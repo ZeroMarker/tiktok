@@ -14,7 +14,10 @@ fi
 # Bilibili 推流地址
 BILI_RTMP="${BILIBILI_PUSH_URL}${BILIBILI_PUSH_CODE}"
 
-# 移除之前的目录操作，直接在当前目录推流
+# 日志目录
+LOG_DIR="./logs"
+mkdir -p "$LOG_DIR"
+
 echo "开始无人值守推流 TikTok @$USERNAME -> Bilibili"
 
 while true; do
@@ -30,6 +33,8 @@ while true; do
     fi
 
     echo "  → 成功获取源，开始向 B 站推流..."
+
+    LOG_FILE="${LOG_DIR}/ffmpeg_tiktok_${USERNAME}_$(date +%Y%m%d).log"
 
     # 2. 核心推流逻辑 (修复版 v3)
     # 修复点:
@@ -50,7 +55,7 @@ while true; do
         -flvflags no_duration_filesize \
         -max_muxing_queue_size 9999 \
         "$BILI_RTMP" \
-        2>> "ffmpeg_${USERNAME}_errors.log"
+        2>> "$LOG_FILE"
 
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] 推流中断，10 秒后重新抓取..."
     sleep 10

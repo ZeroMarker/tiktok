@@ -25,6 +25,10 @@ fi
 # Bilibili 推流地址
 BILI_RTMP="${BILIBILI_PUSH_URL}${BILIBILI_PUSH_CODE}"
 
+# 日志目录
+LOG_DIR="./logs"
+mkdir -p "$LOG_DIR"
+
 echo "開始無人值守推流 YouTube 直播 ($YT_LIVE_URL) -> Bilibili"
 
 while true; do
@@ -44,6 +48,8 @@ while true; do
     echo " → 成功獲取源：$STREAM_URL"
     echo " → 開始向 B 站推流..."
 
+    LOG_FILE="${LOG_DIR}/ffmpeg_youtube_$(date +%Y%m%d).log"
+
     # 2. 核心推流邏輯（保留你原來的優化設定）
     ffmpeg -re \
         -headers "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"$'\r\n'"Referer: https://www.youtube.com/"$'\r\n' \
@@ -58,7 +64,7 @@ while true; do
         -flvflags no_duration_filesize \
         -max_muxing_queue_size 9999 \
         "$BILI_RTMP" \
-        2>> "ffmpeg_youtube_errors.log"
+        2>> "$LOG_FILE"
 
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] 推流中斷，10 秒後重新抓取源..."
     sleep 10

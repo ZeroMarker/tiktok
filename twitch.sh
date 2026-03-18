@@ -1,5 +1,4 @@
 #!/bin/bash
-set -uo pipefail
 
 # Load environment variables from ~/.bashrc (参考 push.sh)
 if [ -f ~/.bashrc ]; then
@@ -88,11 +87,11 @@ while true; do
 
     echo " → 开始向 Bilibili 推流..."
 
-    LOG_FILE="\( {LOG_DIR}/ffmpeg_twitch_ \){TWITCH_USERNAME}_$(date +%Y%m%d).log"
+    LOG_FILE="${LOG_DIR}/ffmpeg_twitch_${TWITCH_USERNAME}_$(date +%Y%m%d).log"
 
     # ffmpeg 推流核心命令（优化参数组合）
     ffmpeg -y \
-        -headers "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"\( '\r\n'"Referer: https://www.twitch.tv/" \)'\r\n' \
+        -headers "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"$'\r\n'"Referer: https://www.twitch.tv/"$'\r\n' \
         -timeout 60000000 \
         -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 10 -reconnect_on_network_error 1 \
         -i "$STREAM_URL" \

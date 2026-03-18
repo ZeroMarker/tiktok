@@ -1,5 +1,4 @@
 #!/bin/bash
-set -uo pipefail
 
 # Load environment variables from ~/.bashrc
 if [ -f ~/.bashrc ]; then
@@ -57,7 +56,7 @@ while true; do
     echo "  → 成功获取源地址"
     echo "  → 开始向 B 站推流..."
 
-    LOG_FILE="${LOG_DIR}/ffmpeg_soop_$(date +%Y%m%d).log"
+    LOG_FILE="${LOG_DIR}/ffmpeg_soop_$(echo "$SOOP_URL" | sed 's/[^a-zA-Z0-9]/_/g')_$(date +%Y%m%d).log"
 
     # 推流命令（优化参数）
     ffmpeg -y \
