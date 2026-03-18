@@ -1,10 +1,18 @@
 #!/bin/bash
 
+# Load environment variables from ~/.bashrc
+if [ -f ~/.bashrc ]; then
+    source ~/.bashrc
+fi
+
 USERNAME="$1"
 if [ -z "$USERNAME" ]; then
-    echo "用法: $0 <TikTok用户名>"
+    echo "用法：$0 <TikTok 用户名>"
     exit 1
 fi
+
+# Bilibili 推流地址
+BILI_RTMP="${BILIBILI_PUSH_URL}${BILIBILI_PUSH_CODE}"
 
 # 移除之前的目录操作，直接在当前目录推流
 echo "开始无人值守推流 TikTok @$USERNAME -> Bilibili"
@@ -16,7 +24,7 @@ while true; do
     STREAM_URL=$(yt-dlp --format "best" --get-url "https://www.tiktok.com/@${USERNAME}/live" 2>/dev/null | head -n1)
 
     if [ -z "$STREAM_URL" ]; then
-        echo "  → 未监测到直播或抓取失败，60秒后重试..."
+        echo "  → 未监测到直播或抓取失败，60 秒后重试..."
         sleep 60
         continue
     fi
@@ -41,9 +49,9 @@ while true; do
         -f flv \
         -flvflags no_duration_filesize \
         -max_muxing_queue_size 9999 \
-        "rtmp://live-push.bilivideo.com/live-bvc/?streamname=live_185817791_2793265&key=4d79bfae0b9b4488987e86e87a4444e1&schedule=rtmp&pflag=2" \
+        "$BILI_RTMP" \
         2>> "ffmpeg_${USERNAME}_errors.log"
 
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] 推流中断，10秒后重新抓取..."
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] 推流中断，10 秒后重新抓取..."
     sleep 10
 done

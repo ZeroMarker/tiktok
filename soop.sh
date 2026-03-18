@@ -1,6 +1,11 @@
 #!/bin/bash
 set -uo pipefail
 
+# Load environment variables from ~/.bashrc
+if [ -f ~/.bashrc ]; then
+    source ~/.bashrc
+fi
+
 # 用法说明
 if [ -z "$1" ]; then
     echo "用法：$0 <SOOP 直播间 URL>"
@@ -10,7 +15,7 @@ fi
 SOOP_URL="$1"
 
 # Bilibili 推流地址
-BILIBILI_PUSH_URL="rtmp://live-push.bilivideo.com/live-bvc/?streamname=live_185817791_2793265&key=4d79bfae0b9b4488987e86e87a4444e1&schedule=rtmp&pflag=2"
+BILIBILI_PUSH_URL="${BILIBILI_PUSH_URL}${BILIBILI_PUSH_CODE}"
 
 # 依赖检查
 for cmd in yt-dlp ffmpeg; do

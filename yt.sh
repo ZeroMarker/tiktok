@@ -1,9 +1,14 @@
 #!/bin/bash
 
+# Load environment variables from ~/.bashrc
+if [ -f ~/.bashrc ]; then
+    source ~/.bashrc
+fi
+
 USERNAME="$1"
 
 if [ -z "$USERNAME" ]; then
-    echo "用法: $0 <YouTube頻道handle 或 直播連結>"
+    echo "用法：$0 <YouTube 頻道 handle 或 直播連結>"
     echo "範例:"
     echo "  $0 @PewDiePie          # 自動找 https://www.youtube.com/@PewDiePie/live"
     echo "  $0 https://www.youtube.com/@MrBeast/live"
@@ -17,6 +22,9 @@ else
     YT_LIVE_URL="$USERNAME"
 fi
 
+# Bilibili 推流地址
+BILI_RTMP="${BILIBILI_PUSH_URL}${BILIBILI_PUSH_CODE}"
+
 echo "開始無人值守推流 YouTube 直播 ($YT_LIVE_URL) -> Bilibili"
 
 while true; do
@@ -28,7 +36,7 @@ while true; do
     STREAM_URL=$(yt-dlp --get-url --format "best" "$YT_LIVE_URL" 2>/dev/null | head -n1)
 
     if [ -z "$STREAM_URL" ]; then
-        echo " → 未偵測到直播或抓取失敗，60秒後重試..."
+        echo " → 未偵測到直播或抓取失敗，60 秒後重試..."
         sleep 60
         continue
     fi
@@ -49,9 +57,9 @@ while true; do
         -f flv \
         -flvflags no_duration_filesize \
         -max_muxing_queue_size 9999 \
-        "rtmp://live-push.bilivideo.com/live-bvc/?streamname=live_185817791_2793265&key=4d79bfae0b9b4488987e86e87a4444e1&schedule=rtmp&pflag=2" \
+        "$BILI_RTMP" \
         2>> "ffmpeg_youtube_errors.log"
 
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] 推流中斷，10秒後重新抓取源..."
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] 推流中斷，10 秒後重新抓取源..."
     sleep 10
 done
