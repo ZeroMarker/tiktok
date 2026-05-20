@@ -12,8 +12,27 @@ $ErrorActionPreference = "Stop"
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $scriptDir
 
-$outputDir = Join-Path "." "tiktok_records_$Username" # 每个账号用独立文件夹，避免混在一起
 $logDir = Join-Path "." "logs"
+
+function Format-PathPart {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Value
+    )
+
+    return (($Value -replace '[\/\\:*?"<>|]', '_').Trim())
+}
+
+Write-Host "正在获取 TikTok @$Username 的昵称..."
+$nickname = (& yt-dlp --no-warnings --skip-download --print "%(uploader)s" "https://www.tiktok.com/@$Username" 2>$null | Select-Object -First 1)
+
+if (-not [string]::IsNullOrWhiteSpace($nickname) -and $nickname -ne "NA") {
+    $safeNickname = Format-PathPart $nickname
+    $outputDir = Join-Path "." "${Username}+$safeNickname" # 每个账号用 username+昵称 独立文件夹
+} else {
+    Write-Host "未获取到昵称，输出目录将只使用 username。"
+    $outputDir = Join-Path "." $Username
+}
 
 New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null

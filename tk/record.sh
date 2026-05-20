@@ -11,8 +11,22 @@ if [ $# -ne 1 ]; then
 fi
 
 USERNAME="$1"
-OUTPUT_DIR="./tiktok_records_${USERNAME}"   # 每个账号用独立文件夹，避免混在一起
 LOG_DIR="./logs"
+
+sanitize_path_part() {
+    printf '%s' "$1" | sed 's/[\/\\:*?"<>|]/_/g; s/^[[:space:]]*//; s/[[:space:]]*$//'
+}
+
+echo "正在获取 TikTok @${USERNAME} 的昵称..."
+NICKNAME=$(yt-dlp --no-warnings --skip-download --print "%(uploader)s" "https://www.tiktok.com/@${USERNAME}" 2>/dev/null | head -n1)
+
+if [ -n "$NICKNAME" ] && [ "$NICKNAME" != "NA" ]; then
+    SAFE_NICKNAME=$(sanitize_path_part "$NICKNAME")
+    OUTPUT_DIR="./${USERNAME}+${SAFE_NICKNAME}"   # 每个账号用 username+昵称 独立文件夹
+else
+    echo "未获取到昵称，输出目录将只使用 username。"
+    OUTPUT_DIR="./${USERNAME}"
+fi
 
 mkdir -p "$OUTPUT_DIR"
 mkdir -p "$LOG_DIR"
