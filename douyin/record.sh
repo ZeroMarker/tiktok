@@ -1,69 +1,39 @@
 #!/bin/bash
 
 # 使用方法：
-#   ./record.sh <web_rid|抖音号>
-# 示例： ./record.sh 1234567890
+#   ./record.sh <web_rid|抖音号|完整URL>
+# 示例： ./record.sh 1930162853
 # 示例： ./record.sh @zhangsan
-# 示例： ./record.sh zhangsan
+# 示例： ./record.sh https://live.douyin.com/1234567890
+
+set -e
 
 if [ $# -ne 1 ]; then
-    echo "用法：$0 <抖音直播间 web_rid|抖音号>"
-    echo "示例：$0 1234567890"
-    echo "示例：$0 @zhangsan"
+    echo "用法：$0 <web_rid|抖音号|完整URL>"
+    echo "示例：$0 1930162853"
     exit 1
 fi
 
 INPUT="$1"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 LOG_DIR="${SCRIPT_DIR}/logs"
+PY_GET_STREAM="${SCRIPT_DIR}/get_stream.py"
 
 sanitize_path_part() {
     printf '%s' "$1" | sed 's/[\/\\:*?"<>|]/_/g; s/^[[:space:]]*//; s/[[:space:]]*$//'
 }
 
-get_metadata_field() {
-    local url="$1"
-    local field="$2"
-    yt-dlp --flat-playlist --no-warnings --skip-download --print "%(${field})s" "$url" 2>/dev/null | head -n1
-}
+CLEAN_INPUT="$(printf '%s' "$INPUT" | sed 's/^@//')"
 
-get_nickname() {
-    local url="$1"
-    local value
+# Get nickname
+echo "正在获取昵称..."
+NICKNAME=$(python "$PY_GET_STREAM" "$INPUT" --get-nickname 2>/dev/null || true)
 
-    for field in channel uploader; do
-        value=$(get_metadata_field "$url" "$field")
-        if [ -n "$value" ] && [ "$value" != "NA" ]; then
-            printf '%s' "$value"
-            return 0
-        fi
-    done
-
-    return 1
-}
-
-CLEAN_INPUT="${INPUT#@}"
-
-# 先用直播房间 ID 尝试
-DOUYIN_URL="https://live.douyin.com/${CLEAN_INPUT}"
-echo "尝试作为直播房间 ID：${CLEAN_INPUT} ..."
-
-ROOM_ID=$(yt-dlp --flat-playlist --no-warnings --skip-download --print "%(id)s" "$DOUYIN_URL" 2>/dev/null | head -n1)
-if [ -z "$ROOM_ID" ]; then
-    # 回退为抖音号
-    DOUYIN_URL="https://www.douyin.com/user/${CLEAN_INPUT}"
-    echo "未找到直播房间，回退为抖音号：${CLEAN_INPUT}"
-else
-    echo "确认为直播房间 ID：${ROOM_ID}"
-fi
-
-echo "正在获取抖音 ${CLEAN_INPUT} 的昵称..."
-NICKNAME=$(get_nickname "$DOUYIN_URL")
-
-if [ -n "$NICKNAME" ] && [ "$NICKNAME" != "NA" ]; then
+if [ -n "$NICKNAME" ]; then
     SAFE_NICKNAME=$(sanitize_path_part "$NICKNAME")
     RECORD_PREFIX="${CLEAN_INPUT}_${SAFE_NICKNAME}"
     OUTPUT_DIR="./${RECORD_PREFIX}"
+    echo "昵称：${NICKNAME}"
 else
     echo "未获取到昵称，输出目录将只使用输入标识。"
     RECORD_PREFIX="${CLEAN_INPUT}"
@@ -75,7 +45,6 @@ mkdir -p "$LOG_DIR"
 cd "$OUTPUT_DIR" || exit 1
 
 echo "开始无人值守录制抖音直播间 ${CLEAN_INPUT}"
-echo "直播页：${DOUYIN_URL}"
 echo "每 10 分钟生成一个 MP4 文件"
 echo "输出目录：$(pwd)"
 echo "按 Ctrl+C 停止，或用 kill 杀掉进程"
@@ -83,7 +52,7 @@ echo "按 Ctrl+C 停止，或用 kill 杀掉进程"
 while true; do
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] 尝试抓取直播源 ${CLEAN_INPUT} ..."
 
-    STREAM_URL=$(yt-dlp "$DOUYIN_URL" --get-url 2>/dev/null | head -n1)
+    STREAM_URL=$(python "$PY_GET_STREAM" "$INPUT" --get-url 2>/dev/null || true)
 
     if [ -z "$STREAM_URL" ]; then
         echo "  → 直播未开启 / 抓取失败，等待 60 秒后重试..."
@@ -91,8 +60,7 @@ while true; do
         continue
     fi
 
-    echo "  → 成功抓到源：${STREAM_URL}..."
-    echo "开始录制..."
+    echo "  → 成功抓到源，开始录制..."
 
     LOG_FILE="${LOG_DIR}/ffmpeg_record_${CLEAN_INPUT}_$(date +%Y%m%d).log"
 
