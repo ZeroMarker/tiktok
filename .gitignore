@@ -208,3 +208,11 @@ __marimo__/
 
 *.log
 logs/
+
+# Live Stream Toolkit runtime outputs
+*.mp4
+*.flv
+*.mkv
+*.ts
+recordings/
+cookies.txt
