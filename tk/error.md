@@ -122,3 +122,57 @@ yt-dlp -v "https://www.tiktok.com/@tubasa__mai/live"
 ```
 
 3. 哪个命令成功拿到直播地址，就把对应参数加到 `record.sh` 中
+
+---
+
+# emma_kusunoki 直播检测失败 (2026-07-26)
+
+## 现象
+
+- yt-dlp 能从 SIGI_STATE 解析到 roomId，但该 roomId 是用户永久 roomId
+- webcast API 返回 status_code=0 / status=4 (4003110: 用户未开播)
+- TikTok 页面标题显示 "is LIVE" 但实际 liveRoom.status != 2
+- 用户确认主播正在直播，但所有 API 检测均返回未开播
+
+## 分析
+
+TikTok 的直播 API 对不同主播返回的数据一致性不同。
+部分主播可能处于某种"中间状态"（例如测试推送、有限区域直播），
+导致浏览器能看到直播画面但 API 不返回正式 roomId。
+
+## 解决方案
+
+### 使用 fallback_tk.sh（新增）
+
+当 yt-dlp 持续失败时，改用备用脚本：
+
+```bash
+bash ~/tiktok/tk/fallback_tk.sh emma_kusunoki
+```
+
+该脚本按优先级依次尝试 4 种检测方法：
+1. yt-dlp 默认（带 --impersonate）
+2. yt-dlp + --xff US（伪造地理位置）
+3. yt-dlp + mobile 域名
+4. Python live_check.py（curl_cffi 直接解析 SIGI_STATE，再次确认）
+
+### Python live_check.py
+
+详细的 Python 检测脚本在 `~/tiktok/tk/live_check.py`，可单独使用：
+
+```bash
+python3 ~/tiktok/tk/live_check.py emma_kusunoki
+```
+
+支持：
+- 解析 SIGI_STATE 中的 liveRoom
+- 解析 __UNIVERSAL_DATA_FOR_REHYDRATION__
+- 调用 webcast API
+- 全文搜索 roomId 并逐一尝试
+
+## 遗留问题
+
+如果所有 API 检测方法都失败（SIGI_STATE 中 liveRoom.status!=2、
+CurrentRoom 为空、webcast API 返回 4003110），
+则可能是 TikTok 内部状态不允许外部 API 检测到直播。
+此时唯一方案是用户在浏览器确认直播后手动通知启动录制。
