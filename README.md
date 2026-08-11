@@ -54,6 +54,7 @@ bash soop/record.sh <soop_username|SOOP直播链接>
 - [配置](docs/configuration.md)
 - [使用说明](docs/usage.md)
 - [排障](docs/troubleshooting.md)
+- [TikTok 直播录制使用与排障](docs/tiktok-live-recording.md)
 - [B站视频上传接口文档](docs/bilibili-upload-api.md)
 
 ## 运行产物
