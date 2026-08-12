@@ -52,6 +52,8 @@ python douyin/get_stream.py <web_rid|抖音号|完整URL> --get-nickname
 - 直播源是否能通过检测命令拿到。
 - `logs/` 中是否有当天的 `ffmpeg` 日志。
 
+如果提示 `Option timeout not found`，说明使用了旧脚本或旧参数。当前录制入口统一使用 ffmpeg 的 `-rw_timeout` 参数，请更新仓库后重试。
+
 ## TikTok 个别账号录制失败
 
 个别账号可能出现“页面能看，但 `yt-dlp` 判断未开播”的情况。通常优先验证 Cookie、浏览器指纹模拟和 verbose 日志；确认某个参数稳定有效后，再把它合入对应录制脚本。

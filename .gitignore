@@ -216,3 +216,4 @@ logs/
 *.ts
 recordings/
 cookies.txt
+douyin-cookies*.txt

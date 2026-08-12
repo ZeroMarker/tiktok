@@ -37,17 +37,26 @@ record_tiktok() {
         return 1
     fi
 
-    local USERNAME="$1"
+    for cmd in yt-dlp ffmpeg; do
+        if ! command -v "$cmd" >/dev/null 2>&1; then
+            echo "错误：缺少依赖 $cmd"
+            return 1
+        fi
+    done
+
+    local USERNAME="${1#@}"
     local LOG_DIR="./logs"
 
     echo "正在获取 TikTok @${USERNAME} 的昵称..."
-    local NICKNAME=$(get_nickname "https://www.tiktok.com/@${USERNAME}")
+    local NICKNAME
+    NICKNAME=$(get_nickname "https://www.tiktok.com/@${USERNAME}" || true)
 
     local RECORD_PREFIX
     local OUTPUT_DIR
 
     if [ -n "$NICKNAME" ] && [ "$NICKNAME" != "NA" ]; then
-        local SAFE_NICKNAME=$(sanitize_path_part "$NICKNAME")
+        local SAFE_NICKNAME
+        SAFE_NICKNAME=$(sanitize_path_part "$NICKNAME")
         RECORD_PREFIX="${USERNAME}_${SAFE_NICKNAME}"
         OUTPUT_DIR="./${RECORD_PREFIX}"
     else
@@ -68,7 +77,8 @@ record_tiktok() {
     while true; do
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] 尝试抓取直播源 @${USERNAME} ..."
 
-        local STREAM_URL=$(yt-dlp "https://www.tiktok.com/@${USERNAME}/live" --get-url 2>/dev/null | head -n1)
+        local STREAM_URL
+        STREAM_URL=$(yt-dlp "https://www.tiktok.com/@${USERNAME}/live" -f "b[ext=flv]/best" --get-url 2>/dev/null | head -n1 || true)
 
         if [ -z "$STREAM_URL" ]; then
             echo "  → 直播未开启 / 抓取失败，等待 60 秒后重试..."
@@ -76,17 +86,18 @@ record_tiktok() {
             continue
         fi
 
-        echo "  → 成功抓到源：${STREAM_URL}..."
+        echo "  → 成功抓到直播源。"
         echo "开始录制..."
 
         local LOG_FILE="../${LOG_DIR}/ffmpeg_record_${USERNAME}_$(date +%Y%m%d).log"
 
-        ffmpeg \
+        ffmpeg -nostdin \
+          -fflags +discardcorrupt \
           -headers "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"$'\r\n'"Referer: https://www.tiktok.com/"$'\r\n' \
-          -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 30 -timeout 30000000 \
+          -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 30 -rw_timeout 30000000 \
           -i "$STREAM_URL" \
           -c copy -bsf:a aac_adtstoasc \
-          -map 0 -reset_timestamps 1 \
+          -map 0:v:0 -map '0:a:0?' -reset_timestamps 1 \
           -f segment \
           -segment_time 600 \
           -segment_format mp4 \

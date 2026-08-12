@@ -54,6 +54,58 @@ bash soop/record.sh playerid
 bash soop/record.sh https://play.sooplive.co.kr/playerid
 ```
 
+### Kick
+
+```bash
+bash kick/record.sh xqc
+bash kick/record.sh https://kick.com/xqc
+```
+
+### YouTube
+
+```bash
+bash youtube/record.sh @PewDiePie
+bash youtube/record.sh https://www.youtube.com/watch?v=<video_id>
+```
+
+### CHZZK
+
+可传入频道 ID 或完整直播间 URL：
+
+```bash
+bash chzzk/record.sh <channel_id>
+bash chzzk/record.sh https://chzzk.naver.com/live/<channel_id>
+```
+
+以上三个入口默认将视频写入 `./recordings/`，可通过 `RECORDINGS_DIR` 修改根目录：
+
+```bash
+RECORDINGS_DIR=/data/live bash kick/record.sh xqc
+```
+
+### 抖音 Cookie
+
+从已登录的浏览器导出 Netscape 格式 Cookie：
+
+```bash
+bash douyin/import_cookies.sh chrome
+```
+
+也可指定浏览器和输出路径：
+
+```bash
+bash douyin/import_cookies.sh firefox /secure/douyin-cookies.txt
+```
+
+录制或检测时导入：
+
+```bash
+bash douyin/record.sh 1930162853 --cookies /secure/douyin-cookies.txt
+python douyin/get_stream.py 1930162853 --cookies /secure/douyin-cookies.txt
+```
+
+临时使用原始 Cookie 请求头时可传 `--cookie 'name=value; ...'`。该方式可能出现在进程参数和终端历史中，长期运行推荐使用权限为 `600` 的 Cookie 文件。
+
 ## 转推到 Bilibili
 
 转推前先完成 `BILIBILI_PUSH_URL` 和 `BILIBILI_PUSH_CODE` 配置。
@@ -117,3 +169,38 @@ python douyin/get_stream.py 1930162853 --get-nickname
 ## 停止任务
 
 前台运行时按 `Ctrl+C` 停止。后台运行时使用 `ps` 找到脚本或 `ffmpeg` 进程后 `kill`。
+
+## WebUI / systemd 管理
+
+安装服务：
+
+```bash
+sudo bash systemd/install.sh
+```
+
+常用维护命令：
+
+```bash
+systemctl status livestream-webui
+journalctl -u livestream-webui -f
+sudo systemctl restart livestream-webui
+```
+
+WebUI 创建的录制任务名称以 `livestream-rec-` 开头，可以直接用 systemd 查看：
+
+```bash
+systemctl list-units 'livestream-rec-*.service' --all
+journalctl -u '<任务名称>' -f
+```
+
+默认仅允许本机连接。通过 SSH 隧道远程访问：
+
+```bash
+ssh -L 8765:127.0.0.1:8766 <server>
+```
+
+浏览器可直接打开 `https://20070809.xyz/tiktok/`，输入安装时生成的访问令牌。域名根路径继续转发 OpenList，只有 `/tiktok/` 子路径进入 WebUI。
+
+DouyinLiveRecorder 管理页面位于 `https://20070809.xyz/douyin/`。
+
+服务器状态监控页面位于 `https://20070809.xyz/sysmon/`。

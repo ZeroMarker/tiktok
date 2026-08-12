@@ -8,13 +8,19 @@
 │   ├── push.sh           # TikTok -> Bilibili
 │   └── soop.sh           # SOOP -> Bilibili
 ├── docs/                 # 使用、配置、排障和维护文档
+├── chzzk/                # CHZZK 录制入口
 ├── douyin/               # 抖音录制脚本和 DouyinLiveRecorder 子模块
 │   ├── get_stream.py     # 抖音直播源解析辅助脚本
 │   ├── record.ps1        # Windows PowerShell 录制入口
 │   └── record.sh         # Linux / macOS 录制入口
 ├── soop/                 # SOOP 录制脚本
+├── kick/                 # Kick 录制入口
+├── scripts/              # 多平台共享录制内核
+├── systemd/              # WebUI systemd unit 与安装脚本
 ├── tk/                   # TikTok 录制脚本
 ├── twitch/               # Twitch -> Bilibili 脚本
+├── youtube/              # YouTube 录制入口
+├── webui/                # 本地录制任务管理页面与 API
 ├── start.sh              # TikTok 直播源检测入口
 └── yt.sh                 # YouTube -> Bilibili 脚本
 ```

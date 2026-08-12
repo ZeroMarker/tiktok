@@ -16,6 +16,13 @@ fi
 INPUT="$1"
 LOG_DIR="./logs"
 
+for cmd in yt-dlp ffmpeg; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+        echo "错误：缺少依赖 $cmd"
+        exit 1
+    fi
+done
+
 sanitize_path_part() {
     printf '%s' "$1" | sed 's/[\/\\:*?"<>|]/_/g; s/^[[:space:]]*//; s/[[:space:]]*$//'
 }
@@ -87,17 +94,17 @@ while true; do
         continue
     fi
 
-    echo "  → 成功抓到源：${STREAM_URL}..."
+    echo "  → 成功抓到直播源。"
     echo "开始录制..."
 
     LOG_FILE="../${LOG_DIR}/ffmpeg_record_${USERNAME}_$(date +%Y%m%d).log"
 
     ffmpeg \
       -headers "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"$'\r\n'"Referer: https://play.sooplive.co.kr/"$'\r\n' \
-      -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 30 -timeout 30000000 \
+      -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 30 -rw_timeout 30000000 \
       -i "$STREAM_URL" \
       -c copy -bsf:a aac_adtstoasc \
-      -map 0 -reset_timestamps 1 \
+      -map 0:v:0 -map '0:a:0?' -reset_timestamps 1 \
       -f segment \
       -segment_time 600 \
       -segment_format mp4 \

@@ -1,0 +1,20 @@
+[Unit]
+Description=Live Stream Toolkit Web UI
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/tiktok
+EnvironmentFile=-/etc/default/livestream-webui
+ExecStart=/usr/bin/python3 /root/tiktok/webui/app.py
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/root/tiktok/recordings /root/tiktok/logs /run /var/log/journal
+
+[Install]
+WantedBy=multi-user.target

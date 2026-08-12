@@ -8,7 +8,7 @@ fi
 # =============================================================================
 # 用法说明
 # =============================================================================
-if [ -z "$1" ]; then
+if [ -z "${1:-}" ]; then
     echo "用法：$0 <Twitch 频道用户名 或 完整 URL>"
     echo "示例："
     echo "  $0 shroud"
@@ -26,6 +26,11 @@ else
 fi
 
 TWITCH_URL="https://www.twitch.tv/$TWITCH_USERNAME"
+
+if [ -z "${BILIBILI_PUSH_URL:-}" ] || [ -z "${BILIBILI_PUSH_CODE:-}" ]; then
+    echo "错误：请先设置 BILIBILI_PUSH_URL 和 BILIBILI_PUSH_CODE"
+    exit 1
+fi
 
 # Bilibili 推流地址 (参考 push.sh: BILIBILI_PUSH_URL + BILIBILI_PUSH_CODE)
 BILI_RTMP="${BILIBILI_PUSH_URL}${BILIBILI_PUSH_CODE}"
@@ -66,7 +71,7 @@ trap cleanup SIGINT SIGTERM SIGQUIT
 echo "===================================================="
 echo "无人值守推流：Twitch @$TWITCH_USERNAME → Bilibili"
 echo "频道 URL: $TWITCH_URL"
-echo "B 站推流地址：${BILI_RTMP:0:50}..."
+echo "B 站推流地址已加载（地址与推流码已隐藏）"
 echo "按 Ctrl+C 停止"
 echo "===================================================="
 
@@ -83,7 +88,7 @@ while true; do
         continue
     fi
 
-    echo " → 成功获取源：${STREAM_URL:0:100}..."
+    echo " → 成功获取直播源。"
 
     echo " → 开始向 Bilibili 推流..."
 
@@ -92,7 +97,7 @@ while true; do
     # ffmpeg 推流核心命令（优化参数组合）
     ffmpeg -y \
         -headers "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"$'\r\n'"Referer: https://www.twitch.tv/"$'\r\n' \
-        -timeout 60000000 \
+        -rw_timeout 60000000 \
         -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 10 -reconnect_on_network_error 1 \
         -i "$STREAM_URL" \
         \

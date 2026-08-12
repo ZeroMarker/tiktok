@@ -6,7 +6,7 @@ if [ -f ~/.bashrc ]; then
 fi
 
 # 用法说明
-if [ -z "$1" ]; then
+if [ -z "${1:-}" ]; then
     echo "用法：$0 <SOOP 直播间 URL>"
     exit 1
 fi
@@ -14,7 +14,11 @@ fi
 SOOP_URL="$1"
 
 # Bilibili 推流地址
-BILIBILI_PUSH_URL="${BILIBILI_PUSH_URL}${BILIBILI_PUSH_CODE}"
+if [ -z "${BILIBILI_PUSH_URL:-}" ] || [ -z "${BILIBILI_PUSH_CODE:-}" ]; then
+    echo "错误：请先设置 BILIBILI_PUSH_URL 和 BILIBILI_PUSH_CODE"
+    exit 1
+fi
+BILI_RTMP="${BILIBILI_PUSH_URL}${BILIBILI_PUSH_CODE}"
 
 # 依赖检查
 for cmd in yt-dlp ffmpeg; do
@@ -61,7 +65,7 @@ while true; do
     # 推流命令（优化参数）
     ffmpeg -y \
         -headers "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"$'\r\n'"Referer: ${SOOP_URL}"$'\r\n' \
-        -timeout 30000000 \
+        -rw_timeout 30000000 \
         -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 15 \
         -i "$STREAM_URL" \
         -c:v libx264 -preset veryfast -tune zerolatency \
@@ -74,7 +78,7 @@ while true; do
         -flvflags no_duration_filesize \
         -max_muxing_queue_size 9999 \
         -fflags +genpts+igndts \
-        "$BILIBILI_PUSH_URL" \
+        "$BILI_RTMP" \
         2>> "$LOG_FILE" &
     
     FFMPEG_PID=$!

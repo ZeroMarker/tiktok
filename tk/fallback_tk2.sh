@@ -63,12 +63,12 @@ while true; do
     sleep 60
     continue
   fi
-  echo "[$(date '+%Y-%m-%d %H:%M:%S')] 成功抓到源：${STREAM_URL:0:80}..."
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] 成功抓到直播源。"
   echo "开始录制..."
   ffmpeg -nostdin \
     -fflags +discardcorrupt \
     -headers "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"$'\r\n'"Referer: https://www.tiktok.com/"$'\r\n' \
-    -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 30 -timeout 30000000 \
+    -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 30 -rw_timeout 30000000 \
     -i "$STREAM_URL" \
     -c copy -bsf:a aac_adtstoasc \
     -map 0:v -map 0:a -live_start_index -1 \

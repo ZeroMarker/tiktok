@@ -5,9 +5,21 @@ if [ -f ~/.bashrc ]; then
     source ~/.bashrc
 fi
 
-USERNAME="$1"
+USERNAME="${1:-}"
 if [ -z "$USERNAME" ]; then
     echo "用法：$0 <TikTok 用户名>"
+    exit 1
+fi
+
+for cmd in yt-dlp ffmpeg; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+        echo "错误：缺少依赖 $cmd"
+        exit 1
+    fi
+done
+
+if [ -z "${BILIBILI_PUSH_URL:-}" ] || [ -z "${BILIBILI_PUSH_CODE:-}" ]; then
+    echo "错误：请先设置 BILIBILI_PUSH_URL 和 BILIBILI_PUSH_CODE"
     exit 1
 fi
 

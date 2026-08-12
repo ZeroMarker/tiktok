@@ -5,7 +5,7 @@ if [ -f ~/.bashrc ]; then
     source ~/.bashrc
 fi
 
-USERNAME="$1"
+USERNAME="${1:-}"
 
 if [ -z "$USERNAME" ]; then
     echo "用法：$0 <YouTube 頻道 handle 或 直播連結>"
@@ -20,6 +20,18 @@ if [[ "$USERNAME" == @* ]]; then
     YT_LIVE_URL="https://www.youtube.com/${USERNAME}/live"
 else
     YT_LIVE_URL="$USERNAME"
+fi
+
+for cmd in yt-dlp ffmpeg; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+        echo "錯誤：缺少依賴 $cmd"
+        exit 1
+    fi
+done
+
+if [ -z "${BILIBILI_PUSH_URL:-}" ] || [ -z "${BILIBILI_PUSH_CODE:-}" ]; then
+    echo "錯誤：請先設定 BILIBILI_PUSH_URL 和 BILIBILI_PUSH_CODE"
+    exit 1
 fi
 
 # Bilibili 推流地址
@@ -45,7 +57,7 @@ while true; do
         continue
     fi
 
-    echo " → 成功獲取源：$STREAM_URL"
+    echo " → 成功獲取直播源。"
     echo " → 開始向 B 站推流..."
 
     LOG_FILE="${LOG_DIR}/ffmpeg_youtube_$(date +%Y%m%d).log"

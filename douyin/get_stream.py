@@ -6,7 +6,9 @@ Usage:
     python get_stream.py <web_rid|url> --get-nickname  # Just print nickname
 """
 
+import argparse
 import asyncio
+import http.cookiejar
 import json
 import os
 import sys
@@ -55,9 +57,28 @@ def pick_best_url(stream_url_data: dict) -> str | None:
     return None
 
 
-async def get_info(url: str):
+def load_cookie_header(cookie_file: str) -> str:
+    """Load Douyin cookies from a Netscape-format cookie file."""
+    jar = http.cookiejar.MozillaCookieJar()
     try:
-        data = await spider.get_douyin_app_stream_data(url)
+        jar.load(cookie_file, ignore_discard=True, ignore_expires=True)
+    except (FileNotFoundError, http.cookiejar.LoadError, OSError) as exc:
+        raise ValueError(f"无法读取 Cookie 文件 {cookie_file}: {exc}") from exc
+
+    allowed_domains = ("douyin.com", "iesdouyin.com", "amemv.com")
+    cookies = [
+        f"{cookie.name}={cookie.value}"
+        for cookie in jar
+        if cookie.domain.lstrip(".").endswith(allowed_domains)
+    ]
+    if not cookies:
+        raise ValueError("Cookie 文件中没有找到抖音域名 Cookie")
+    return "; ".join(cookies)
+
+
+async def get_info(url: str, cookies: str | None = None):
+    try:
+        data = await spider.get_douyin_app_stream_data(url, cookies=cookies)
     except Exception as e:
         return {"stream_url": None, "nickname": None, "is_live": False, "error": str(e)}
 
@@ -86,19 +107,26 @@ async def get_info(url: str):
 
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: python get_stream.py <web_rid|url> [--get-url|--get-nickname]", file=sys.stderr)
-        sys.exit(1)
+    parser = argparse.ArgumentParser(description="获取抖音直播信息")
+    parser.add_argument("target", help="web_rid、抖音号或直播间 URL")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--get-url", action="store_true", help="只输出直播源 URL")
+    mode.add_argument("--get-nickname", action="store_true", help="只输出主播昵称")
+    cookies = parser.add_mutually_exclusive_group()
+    cookies.add_argument("--cookies", metavar="FILE", help="Netscape 格式 Cookie 文件")
+    cookies.add_argument("--cookie", metavar="HEADER", help="原始 Cookie 请求头")
+    args = parser.parse_args()
 
-    raw = sys.argv[1]
-    url = normalize_url(raw)
-    mode = sys.argv[2] if len(sys.argv) > 2 else "json"
+    try:
+        cookie_header = load_cookie_header(args.cookies) if args.cookies else args.cookie
+    except ValueError as exc:
+        parser.error(str(exc))
 
-    info = asyncio.run(get_info(url))
+    info = asyncio.run(get_info(normalize_url(args.target), cookie_header))
 
-    if mode == "--get-url":
+    if args.get_url:
         print(info.get("stream_url") or "")
-    elif mode == "--get-nickname":
+    elif args.get_nickname:
         print(info.get("nickname") or "")
     else:
         print(json.dumps(info, ensure_ascii=False))
