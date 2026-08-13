@@ -11,36 +11,30 @@ bash /root/tiktok/tk/record.sh <username>
 `tk.sh`、`tk_direct.sh`、`fallback_tk*.sh` 和 Playwright/Python 探测脚本保留为历史兼容与故障诊断工具，不再作为常规入口。不要仅凭 Web API 的 GroupBlock 或离线结果判定无法录制；应首先直接运行正式入口，让 yt-dlp 轮询实际流地址。
 
 > 适用环境：Linux（root），ffmpeg ≥ 6.1，yt-dlp 已安装
-> 最后更新：2026-08-11
+> 最后更新：2026-08-13
 
 ## 1. 概述
 
-服务器上有两个功能等价的 TikTok 直播录制脚本，定义 bash 函数 `tk`：
+正式入口为 `tk/record.sh`：
 
 | 脚本 | 说明 |
 |------|------|
-| `~/scripts/tk.sh` | 原版。沿用系统代理环境变量；ffmpeg 使用 `-timeout`（已知有 bug，见 §6.1） |
-| `~/scripts/tk_direct.sh` | 直连版（**推荐**）。函数开头 unset 全部代理变量强制直连；ffmpeg 改用 `-rw_timeout` 修复 §6.1 问题 |
+| `/root/tiktok/tk/record.sh` | 正式入口；使用 `-rw_timeout`，无人值守轮询和分段录制 |
+| `tk.sh` / `tk_direct.sh` / `fallback_tk*.sh` | 历史兼容与故障诊断工具 |
 
 两个脚本均实现**无人值守自动录制**：检测到直播开播即录，断流自动重连，每 10 分钟切一个 MP4 分段。
 
 ## 2. 快速开始
 
 ```bash
-# 推荐：source 后调用函数（tmux/zellij 新窗口里执行）
-source ~/scripts/tk_direct.sh
-tk hana_kuraki87
-
-# 或直接运行脚本
-bash ~/scripts/tk_direct.sh hana_kuraki87
+bash /root/tiktok/tk/record.sh hana_kuraki87
 ```
 
 ⚠️ 脚本会长期占用终端，**必须在 tmux / zellij 新窗口中运行**，不要在当前会话直接执行：
 
 ```bash
 tmux new -s tk_hana
-source ~/scripts/tk_direct.sh
-tk hana_kuraki87
+bash /root/tiktok/tk/record.sh hana_kuraki87
 # 退出窗口：Ctrl+B 然后 D（detach），录制继续后台运行
 ```
 
@@ -103,13 +97,13 @@ tk hana_kuraki87
 
 **根因**：`-timeout` 不是 http/https 协议的合法 ffmpeg 选项，只对直接 tcp 路径生效；流经 tls 层或 HTTP CONNECT 代理时选项被丢弃，直接报错退出。
 
-**解决**：改用 `-rw_timeout`（AVFormatContext 原生读写超时选项，对所有协议生效）。这就是 tk_direct.sh 与 tk.sh 的关键差异。
+**解决**：使用正式入口 `tk/record.sh`，其中已改用 `-rw_timeout`（AVFormatContext 原生读写超时选项，对所有协议生效）。
 
 ### 6.2 代理导致全部请求失败
 
 **现象**：clash 停止或代理失效后，走代理的旧会话所有请求指向死端口，一直"抓取失败"。
 
-**解决**：改用 tk_direct.sh —— 函数开头 `unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY all_proxy` 强制直连。服务器直连 TikTok 已验证可用。
+**解决**：先检查当前代理环境；需要强制直连诊断时再使用 `tk_direct.sh`。不要把一次 Web API 失败直接解释为直播不可录制。
 
 ### 6.3 一直显示"直播未开启 / 抓取失败"
 
@@ -161,11 +155,11 @@ tk hana_kuraki87
 
 | 文件 | 说明 |
 |------|------|
-| `record.sh` | 原始脚本（git: 0016772），tk.sh 的祖先 |
+| `record.sh` | 当前正式录制入口 |
 | `tk.sh` | 与 ~/scripts/tk.sh 相同的改进版 |
 | `fallback_tk.sh` | 备用录制：4 种方法按优先级尝试（yt-dlp → yt-dlp+xff → yt-dlp+mobile → live_check.py） |
 | `fallback_tk2.sh` | 修复 live_check.py 输出 dict 被当 URL 的问题，提取 flv_pull_url.HD1 / rtmp_pull_url |
-| `fallback_tk3.sh` | 修复 tk2 只解析 dict 行的问题；内嵌 python 从页面 roomId → webcast API 取 FLV 直链（**推荐备用**） |
+| `fallback_tk3.sh` | 修复 tk2 只解析 dict 行的问题；内嵌 Python 从页面 roomId → webcast API 取 FLV 直链 |
 | `live_check.py` | curl_cffi 模拟浏览器解析 SIGI_STATE，二次确认直播状态并取流地址 |
 | `playwright_*.py` / `debug_check.py` | Playwright 真实浏览器渲染调试（兜底手段） |
 | `room_enter_test.py` | 单独测试 webcast room/enter API |
@@ -205,5 +199,5 @@ yt-dlp "https://www.tiktok.com/@<user>/live" -f "b[ext=flv]" --get-url
 ## 9. 注意事项
 
 - 不要用 `find`/`grep` 扫描 `/root/tiktok` 目录（约 14GB，会卡死）；但 `/root/tiktok/tk/` 是脚本目录（见 §7），不受此限制
-- 脚本改进请另存新文件（如 tk_direct.sh），不要覆盖原文件，改动在顶部注释标注
+- 日常功能应优先合入并测试 `tk/record.sh`；备用脚本只保留平台兼容实验，不作为默认入口
 - 涉及脚本改动用 git 确认版本、`git diff` 对比后再动

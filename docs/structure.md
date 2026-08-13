@@ -17,6 +17,7 @@
 ├── kick/                 # Kick 录制入口
 ├── scripts/              # 多平台共享录制内核
 ├── systemd/              # WebUI systemd unit 与安装脚本
+├── tests/                # WebUI 单元测试
 ├── tk/                   # TikTok 录制脚本
 ├── twitch/               # Twitch -> Bilibili 脚本
 ├── youtube/              # YouTube 录制入口
@@ -39,6 +40,7 @@
 - `cookies.txt`
 
 建议在仓库外或 `recordings/` 下运行长期录制任务，避免源码目录被账号目录和视频文件淹没。
+WebUI 的最近文件列表只扫描配置的 `RECORDINGS_DIR`，不会遍历整个仓库。
 
 ## 子模块
 

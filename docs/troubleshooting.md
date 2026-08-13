@@ -56,4 +56,34 @@ python douyin/get_stream.py <web_rid|抖音号|完整URL> --get-nickname
 
 ## TikTok 个别账号录制失败
 
-个别账号可能出现“页面能看，但 `yt-dlp` 判断未开播”的情况。通常优先验证 Cookie、浏览器指纹模拟和 verbose 日志；确认某个参数稳定有效后，再把它合入对应录制脚本。
+个别账号可能出现“页面能看，但 Web API 或 `yt-dlp` 判断未开播”的情况。Web API 的 GroupBlock 不等于实际流地址一定不可用，先让正式入口持续轮询：
+
+```bash
+bash tk/record.sh <tiktok_username>
+```
+
+若 yt-dlp 也持续失败，再验证 Cookie、实际出口地区、浏览器指纹模拟和 verbose 日志。详细历史案例见 [TikTok 录制排障](tiktok-live-recording.md)。
+
+## WebUI 无法启动或返回认证失败
+
+检查服务与日志：
+
+```bash
+systemctl status livestream-webui --no-pager
+journalctl -u livestream-webui -n 100 --no-pager
+```
+
+- 日志提示必须设置 `LIVE_WEBUI_TOKEN`：在 `/etc/default/livestream-webui` 设置非空令牌后重启服务。
+- 页面提示认证失败：确认浏览器中输入的令牌与服务配置一致。
+- 修改了 `RECORDINGS_DIR` 后无法写入：确认目录存在，并已加入 systemd unit 的 `ReadWritePaths`。
+
+## 磁盘空间不足
+
+检查录像所在文件系统，而不是只看仓库目录：
+
+```bash
+df -h "$(systemctl show livestream-webui -p Environment --value | tr ' ' '\n' | sed -n 's/^RECORDINGS_DIR=//p')"
+du -sh /root/tiktok/recordings/* 2>/dev/null | sort -h
+```
+
+删除录像属于不可恢复操作。先确认录像已备份或不再需要，再按明确的日期、频道和文件路径人工清理；项目不会自动删除录像。

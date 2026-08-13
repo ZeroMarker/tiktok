@@ -74,6 +74,7 @@ sudo bash systemd/install.sh
 ```
 
 WebUI 后端默认只监听 `127.0.0.1:8766`。项目提供的 Caddy 配置通过 `https://20070809.xyz/tiktok/` 对外提供服务，域名根路径继续由 OpenList 使用。
+安装脚本会生成随机访问令牌；后端在令牌为空时会拒绝启动，避免误配置成无认证服务。
 
 不开放公网时也可以使用 SSH 隧道：
 
@@ -81,7 +82,7 @@ WebUI 后端默认只监听 `127.0.0.1:8766`。项目提供的 Caddy 配置通�
 ssh -L 8765:127.0.0.1:8766 <server>
 ```
 
-然后打开 `http://127.0.0.1:8765`。访问令牌保存在 `/etc/default/livestream-webui`。
+然后打开 `http://127.0.0.1:8765`。访问令牌保存在 `/etc/default/livestream-webui`，不要提交或分享该文件内容。
 
 ## 常用文档
 
@@ -97,3 +98,15 @@ ssh -L 8765:127.0.0.1:8766 <server>
 录制脚本会按账号创建输出目录，并每 10 分钟生成一个 MP4 文件。日志默认写入对应 `logs/` 目录。
 
 仓库已忽略日志、视频文件、Cookie 文件和 `recordings/`。建议长期任务在仓库外或 `recordings/` 下运行，避免运行产物和源码混在一起。
+
+WebUI 创建的任务统一使用 `RECORDINGS_DIR`；概览页的磁盘容量与最近文件也以该目录为准。
+
+## 开发检查
+
+```bash
+python3 -m unittest discover -s tests -v
+find . -path './douyin/DouyinLiveRecorder' -prune -o -name '*.sh' -type f -print \
+  | while IFS= read -r script; do bash -n "$script"; done
+```
+
+推送后 GitHub Actions 会自动执行相同检查。

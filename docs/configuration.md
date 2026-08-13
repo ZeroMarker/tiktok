@@ -56,6 +56,31 @@ ${BILIBILI_PUSH_URL}${BILIBILI_PUSH_CODE}
 
 如果任一变量为空，转推脚本会在启动 ffmpeg 前退出。脚本不会在终端输出完整推流地址、推流码或直播源签名 URL。
 
+## WebUI
+
+安装脚本会创建权限为 `600` 的 `/etc/default/livestream-webui`：
+
+```text
+LIVE_WEBUI_HOST=127.0.0.1
+LIVE_WEBUI_PORT=8766
+LIVE_WEBUI_TOKEN=<随机生成的令牌>
+RECORDINGS_DIR=/root/tiktok/recordings
+```
+
+`LIVE_WEBUI_TOKEN` 必须为非空值，否则后端会拒绝启动。修改配置后执行：
+
+```bash
+sudo systemctl restart livestream-webui
+```
+
+`RECORDINGS_DIR` 可以指向仓库外的磁盘。使用自定义目录时，需要先创建目录，并同步调整 systemd unit 的 `ReadWritePaths`，否则 `ProtectSystem=strict` 会阻止服务写入：
+
+```bash
+sudo install -d -m 755 /data/live
+```
+
+不要把访问令牌、Cookie 或 Bilibili 推流码提交到仓库。
+
 ## 抖音子模块
 
 抖音录制依赖 `douyin/DouyinLiveRecorder`：

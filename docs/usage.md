@@ -10,6 +10,8 @@ Linux / macOS：
 bash tk/record.sh <tiktok_username>
 ```
 
+这是日常录制的正式入口，会持续轮询 yt-dlp，断流后自动重新获取直播源。`tk.sh`、`tk_direct.sh`、`fallback_tk*.sh` 和 Python/Playwright 脚本仅用于兼容与排障。
+
 PowerShell：
 
 ```powershell
@@ -200,6 +202,14 @@ ssh -L 8765:127.0.0.1:8766 <server>
 ```
 
 浏览器可直接打开 `https://20070809.xyz/tiktok/`，输入安装时生成的访问令牌。域名根路径继续转发 OpenList，只有 `/tiktok/` 子路径进入 WebUI。
+
+后端要求 `LIVE_WEBUI_TOKEN` 非空。令牌丢失时可以在服务器查看配置，但不要把输出粘贴到日志或公开渠道：
+
+```bash
+sudoedit /etc/default/livestream-webui
+```
+
+WebUI 的“最近文件”和磁盘统计均读取 `RECORDINGS_DIR`。修改录像目录后必须重启服务。
 
 DouyinLiveRecorder 管理页面位于 `https://20070809.xyz/douyin/`。
 
