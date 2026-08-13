@@ -50,7 +50,10 @@ if [ -z "$IDENTIFIER" ]; then
 fi
 
 sanitize_path_part() {
-    printf '%s' "$1" | sed 's/[\/\\:*?"<>|]/_/g; s/^[[:space:]]*//; s/[[:space:]]*$//'
+    printf '%s' "$1" \
+      | tr -d '[:cntrl:]' \
+      | sed 's/[\/\\:*?"<>|]/_/g; s/^[[:space:].]*//; s/[[:space:].]*$//' \
+      | cut -c1-120
 }
 
 CHANNEL_NAME=$(yt-dlp --no-warnings --skip-download --print '%(channel)s' "$LIVE_URL" 2>/dev/null | head -n1 || true)
@@ -60,6 +63,11 @@ fi
 
 SAFE_IDENTIFIER=$(sanitize_path_part "$IDENTIFIER")
 SAFE_CHANNEL=$(sanitize_path_part "$CHANNEL_NAME")
+if [ -z "$SAFE_IDENTIFIER" ]; then
+    echo "错误：频道名称清洗后为空。"
+    exit 1
+fi
+[ -n "$SAFE_CHANNEL" ] || SAFE_CHANNEL="$SAFE_IDENTIFIER"
 RECORD_PREFIX="${PLATFORM}_${SAFE_IDENTIFIER}"
 if [ "$SAFE_CHANNEL" != "$SAFE_IDENTIFIER" ]; then
     RECORD_PREFIX="${RECORD_PREFIX}_${SAFE_CHANNEL}"

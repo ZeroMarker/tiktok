@@ -48,22 +48,23 @@ def list_jobs() -> list[dict[str, object]]:
         [SYSTEMCTL, "list-units", "livestream-rec-*.service", "--all", "--no-legend", "--plain"],
         check=False,
     )
+    units = [line.split(None, 1)[0] for line in result.stdout.splitlines() if line.strip()]
+    if not units:
+        return []
+    details = run(
+        [SYSTEMCTL, "show", *units, "--property=Id,ActiveState,SubState,Description,ExecMainStartTimestamp,MainPID,MemoryCurrent,NRestarts"],
+        check=False,
+    )
     jobs = []
-    for line in result.stdout.splitlines():
-        fields = line.split(None, 4)
-        if not fields:
+    for block in details.stdout.strip().split("\n\n"):
+        values = dict(item.split("=", 1) for item in block.splitlines() if "=" in item)
+        if not values.get("Id"):
             continue
-        unit = fields[0]
-        details = run(
-            [SYSTEMCTL, "show", unit, "--property=Id,ActiveState,SubState,Description,ExecMainStartTimestamp,MainPID,MemoryCurrent,NRestarts"],
-            check=False,
-        )
-        values = dict(item.split("=", 1) for item in details.stdout.splitlines() if "=" in item)
         description = values.get("Description", "")
         match = re.match(r"Live recorder: (\S+) (.+)", description)
         jobs.append(
             {
-                "unit": values.get("Id", unit),
+                "unit": values["Id"],
                 "state": values.get("ActiveState", "unknown"),
                 "substate": values.get("SubState", "unknown"),
                 "description": description,
@@ -79,19 +80,21 @@ def list_jobs() -> list[dict[str, object]]:
 
 
 def recent_files(limit: int = 12) -> list[dict[str, object]]:
+    recordings_root = Path(RECORDINGS_DIR).expanduser().resolve()
+    if not recordings_root.is_dir():
+        return []
     files: list[tuple[float, Path, int]] = []
-    for path in PROJECT_ROOT.glob("**/*.mp4"):
-        if ".git" not in path.parts and "DouyinLiveRecorder" not in path.parts:
-            try:
-                stat = path.stat()
-                files.append((stat.st_mtime, path, stat.st_size))
-            except FileNotFoundError:
-                continue
+    for path in recordings_root.glob("**/*.mp4"):
+        try:
+            stat = path.stat()
+            files.append((stat.st_mtime, path, stat.st_size))
+        except FileNotFoundError:
+            continue
     files.sort(key=lambda item: item[0], reverse=True)
     return [
         {
             "name": path.name,
-            "path": str(path.relative_to(PROJECT_ROOT)),
+            "path": str(path.relative_to(recordings_root)),
             "size": size,
             "modified": int(modified),
         }
@@ -242,6 +245,8 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
+    if not AUTH_TOKEN:
+        raise SystemExit("错误：必须设置非空的 LIVE_WEBUI_TOKEN")
     host = os.environ.get("LIVE_WEBUI_HOST", "127.0.0.1")
     port = int(os.environ.get("LIVE_WEBUI_PORT", "8765"))
     server = ThreadingHTTPServer((host, port), Handler)

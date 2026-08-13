@@ -6,7 +6,10 @@
 # 示例： record_tiktok kobiritukii
 
 sanitize_path_part() {
-    printf '%s' "$1" | sed 's/[\/\\:*?"<>|]/_/g; s/^[[:space:]]*//; s/[[:space:]]*$//'
+    printf '%s' "$1" \
+      | tr -d '[:cntrl:]' \
+      | sed 's/[\/\\:*?"<>|]/_/g; s/^[[:space:].]*//; s/[[:space:].]*$//' \
+      | cut -c1-120
 }
 
 get_metadata_field() {
@@ -45,6 +48,11 @@ record_tiktok() {
     done
 
     local USERNAME="${1#@}"
+    USERNAME=$(sanitize_path_part "$USERNAME")
+    if [ -z "$USERNAME" ]; then
+        echo "错误：用户名无效。"
+        return 1
+    fi
     local LOG_DIR="./logs"
 
     echo "正在获取 TikTok @${USERNAME} 的昵称..."

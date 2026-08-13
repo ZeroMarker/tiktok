@@ -1,4 +1,14 @@
-# TikTok 直播录制脚本（tk.sh / tk_direct.sh）使用与排障说明
+# TikTok 直播录制使用与排障说明
+
+## 当前入口
+
+日常录制统一使用：
+
+```bash
+bash /root/tiktok/tk/record.sh <username>
+```
+
+`tk.sh`、`tk_direct.sh`、`fallback_tk*.sh` 和 Playwright/Python 探测脚本保留为历史兼容与故障诊断工具，不再作为常规入口。不要仅凭 Web API 的 GroupBlock 或离线结果判定无法录制；应首先直接运行正式入口，让 yt-dlp 轮询实际流地址。
 
 > 适用环境：Linux（root），ffmpeg ≥ 6.1，yt-dlp 已安装
 > 最后更新：2026-08-11

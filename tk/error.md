@@ -175,7 +175,9 @@ python3 ~/tiktok/tk/live_check.py emma_kusunoki
 如果所有 API 检测方法都失败（SIGI_STATE 中 liveRoom.status!=2、
 CurrentRoom 为空、webcast API 返回 4003110），
 则可能是 TikTok 内部状态不允许外部 API 检测到直播。
-此时唯一方案是用户在浏览器确认直播后手动通知启动录制。
+这只能说明 Web API 检测失败，不能说明 yt-dlp 无法录制。应先运行
+`bash tk/record.sh <username>` 让 yt-dlp 持续轮询；若 yt-dlp 也持续失败，
+再检查 Cookie、实际出口地区或从可播放的浏览器获取流 URL。
 
 ---
 
