@@ -63,11 +63,10 @@ ${BILIBILI_PUSH_URL}${BILIBILI_PUSH_CODE}
 ```text
 LIVE_WEBUI_HOST=127.0.0.1
 LIVE_WEBUI_PORT=8766
-LIVE_WEBUI_TOKEN=<随机生成的令牌>
 RECORDINGS_DIR=/root/tiktok/recordings
 ```
 
-`LIVE_WEBUI_TOKEN` 必须为非空值，否则后端会拒绝启动。修改配置后执行：
+认证已移除：后端不再校验令牌，页面可直接打开。请仅在内网、VPN 或带访问控制的反代后使用；如需恢复认证，在 `webui/app.py` 的 `Handler.authenticated()` 中启用校验，并在此重新设置 `LIVE_WEBUI_TOKEN`。修改配置后执行：
 
 ```bash
 sudo systemctl restart livestream-webui
@@ -79,7 +78,7 @@ sudo systemctl restart livestream-webui
 sudo install -d -m 755 /data/live
 ```
 
-不要把访问令牌、Cookie 或 Bilibili 推流码提交到仓库。
+不要把 Cookie 或 Bilibili 推流码提交到仓库。
 
 ## 抖音子模块
 

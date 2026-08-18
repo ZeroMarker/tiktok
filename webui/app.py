@@ -17,10 +17,10 @@ from urllib.parse import parse_qs, urlparse
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-INDEX_FILE = Path(__file__).resolve().parent / "index.html"
+WEBUI_DIR = Path(__file__).resolve().parent
+INDEX_FILE = WEBUI_DIR / "index.html"
 SYSTEMCTL = os.environ.get("SYSTEMCTL", "systemctl")
 SYSTEMD_RUN = os.environ.get("SYSTEMD_RUN", "systemd-run")
-AUTH_TOKEN = os.environ.get("LIVE_WEBUI_TOKEN", "")
 RECORDINGS_DIR = os.environ.get("RECORDINGS_DIR", str(PROJECT_ROOT / "recordings"))
 
 PLATFORMS = {
@@ -30,6 +30,19 @@ PLATFORMS = {
     "kick": ("kick/record.sh",),
     "youtube": ("youtube/record.sh",),
     "chzzk": ("chzzk/record.sh",),
+}
+
+# Static PWA assets served by the web UI.  Only whitelisted names, served
+# from webui/ with explicit content types.
+STATIC_FILES: dict[str, tuple[str, str]] = {
+    "favicon.ico": ("image/x-icon", "public, max-age=604800"),
+    "icon-32.png": ("image/png", "public, max-age=604800"),
+    "icon-180.png": ("image/png", "public, max-age=604800"),
+    "icon-192.png": ("image/png", "public, max-age=604800"),
+    "icon-512.png": ("image/png", "public, max-age=604800"),
+    "icon-maskable-512.png": ("image/png", "public, max-age=604800"),
+    "manifest.webmanifest": ("application/manifest+json; charset=utf-8", "no-cache"),
+    "sw.js": ("application/javascript; charset=utf-8", "no-cache"),
 }
 
 
@@ -185,34 +198,41 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def authenticated(self) -> bool:
-        return not AUTH_TOKEN or self.headers.get("X-Auth-Token", "") == AUTH_TOKEN
+        # 认证已移除：本 WebUI 设计为仅在内网/隧道/受控反代后使用。
+        # 如需恢复认证，在下方改为校验 X-Auth-Token 并设置 LIVE_WEBUI_TOKEN 环境变量。
+        return True
+
+    def send_file(self, path: Path, content_type: str, cache_control: str) -> None:
+        try:
+            body = path.read_bytes()
+        except OSError:
+            self.send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
+            return
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", cache_control)
+        self.end_headers()
+        self.wfile.write(body)
 
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         try:
             if parsed.path == "/":
-                body = INDEX_FILE.read_bytes()
-                self.send_response(HTTPStatus.OK)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
-                self.send_header("Content-Length", str(len(body)))
-                self.send_header("Cache-Control", "no-store")
-                self.end_headers()
-                self.wfile.write(body)
+                self.send_file(INDEX_FILE, "text/html; charset=utf-8", "no-store")
+            elif parsed.path == "/index.html":
+                # Direct hit on the file name (kept fresh; cache layer is the SW)
+                self.send_file(INDEX_FILE, "text/html; charset=utf-8", "no-store")
+            elif parsed.path.lstrip("/") in STATIC_FILES:
+                name = parsed.path.lstrip("/")
+                content_type, cache_control = STATIC_FILES[name]
+                self.send_file(WEBUI_DIR / name, content_type, cache_control)
             elif parsed.path == "/api/jobs":
-                if not self.authenticated():
-                    self.send_json(HTTPStatus.UNAUTHORIZED, {"error": "认证失败"})
-                    return
                 self.send_json(HTTPStatus.OK, list_jobs())
             elif parsed.path == "/api/logs":
-                if not self.authenticated():
-                    self.send_json(HTTPStatus.UNAUTHORIZED, {"error": "认证失败"})
-                    return
                 unit = parse_qs(parsed.query).get("unit", [""])[0]
                 self.send_json(HTTPStatus.OK, {"logs": job_logs(unit)})
             elif parsed.path == "/api/overview":
-                if not self.authenticated():
-                    self.send_json(HTTPStatus.UNAUTHORIZED, {"error": "认证失败"})
-                    return
                 self.send_json(HTTPStatus.OK, overview())
             elif parsed.path == "/api/health":
                 self.send_json(HTTPStatus.OK, {"ok": True})
@@ -222,9 +242,6 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
 
     def do_POST(self) -> None:  # noqa: N802
-        if not self.authenticated():
-            self.send_json(HTTPStatus.UNAUTHORIZED, {"error": "认证失败"})
-            return
         try:
             length = int(self.headers.get("Content-Length", "0"))
             if length > 16_384:
@@ -245,8 +262,6 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    if not AUTH_TOKEN:
-        raise SystemExit("错误：必须设置非空的 LIVE_WEBUI_TOKEN")
     host = os.environ.get("LIVE_WEBUI_HOST", "127.0.0.1")
     port = int(os.environ.get("LIVE_WEBUI_PORT", "8765"))
     server = ThreadingHTTPServer((host, port), Handler)

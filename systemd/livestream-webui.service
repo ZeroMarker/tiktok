@@ -6,15 +6,15 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/root/tiktok
+WorkingDirectory=__PROJECT_ROOT__
 EnvironmentFile=-/etc/default/livestream-webui
-ExecStart=/usr/bin/python3 /root/tiktok/webui/app.py
+ExecStart=/usr/bin/python3 __PROJECT_ROOT__/webui/app.py
 Restart=on-failure
 RestartSec=5s
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ReadWritePaths=/root/tiktok/recordings /root/tiktok/logs /run /var/log/journal
+ReadWritePaths=__PROJECT_ROOT__/recordings __PROJECT_ROOT__/logs /run /var/log/journal
 
 [Install]
 WantedBy=multi-user.target

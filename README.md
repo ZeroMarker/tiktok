@@ -67,14 +67,14 @@ bash douyin/record.sh <直播间> --cookies douyin-cookies.txt
 
 ## WebUI 与 systemd
 
-安装并启动本机管理页面：
+安装并启动本机管理页面（无需认证，仅限内网/受控反代环境使用）：
 
 ```bash
 sudo bash systemd/install.sh
 ```
 
-WebUI 后端默认只监听 `127.0.0.1:8766`。项目提供的 Caddy 配置通过 `https://20070809.xyz/tiktok/` 对外提供服务，域名根路径继续由 OpenList 使用。
-安装脚本会生成随机访问令牌；后端在令牌为空时会拒绝启动，避免误配置成无认证服务。
+WebUI 后端默认监听 `127.0.0.1:8766`。项目提供的 Caddy 配置通过 `https://20070809.xyz/tiktok/` 对外提供服务，域名根路径继续由 OpenList 使用。
+插件自 2026-08 起已移除访问认证：后端不再校验令牌，页面可直接打开。若需部署在公开网络，请在内网、VPN 或带访问控制的网关之后使用，或参照 `webui/app.py` 中 `Handler.authenticated()` 的注释恢复令牌校验。
 
 不开放公网时也可以使用 SSH 隧道：
 
@@ -82,7 +82,9 @@ WebUI 后端默认只监听 `127.0.0.1:8766`。项目提供的 Caddy 配置通�
 ssh -L 8765:127.0.0.1:8766 <server>
 ```
 
-然后打开 `http://127.0.0.1:8765`。访问令牌保存在 `/etc/default/livestream-webui`，不要提交或分享该文件内容。
+然后打开 `http://127.0.0.1:8765`。
+
+WebUI 同时提供 PWA 支持：可安装到桌面/主屏幕，断网时仍可打开界面（任务数据在联网后自动刷新）。前端资源（`manifest.webmanifest`、`sw.js`、图标）在 `webui/` 目录下，配合 Caddy 路径剥离可正常工作；修改 `systemd/Caddyfile` 后需 `sudo systemctl reload caddy` 生效。
 
 ## 常用文档
 

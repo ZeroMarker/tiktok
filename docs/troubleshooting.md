@@ -64,7 +64,7 @@ bash tk/record.sh <tiktok_username>
 
 若 yt-dlp 也持续失败，再验证 Cookie、实际出口地区、浏览器指纹模拟和 verbose 日志。详细历史案例见 [TikTok 录制排障](tiktok-live-recording.md)。
 
-## WebUI 无法启动或返回认证失败
+## WebUI 无法启动
 
 检查服务与日志：
 
@@ -73,8 +73,6 @@ systemctl status livestream-webui --no-pager
 journalctl -u livestream-webui -n 100 --no-pager
 ```
 
-- 日志提示必须设置 `LIVE_WEBUI_TOKEN`：在 `/etc/default/livestream-webui` 设置非空令牌后重启服务。
-- 页面提示认证失败：确认浏览器中输入的令牌与服务配置一致。
 - 修改了 `RECORDINGS_DIR` 后无法写入：确认目录存在，并已加入 systemd unit 的 `ReadWritePaths`。
 
 ## 磁盘空间不足

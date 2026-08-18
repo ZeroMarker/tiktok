@@ -1,0 +1,19 @@
+{
+  "id": "./",
+  "name": "直播录制中心",
+  "short_name": "录制中心",
+  "description": "管理 TikTok、抖音、SOOP、Kick、YouTube、CHZZK 直播录制任务的本地控制台",
+  "lang": "zh-CN",
+  "dir": "ltr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "background_color": "#090d12",
+  "theme_color": "#090d12",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

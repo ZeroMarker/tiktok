@@ -12,6 +12,7 @@
 }
 
 http://20070809.xyz {
+	redir /tiktok /tiktok/ 308
 	redir /douyin /douyin/ 308
 	redir /douyinliverecorder /douyin/ 308
 	redir /sysmon /sysmon/ 308
@@ -34,6 +35,7 @@ http://20070809.xyz {
 
 https://20070809.xyz {
 	tls internal
+	redir /tiktok /tiktok/ 308
 	redir /douyin /douyin/ 308
 	redir /douyinliverecorder /douyin/ 308
 	redir /sysmon /sysmon/ 308
