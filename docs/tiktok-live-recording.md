@@ -8,7 +8,7 @@
 bash /root/tiktok/tk/record.sh <username>
 ```
 
-`tk.sh`、`tk_direct.sh`、`fallback_tk*.sh` 和 Playwright/Python 探测脚本保留为历史兼容与故障诊断工具，不再作为常规入口。不要仅凭 Web API 的 GroupBlock 或离线结果判定无法录制；应首先直接运行正式入口，让 yt-dlp 轮询实际流地址。
+`tk.sh`、`fallback_tk.sh` 仅作为旧接口兼容保留；其余历史调试脚本（`tk_direct.sh`、`playwright_*.py`、`fallback_tk2/3.sh` 等）已移除。不要仅凭 Web API 的 GroupBlock 或离线结果判定无法录制；应首先直接运行正式入口，让引擎轮询实际流地址。
 
 > 适用环境：Linux（root），ffmpeg ≥ 6.1，yt-dlp 已安装
 > 最后更新：2026-08-13
@@ -17,10 +17,12 @@ bash /root/tiktok/tk/record.sh <username>
 
 正式入口为 `tk/record.sh`：
 
-| 脚本 | 说明 |
+| 架构 | 说明 |
 |------|------|
-| `/root/tiktok/tk/record.sh` | 正式入口；使用 `-rw_timeout`，无人值守轮询和分段录制 |
-| `tk.sh` / `tk_direct.sh` / `fallback_tk*.sh` | 历史兼容与故障诊断工具 |
+| `scripts/dlr.py` | 统一录制引擎（所有平台共用） |
+| `scripts/dlr/adapters/tiktok.py` | TikTok 适配器：yt-dlp → impersonate → mobile → curl_cffi 四方法兜底 |
+| `tk/record.sh` | TikTok 转发入口（调用引擎） |
+| `tk.sh` / `fallback_tk.sh` | 旧接口兼容 |
 
 两个脚本均实现**无人值守自动录制**：检测到直播开播即录，断流自动重连，每 10 分钟切一个 MP4 分段。
 
@@ -103,7 +105,7 @@ bash /root/tiktok/tk/record.sh hana_kuraki87
 
 **现象**：clash 停止或代理失效后，走代理的旧会话所有请求指向死端口，一直"抓取失败"。
 
-**解决**：先检查当前代理环境；需要强制直连诊断时再使用 `tk_direct.sh`。不要把一次 Web API 失败直接解释为直播不可录制。
+**解决**：先检查当前代理环境；不要把一次 Web API 失败直接解释为直播不可录制，应让正式入口的 `live_check.py` 兜底继续轮询。
 
 ### 6.3 一直显示"直播未开启 / 抓取失败"
 
@@ -155,28 +157,16 @@ bash /root/tiktok/tk/record.sh hana_kuraki87
 
 | 文件 | 说明 |
 |------|------|
-| `record.sh` | 当前正式录制入口 |
-| `tk.sh` | 与 ~/scripts/tk.sh 相同的改进版 |
-| `fallback_tk.sh` | 备用录制：4 种方法按优先级尝试（yt-dlp → yt-dlp+xff → yt-dlp+mobile → live_check.py） |
-| `fallback_tk2.sh` | 修复 live_check.py 输出 dict 被当 URL 的问题，提取 flv_pull_url.HD1 / rtmp_pull_url |
-| `fallback_tk3.sh` | 修复 tk2 只解析 dict 行的问题；内嵌 Python 从页面 roomId → webcast API 取 FLV 直链 |
-| `live_check.py` | curl_cffi 模拟浏览器解析 SIGI_STATE，二次确认直播状态并取流地址 |
-| `playwright_*.py` / `debug_check.py` | Playwright 真实浏览器渲染调试（兜底手段） |
-| `room_enter_test.py` | 单独测试 webcast room/enter API |
-| `record.ps1` | Windows PowerShell 版录制（Record-TikTok 函数） |
-| `error.md` | 历次排障记录（tubasa__mai、emma_kusunoki GroupBlock、act.jp_official 等） |
+| `tk/record.sh` | TikTok 转发入口 → 统一引擎 `scripts/dlr.py` |
+| `scripts/dlr/adapters/tiktok.py` | TikTok 适配器（含 4 方法兜底检测） |
+| `tk/live_check.py` | curl_cffi 直接解析页面 + webcast API，取流地址（引擎的兜底方法） |
+| `tk.sh` / `fallback_tk.sh` | 旧接口兼容入口 |
 
 **live_check.py 单独使用**（yt-dlp 失败时二次确认）：
 
 ```bash
 python3 /root/tiktok/tk/live_check.py <username>
 # 成功 → stdout 输出一行流 URL；失败 → exit 1
-```
-
-**备用录制**（注意输出目录写死为 /root/.nanobot/workspace/，与主脚本"执行时当前目录"不同）：
-
-```bash
-bash /root/tiktok/tk/fallback_tk3.sh <username>
 ```
 
 ## 8. 运维速查

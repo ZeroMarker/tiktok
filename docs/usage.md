@@ -10,14 +10,7 @@ Linux / macOS：
 bash tk/record.sh <tiktok_username>
 ```
 
-这是日常录制的正式入口，会持续轮询 yt-dlp，断流后自动重新获取直播源。`tk.sh`、`tk_direct.sh`、`fallback_tk*.sh` 和 Python/Playwright 脚本仅用于兼容与排障。
-
-PowerShell：
-
-```powershell
-. .\tk\record.ps1
-Record-TikTok -Username <tiktok_username>
-```
+这是日常录制的正式入口，会持续轮询直播源（yt-dlp → 多方法兜底），断流后自动重新获取。`tk.sh`、`fallback_tk.sh` 仅作为旧接口兼容保留。
 
 ### 抖音
 
@@ -33,12 +26,6 @@ bash douyin/record.sh <web_rid|抖音号|完整URL>
 bash douyin/record.sh 1930162853
 bash douyin/record.sh @zhangsan
 bash douyin/record.sh https://live.douyin.com/1234567890
-```
-
-PowerShell：
-
-```powershell
-.\douyin\record.ps1 <web_rid|抖音号|完整URL>
 ```
 
 ### SOOP
