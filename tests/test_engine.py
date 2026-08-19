@@ -101,6 +101,29 @@ class OutputDirTest(unittest.TestCase):
         self.assertEqual("_".join(engine._name_parts(None)), "soop_player")
         self.assertEqual("_".join(engine._name_parts("Nic Name")), "soop_player_Nic_Name")
 
+    def test_refresh_nickname_updates_dir_once(self):
+        engine = Engine("soop", "player", "/tmp/rec", detect_interval=1, break_seconds=1)
+        engine.nickname = None
+        engine.out_dir = engine.output_dir(None)
+        engine.adapter.get_nickname = lambda: "Nice"
+        engine._refresh_nickname()
+        self.assertEqual(engine.nickname, "Nice")
+        self.assertEqual(engine.out_dir, Path("/tmp/rec/soop_player_Nice"))
+        # 已拿到昵称后不再重取，也不覆盖
+        engine.adapter.get_nickname = lambda: "Other"
+        engine._refresh_nickname()
+        self.assertEqual(engine.nickname, "Nice")
+        self.assertEqual(engine.out_dir, Path("/tmp/rec/soop_player_Nice"))
+
+    def test_refresh_nickname_noop_when_still_missing(self):
+        engine = Engine("soop", "player", "/tmp/rec", detect_interval=1, break_seconds=1)
+        engine.nickname = None
+        engine.out_dir = engine.output_dir(None)
+        engine.adapter.get_nickname = lambda: None
+        engine._refresh_nickname()
+        self.assertIsNone(engine.nickname)
+        self.assertEqual(engine.out_dir, engine.output_dir(None))
+
 
 if __name__ == "__main__":
     unittest.main()

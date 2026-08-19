@@ -58,6 +58,8 @@ class Engine:
         self.identifier = self.adapter.identifier
         self.ffmpeg_proc: subprocess.Popen | None = None
         self._stopping = False
+        self.nickname: str | None = None
+        self.out_dir: Path | None = None
 
         # 优雅停止：SIGTERM/SIGINT 时先结束 ffmpeg 再退出（配合 KillMode=mixed）
         signal.signal(signal.SIGTERM, self._on_signal)
@@ -97,21 +99,24 @@ class Engine:
     def run(self) -> int:
         print(f"开始无人值守录制 {self.platform}：{self.identifier}", flush=True)
 
-        nickname = self._safe_nickname()
-        if nickname:
-            print(f"主播昵称：{nickname}", flush=True)
+        self.nickname = self._safe_nickname()
+        if self.nickname:
+            print(f"主播昵称：{self.nickname}", flush=True)
         else:
-            print("未获取到昵称，输出目录将只使用频道标识。", flush=True)
+            print("未获取到昵称，输出目录将只使用频道标识（后续会尝试补获取）。", flush=True)
 
-        out_dir = self.output_dir(nickname)
-        out_dir.mkdir(parents=True, exist_ok=True)
+        self.out_dir = self.output_dir(self.nickname)
+        self.out_dir.mkdir(parents=True, exist_ok=True)
         log_dir = self.recordings_root / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
 
         print(f"每 {self.segment_seconds} 秒生成一个分段", flush=True)
-        print(f"输出目录：{out_dir}", flush=True)
+        print(f"输出目录：{self.out_dir}", flush=True)
 
         while not self._stopping:
+            # 未开播轮询期间补获取昵称（仅当首次失败时才有动作）
+            self._refresh_nickname()
+
             print(
                 f"[{datetime.now():%Y-%m-%d %H:%M:%S}] 尝试抓取直播源 @{self.identifier} ...",
                 flush=True,
@@ -128,7 +133,7 @@ class Engine:
             # 只打印去掉签名参数的开头，避免整串 token 进日志
             print(f"  → 成功抓到直播源：{stream_url.split('?')[0]}", flush=True)
             print("开始录制...", flush=True)
-            self._record(out_dir, log_dir, stream_url, nickname)
+            self._record(self.out_dir, log_dir, stream_url, self.nickname)
             print(
                 f"录制中断，等待 {self.break_seconds} 秒后重新抓取源...",
                 flush=True,
@@ -146,6 +151,19 @@ class Engine:
         except Exception as exc:  # 昵称失败不影响录制
             print(f"获取昵称失败：{exc}", file=sys.stderr, flush=True)
             return None
+
+    def _refresh_nickname(self) -> None:
+        """首次昵称获取失败时，在未开播轮询期间补获取（不影响已开始的录制）。"""
+        if self.nickname:
+            return
+        nickname = self._safe_nickname()
+        if not nickname:
+            return
+        self.nickname = nickname
+        new_dir = self.output_dir(nickname)
+        new_dir.mkdir(parents=True, exist_ok=True)
+        self.out_dir = new_dir
+        print(f"补获取到主播昵称：{nickname}，新输出目录：{self.out_dir}", flush=True)
 
     def _name_parts(self, nickname: str | None) -> list[str]:
         """输出目录/文件名的公共前缀片段：平台_频道标识[_昵称]。"""
