@@ -62,7 +62,17 @@ python douyin/get_stream.py <web_rid|抖音号|完整URL> --get-nickname
 bash tk/record.sh <tiktok_username>
 ```
 
-若 yt-dlp 也持续失败，再验证 Cookie、实际出口地区、浏览器指纹模拟和 verbose 日志。详细历史案例见 [TikTok 录制排障](tiktok-live-recording.md)。
+若 yt-dlp 也持续失败，优先排查是否**需要登录 Cookie**：
+
+```bash
+# 提供 Netscape 登录 Cookie 后，yt-dlp 常能直接抓到流
+yt-dlp --impersonate chrome --cookies cookies.txt \
+  -f "b[ext=flv]" --get-url "https://www.tiktok.com/@<user>/live"
+```
+
+`tk/record.sh` 会自动检测项目根 `cookies.txt` 并携带；详见
+[使用说明](usage.md) 的“TikTok 登录 Cookie”。历史案例（emma_kusunoki 等）见
+[tk/error.md](../tk/error.md) 与 [TikTok 录制排障](tiktok-live-recording.md)。
 
 ## WebUI 无法启动
 

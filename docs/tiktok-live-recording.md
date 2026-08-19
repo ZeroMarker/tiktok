@@ -10,8 +10,10 @@ bash /root/tiktok/tk/record.sh <username>
 
 历史调试脚本（`tk_direct.sh`、`tk.sh`、`fallback_tk*.sh`、`playwright_*.py` 等）已移除。不要仅凭 Web API 的 GroupBlock 或离线结果判定无法录制；应首先直接运行正式入口，让引擎轮询实际流地址。
 
-> 适用环境：Linux（root），ffmpeg ≥ 6.1，yt-dlp 已安装
-> 最后更新：2026-08-13
+> 适用环境：Linux，ffmpeg ≥ 6.1，yt-dlp 已安装
+> 录制服务应以装有 yt-dlp/curl_cffi 的用户（本部署 `ubuntu`）运行；
+> 需登录态主播可放 `cookies.txt` 自动携带，见 [usage.md](usage.md)。
+> 最后更新：2026-08-19
 
 ## 1. 概述
 
@@ -139,17 +141,25 @@ bash /root/tiktok/tk/record.sh hana_kuraki87
 
 **解决**：换日本等地区服务器/VPN 出口，或手动获取直链流地址喂给 ffmpeg。
 
-### 6.7 yt-dlp 报 "not currently live" 但主播实际在播
+### 6.7 yt-dlp 报 "not currently live" 但主播实际在播（需登录 Cookie）
 
-**现象**：确认主播在播，但 yt-dlp 抓不到流（webcast room/info 返回 4003110 等）。
+**现象**：确认主播在播，但 yt-dlp 抓不到流（webcast room/info 返回 4003110，
+`api-live/user/room` 返回空 roomId，页面被 Slardar WAF 拦截），本地所有检测接口
+都拿不到 roomId。
 
-**原因**：TikTok 检测接口对无登录 Cookie 的请求限流/风控。
+**原因**：TikTok 对部分主播（登录限流 / 风控 / 直播需登录才能看）在无登录 Cookie 时
+不返回直播流。`yt-dlp` 旧接口直接误报“未开播”。
 
-**解决**（备选方向）：
-- 给 yt-dlp 配登录 Cookie
-- 换用 webcast API 直接解析
-- 用 Playwright 渲染页面拿 LiveRoomInfo
-- 直接用备用脚本，见 §7
+**解决**：提供登录 Cookie（Netscape 格式），`tk/record.sh` 会检测项目根 `cookies.txt`
+并自动透传给 yt-dlp；见 [使用说明](usage.md) 的“TikTok 登录 Cookie”章节。
+验证命令：
+
+```bash
+yt-dlp --impersonate chrome --cookies cookies.txt \
+  -f "b[ext=flv]" --get-url "https://www.tiktok.com/@<user>/live"
+```
+
+> 历史案例（emma_kusunoki 等）与经验沉淀见 [tk/error.md](../tk/error.md)。
 
 ## 7. 辅助工具链（/root/tiktok/tk/）
 

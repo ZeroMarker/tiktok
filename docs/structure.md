@@ -66,9 +66,18 @@ WebUI 的最近文件列表扫描 `RECORDINGS_DIR`，不会遍历整个仓库。
 ## 控制面
 
 `webui/app.py`（常驻 systemd 服务）通过 `systemd-run` 按需生成每频道临时单元
-`livestream-rec-{platform}-{channel}-{hash}.service`，调用各平台 `record.sh`。
-临时单元以非 root 用户 `liverec` 运行，带 `KillMode=mixed`、`TimeoutStopSec=30s`、
-网络就绪依赖与崩溃自动重启。
+`livestream-rec-{platform}-{channel}.service`，调用各平台 `record.sh`。
+临时单元带 `KillMode=mixed`、`TimeoutStopSec=30s`、网络就绪依赖与崩溃自动重启。
+
+**运行用户**：录制服务应以安装了 yt-dlp/curl_cffi 的普通用户运行（本部署为
+`ubuntu`，依赖其 `~/.local` 站点目录），否则子进程 yt-dlp 会因找不到 `yt_dlp`
+模块而静默失败，导致所有 yt-dlp 抓流方法失效。本仓库 `tk/record.sh` 会为子进程
+自动补充该用户的 `PYTHONPATH`/`PATH` 作为兜底。
+
+**登录 Cookie**：TikTok 部分主播要求登录态才能拿到直播流（无 Cookie 时
+yt-dlp / Web API 均判“未开播”）。`tk/record.sh` 会检测项目根 `cookies.txt`
+（Netscape 格式，已被 `.gitignore` 忽略），存在时自动附带 `--cookies` 给引擎，
+由适配器透传给 yt-dlp；Cookie 与 Bilibili 推流码等敏感信息不要提交仓库。
 
 ## 子模块
 

@@ -12,6 +12,30 @@ bash tk/record.sh <tiktok_username>
 
 这是日常录制的正式入口，会持续轮询直播源（yt-dlp → 多方法兜底），断流后自动重新获取。
 
+#### TikTok 登录 Cookie（部分主播需要）
+
+TikTok 对部分主播（登录限流、风控、或直播需要登录才能看）在无登录 Cookie 时不会返回
+直播流——yt-dlp / Web API 都会误报“未开播”，但浏览器里明明在播。
+
+解决办法是提供 Netscape 格式的登录 Cookie，`tk/record.sh` 会自动携带：
+
+```bash
+# 将浏览器导出的 Cookie 存为项目根 cookies.txt（已 .gitignore 忽略，勿提交）
+cp ~/secrets/tiktok-cookies.txt ./cookies.txt
+
+# 直接复用项目入口即可，record.sh 自动附带 Cookie
+bash tk/record.sh <tiktok_username>
+```
+
+也可显式指定其他 Cookie 文件：
+
+```bash
+bash tk/record.sh <tiktok_username> --cookies /secure/tiktok-cookies.txt
+```
+
+> 提示：确保录制服务以能访问 `~/.local`（yt-dlp/curl_cffi）的用户运行；
+> 详见 [结构](structure.md) 的“控制面 / 运行用户”。
+
 ### 抖音
 
 可传入 `web_rid`、抖音号或完整直播间 URL：

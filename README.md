@@ -36,6 +36,9 @@ python --version
 bash tk/record.sh <tiktok_username>
 ```
 
+部分 TikTok 主播需要登录态，把浏览器导出的 Netscape Cookie 存为项目根 `cookies.txt`
+（已 .gitignore 忽略），`record.sh` 会自动携带；详见 [使用说明](docs/usage.md)。
+
 录制抖音：
 
 ```bash
