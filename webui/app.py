@@ -13,7 +13,7 @@ import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -95,40 +95,108 @@ def list_jobs() -> list[dict[str, object]]:
     return jobs
 
 
-def recent_files(limit: int = 12) -> list[dict[str, object]]:
+def list_files(query: str = "", limit: int = 300, offset: int = 0) -> dict[str, object]:
+    """列出 RECORDINGS_DIR 下的录制文件（按修改时间倒序，支持搜索与分页）。"""
     recordings_root = Path(RECORDINGS_DIR).expanduser().resolve()
     if not recordings_root.is_dir():
-        return []
+        return {"total": 0, "offset": offset, "files": []}
+    q = query.strip().lower()
     files: list[tuple[float, Path, int]] = []
     for path in recordings_root.glob("**/*.mp4"):
         try:
             stat = path.stat()
-            files.append((stat.st_mtime, path, stat.st_size))
-        except FileNotFoundError:
+        except OSError:
             continue
+        if q:
+            rel = path.relative_to(recordings_root).as_posix().lower()
+            if q not in path.name.lower() and q not in rel:
+                continue
+        files.append((stat.st_mtime, path, stat.st_size))
     files.sort(key=lambda item: item[0], reverse=True)
-    return [
-        {
-            "name": path.name,
-            "path": str(path.relative_to(recordings_root)),
-            "size": size,
-            "modified": int(modified),
-        }
-        for modified, path, size in files[:limit]
-    ]
+    total = len(files)
+    page = files[offset : offset + limit]
+    return {
+        "total": total,
+        "offset": offset,
+        "files": [
+            {
+                "name": path.name,
+                "path": str(path.relative_to(recordings_root)),
+                "dir": str(path.parent.relative_to(recordings_root)) if path.parent != recordings_root else "",
+                "size": size,
+                "modified": int(modified),
+            }
+            for modified, path, size in page
+        ],
+    }
+
+
+def recent_files(limit: int = 12) -> list[dict[str, object]]:
+    return list_files(limit=limit)["files"]
+
+
+def resolve_recording(rel: str) -> Path | None:
+    """将相对路径安全解析到 RECORDINGS_DIR 内的文件，越界返回 None。"""
+    if not rel or "\x00" in rel:
+        return None
+    root = Path(RECORDINGS_DIR).expanduser().resolve()
+    path = (root / rel).resolve()
+    if path == root or not str(path).startswith(str(root) + os.sep):
+        return None
+    return path if path.is_file() else None
+
+
+def delete_file(rel: str) -> None:
+    path = resolve_recording(rel)
+    if path is None:
+        raise ValueError("文件路径无效或文件不存在")
+    try:
+        path.unlink()
+    except OSError as exc:
+        raise RuntimeError(f"删除失败: {exc}")
+
+
+def system_stats() -> dict[str, object]:
+    """系统负载与内存概览（尽力而为，读取失败返回空值）。"""
+    try:
+        load1, load5, load15 = os.getloadavg()
+        load = [round(load1, 2), round(load5, 2), round(load15, 2)]
+    except (OSError, AttributeError):
+        load = []
+    mem_total = mem_available = 0
+    try:
+        with open("/proc/meminfo", encoding="utf-8") as fh:
+            for line in fh:
+                key, _, value = line.partition(":")
+                if key == "MemTotal":
+                    mem_total = int(value.strip().split()[0]) * 1024
+                elif key == "MemAvailable":
+                    mem_available = int(value.strip().split()[0]) * 1024
+    except OSError:
+        pass
+    return {"load": load, "mem_total": mem_total, "mem_available": mem_available}
 
 
 def overview() -> dict[str, object]:
     usage = shutil.disk_usage(RECORDINGS_DIR if Path(RECORDINGS_DIR).exists() else PROJECT_ROOT)
     jobs = list_jobs()
+    platforms: dict[str, int] = {}
+    for job in jobs:
+        platforms[job["platform"]] = platforms.get(job["platform"], 0) + 1
+    stats = system_stats()
     return {
         "jobs": len(jobs),
         "running": sum(job["state"] == "active" for job in jobs),
+        "failed": sum(job["state"] == "failed" for job in jobs),
+        "platforms": platforms,
         "disk_total": usage.total,
         "disk_used": usage.used,
         "disk_free": usage.free,
         "disk_percent": round(usage.used / usage.total * 100, 1),
         "files": recent_files(),
+        "load": stats["load"],
+        "mem_total": stats["mem_total"],
+        "mem_available": stats["mem_available"],
         "server_time": int(time.time()),
     }
 
@@ -180,18 +248,31 @@ def start_job(data: dict) -> str:
     return unit
 
 
+def _valid_unit(unit: str) -> bool:
+    return bool(re.fullmatch(r"livestream-rec-[a-z0-9-]+\.service", unit))
+
+
 def stop_job(unit: str) -> None:
-    if not re.fullmatch(r"livestream-rec-[a-z0-9-]+\.service", unit):
+    if not _valid_unit(unit):
         raise ValueError("任务名称无效")
     result = run([SYSTEMCTL, "stop", unit], check=False)
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or "停止任务失败")
 
 
-def job_logs(unit: str) -> str:
-    if not re.fullmatch(r"livestream-rec-[a-z0-9-]+\.service", unit):
+def restart_job(unit: str) -> None:
+    if not _valid_unit(unit):
         raise ValueError("任务名称无效")
-    result = run(["journalctl", "-u", unit, "-n", "200", "--no-pager", "-o", "short-iso"], check=False)
+    result = run([SYSTEMCTL, "restart", unit], check=False)
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or "重启任务失败")
+
+
+def job_logs(unit: str, tail: int = 200) -> str:
+    if not _valid_unit(unit):
+        raise ValueError("任务名称无效")
+    tail = max(1, min(int(tail), 5000))
+    result = run(["journalctl", "-u", unit, "-n", str(tail), "--no-pager", "-o", "short-iso"], check=False)
     return result.stdout[-100_000:]
 
 
@@ -225,6 +306,57 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def send_file_download(self, path: Path) -> None:
+        """以附件方式下载录制文件，支持 HTTP Range（浏览器内视频拖动/续传）。"""
+        try:
+            size = path.stat().st_size
+        except OSError:
+            self.send_json(HTTPStatus.NOT_FOUND, {"error": "文件不存在"})
+            return
+        start, end, status = 0, size - 1, HTTPStatus.OK
+        range_header = self.headers.get("Range", "")
+        if range_header:
+            match = re.match(r"bytes=(\d*)-(\d*)", range_header)
+            if match:
+                rs, re_part = match.groups()
+                if rs:
+                    start = int(rs)
+                if re_part:
+                    end = min(int(re_part), size - 1)
+                if start > end or start >= size:
+                    self.send_response(HTTPStatus.REQUESTED_RANGE_NOT_SATISFIABLE)
+                    self.send_header("Content-Range", f"bytes */{size}")
+                    self.end_headers()
+                    return
+                status = HTTPStatus.PARTIAL_CONTENT
+        length = end - start + 1
+        self.send_response(status)
+        self.send_header("Content-Type", "video/mp4")
+        self.send_header("Content-Length", str(length))
+        self.send_header("Accept-Ranges", "bytes")
+        if range_header:
+            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+        self.send_header("Content-Disposition", f'attachment; filename="{quote(path.name)}"')
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        if self.command == "HEAD":
+            return
+        try:
+            with path.open("rb") as fh:
+                fh.seek(start)
+                remaining = length
+                while remaining > 0:
+                    chunk = fh.read(min(64 * 1024, remaining))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    remaining -= len(chunk)
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # 客户端提前断开（如取消下载）
+
+    def do_HEAD(self) -> None:  # noqa: N802
+        self.do_GET()
+
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         try:
@@ -240,8 +372,23 @@ class Handler(BaseHTTPRequestHandler):
             elif parsed.path == "/api/jobs":
                 self.send_json(HTTPStatus.OK, list_jobs())
             elif parsed.path == "/api/logs":
-                unit = parse_qs(parsed.query).get("unit", [""])[0]
-                self.send_json(HTTPStatus.OK, {"logs": job_logs(unit)})
+                query = parse_qs(parsed.query)
+                unit = query.get("unit", [""])[0]
+                tail = int(query.get("tail", ["200"])[0] or "200")
+                self.send_json(HTTPStatus.OK, {"logs": job_logs(unit, tail)})
+            elif parsed.path == "/api/files":
+                query = parse_qs(parsed.query)
+                q = query.get("q", [""])[0]
+                limit = int(query.get("limit", ["300"])[0] or "300")
+                offset = int(query.get("offset", ["0"])[0] or "0")
+                self.send_json(HTTPStatus.OK, list_files(q, limit=limit, offset=offset))
+            elif parsed.path == "/api/file":
+                rel = parse_qs(parsed.query).get("path", [""])[0]
+                path = resolve_recording(rel)
+                if path is None:
+                    self.send_json(HTTPStatus.NOT_FOUND, {"error": "文件不存在"})
+                    return
+                self.send_file_download(path)
             elif parsed.path == "/api/overview":
                 self.send_json(HTTPStatus.OK, overview())
             elif parsed.path == "/api/health":
@@ -261,6 +408,12 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(HTTPStatus.CREATED, {"unit": start_job(data)})
             elif self.path == "/api/stop":
                 stop_job(str(data.get("unit", "")))
+                self.send_json(HTTPStatus.OK, {"ok": True})
+            elif self.path == "/api/restart":
+                restart_job(str(data.get("unit", "")))
+                self.send_json(HTTPStatus.OK, {"ok": True})
+            elif self.path == "/api/delete":
+                delete_file(str(data.get("path", "")))
                 self.send_json(HTTPStatus.OK, {"ok": True})
             else:
                 self.send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})

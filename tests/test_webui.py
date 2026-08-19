@@ -154,6 +154,130 @@ class WebUIHelpersTest(unittest.TestCase):
         self.assertEqual(mocked_run.call_count, 2)
         self.assertEqual([job["target"] for job in jobs], ["one", "two"])
 
+    def test_list_files_search_and_dirs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "tiktok_alpha").mkdir()
+            (root / "soop_beta").mkdir()
+            recent = root / "tiktok_alpha" / "clip_2.mp4"
+            recent.write_bytes(b"new")
+            older = root / "tiktok_alpha" / "clip_1.mp4"
+            older.write_bytes(b"old")
+            other = root / "soop_beta" / "live.mp4"
+            other.write_bytes(b"soop")
+            # mtime 排序：让 clip_2 最新、live.mp4 次之、clip_1 最旧
+            older_ts, recent_ts = 1_700_000_000, 1_700_000_100
+            os.utime(older, (older_ts, older_ts))
+            os.utime(recent, (recent_ts, recent_ts))
+            os.utime(other, (recent_ts - 50, recent_ts - 50))
+            with patch.object(app, "RECORDINGS_DIR", directory):
+                data = app.list_files()
+            self.assertEqual(data["total"], 3)
+            self.assertEqual([f["name"] for f in data["files"]], ["clip_2.mp4", "live.mp4", "clip_1.mp4"])
+            self.assertEqual(data["files"][0]["dir"], "tiktok_alpha")
+            self.assertEqual(data["files"][1]["dir"], "soop_beta")
+            with patch.object(app, "RECORDINGS_DIR", directory):
+                filtered = app.list_files(query="clip_1")
+            self.assertEqual(filtered["total"], 1)
+            self.assertEqual(filtered["files"][0]["name"], "clip_1.mp4")
+
+    def test_list_files_pagination(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for i in range(5):
+                (root / f"f{i}.mp4").write_bytes(b"x")
+                os.utime(root / f"f{i}.mp4", (1_700_000_000 + i, 1_700_000_000 + i))
+            with patch.object(app, "RECORDINGS_DIR", directory):
+                page = app.list_files(limit=2, offset=2)
+            self.assertEqual(page["total"], 5)
+            self.assertEqual([f["name"] for f in page["files"]], ["f2.mp4", "f1.mp4"])
+
+    def test_resolve_recording_rejects_traversal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            outside = root.parent / "outside.mp4"
+            outside.write_bytes(b"secret")
+            with patch.object(app, "RECORDINGS_DIR", directory):
+                self.assertIsNone(app.resolve_recording("../outside.mp4"))
+                self.assertIsNone(app.resolve_recording("/etc/passwd"))
+                self.assertIsNone(app.resolve_recording(""))
+                self.assertIsNone(app.resolve_recording("missing.mp4"))
+            (root / "ok.mp4").write_bytes(b"data")
+            with patch.object(app, "RECORDINGS_DIR", directory):
+                self.assertEqual(app.resolve_recording("ok.mp4").name, "ok.mp4")
+
+    def test_delete_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "gone.mp4").write_bytes(b"data")
+            with patch.object(app, "RECORDINGS_DIR", directory):
+                app.delete_file("gone.mp4")
+                self.assertFalse((root / "gone.mp4").exists())
+                with self.assertRaises(ValueError):
+                    app.delete_file("../etc/passwd")
+
+    def test_job_logs_tail(self):
+        with patch.object(app, "run", return_value=CompletedProcess([], 0, stdout="log line\n", stderr="")) as mocked:
+            app.job_logs("livestream-rec-tiktok-x-abc.service", tail=1000)
+        args = mocked.call_args.args[0]
+        self.assertIn("-n", args)
+        self.assertEqual(args[args.index("-n") + 1], "1000")
+        with self.assertRaises(ValueError):
+            app.job_logs("evil.service")
+
+    def test_restart_job_validates_unit(self):
+        with patch.object(app, "run", return_value=CompletedProcess([], 0, stdout="", stderr="")) as mocked:
+            app.restart_job("livestream-rec-tiktok-x-abc.service")
+        self.assertEqual(mocked.call_args.args[0][0], "systemctl")
+        self.assertIn("restart", mocked.call_args.args[0])
+        with self.assertRaises(ValueError):
+            app.restart_job("../../evil")
+
+    def test_download_range(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            video = root / "clip.mp4"
+            video.write_bytes(b"0123456789")
+            with patch.object(app, "RECORDINGS_DIR", directory):
+                handler = _FakeHandler("/api/file?path=clip.mp4")
+                handler.headers["Range"] = "bytes=2-5"
+                handler.do_GET()
+            raw = handler.wfile.getvalue()
+            head, _, body = raw.partition(b"\r\n\r\n")
+            lines = head.decode("latin-1").splitlines()
+            self.assertEqual(lines[0].split()[1], "206")
+            self.assertIn("Content-Range: bytes 2-5/10", lines)
+            self.assertEqual(body, b"2345")
+
+    def test_download_rejects_traversal(self):
+        with patch.object(app, "RECORDINGS_DIR", "/tmp"):
+            handler = _FakeHandler("/api/file?path=..%2F..%2Fetc%2Fpasswd")
+            handler.do_GET()
+        raw = handler.wfile.getvalue()
+        head, _, _ = raw.partition(b"\r\n\r\n")
+        self.assertEqual(head.decode("latin-1").splitlines()[0].split()[1], "404")
+
+    def test_files_api_and_overview_platforms(self):
+        import json
+
+        jobs = [{"platform": "tiktok", "state": "active"}, {"platform": "tiktok", "state": "failed"}]
+        with (
+            patch.object(app, "list_jobs", return_value=jobs),
+            patch.object(app, "list_files", return_value={"total": 0, "offset": 0, "files": []}),
+            patch.object(app, "system_stats", return_value={"load": [0.1, 0.2, 0.3], "mem_total": 1000, "mem_available": 500}),
+        ):
+            data = app.overview()
+        self.assertEqual(data["running"], 1)
+        self.assertEqual(data["failed"], 1)
+        self.assertEqual(data["platforms"], {"tiktok": 2})
+        handler = _FakeHandler("/api/files")
+        with patch.object(app, "list_files", return_value={"total": 0, "offset": 0, "files": []}):
+            handler.do_GET()
+        raw = handler.wfile.getvalue()
+        head, _, body = raw.partition(b"\r\n\r\n")
+        self.assertEqual(head.decode("latin-1").splitlines()[0].split()[1], "200")
+        self.assertEqual(json.loads(body)["total"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()
