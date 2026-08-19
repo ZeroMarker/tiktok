@@ -105,14 +105,27 @@ def check_live_via_webcast_api(session: requests.Session, room_id: str) -> str |
 
         room_info = data.get("data", {})
         if room_info.get("status") == 2:
-            # 提取流 URL
-            stream_url = (
-                room_info.get("stream_url")
-                or room_info.get("liveUrl")
-                or room_info.get("rtmp_pull_url")
-                or room_info.get("hls_pull_url")
-            )
-            return stream_url
+            # 提取流 URL：stream_url 可能是一个包含各清晰度/协议的字典
+            stream_url = room_info.get("stream_url") or {}
+            if isinstance(stream_url, dict):
+                # 优先 FLV（HD1 高清），其次 rtmp/hls
+                flv = stream_url.get("flv_pull_url") or {}
+                for key in ("HD1", "FULL_HD1", "SD1", "SD2"):
+                    url = flv.get(key)
+                    if url:
+                        return url
+                for key in ("rtmp_pull_url", "hls_pull_url", "liveUrl"):
+                    url = stream_url.get(key)
+                    if isinstance(url, str) and url.startswith("http"):
+                        return url
+            elif isinstance(stream_url, str) and stream_url.startswith("http"):
+                return stream_url
+            # 直接挂在 data 上的 rtmp/hls
+            for key in ("rtmp_pull_url", "hls_pull_url", "liveUrl"):
+                url = room_info.get(key)
+                if isinstance(url, str) and url.startswith("http"):
+                    return url
+            return None
     except Exception:
         pass
     return None

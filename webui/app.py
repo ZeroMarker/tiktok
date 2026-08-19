@@ -22,6 +22,9 @@ INDEX_FILE = WEBUI_DIR / "index.html"
 SYSTEMCTL = os.environ.get("SYSTEMCTL", "systemctl")
 SYSTEMD_RUN = os.environ.get("SYSTEMD_RUN", "systemd-run")
 RECORDINGS_DIR = os.environ.get("RECORDINGS_DIR", str(PROJECT_ROOT / "recordings"))
+# 录制进程运行的非 root 身份。留空则仍以 root 运行（不推荐）。
+# 设置后，systemd-run 生成的各频道单元将以该用户运行，需确保其可写输出目录/日志目录。
+RECORDER_USER = os.environ.get("RECORDER_USER", "").strip()
 
 PLATFORMS = {
     "tiktok": ("tk/record.sh",),
@@ -149,22 +152,29 @@ def start_job(data: dict) -> str:
 
     unit = unit_name(platform, target)
     description = f"Live recorder: {platform} {target}"[:200]
-    result = run(
-        [
-            SYSTEMD_RUN,
-            f"--unit={unit.removesuffix('.service')}",
-            "--collect",
-            "--service-type=exec",
-            f"--description={description}",
-            f"--working-directory={PROJECT_ROOT}",
-            f"--setenv=RECORDINGS_DIR={RECORDINGS_DIR}",
-            "--property=Restart=on-failure",
-            "--property=RestartSec=10s",
-            "--",
-            *command,
-        ],
-        check=False,
-    )
+    argv = [
+        SYSTEMD_RUN,
+        f"--unit={unit.removesuffix('.service')}",
+        "--collect",
+        "--service-type=exec",
+        f"--description={description}",
+        f"--working-directory={PROJECT_ROOT}",
+        f"--setenv=RECORDINGS_DIR={RECORDINGS_DIR}",
+        # 网络依赖：等网络就绪后再拉起录制
+        "--property=After=network-online.target",
+        "--property=Wants=network-online.target",
+        # 停止语义：先 SIGTERM 主进程（脚本 trap 干净收尾 ffmpeg），超时后 SIGKILL 整个 cgroup
+        "--property=KillMode=mixed",
+        "--property=TimeoutStopSec=30s",
+        # 重启策略
+        "--property=Restart=on-failure",
+        "--property=RestartSec=10s",
+    ]
+    # 以非 root 身份运行录制（RECORDER_USER 设置时）
+    if RECORDER_USER:
+        argv += [f"--uid={RECORDER_USER}", f"--gid={RECORDER_USER}"]
+    argv += ["--", *command]
+    result = run(argv, check=False)
     if result.returncode != 0:
         raise RuntimeError((result.stderr or result.stdout).strip() or "systemd 启动失败")
     return unit
