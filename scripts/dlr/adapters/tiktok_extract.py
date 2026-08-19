@@ -1,36 +1,34 @@
 #!/usr/bin/env python3
-"""
-live_check.py — TikTok 直播状态检测备用方案
+"""tiktok_extract.py — TikTok 直播流地址解析（兜底取流，供适配器直接调用）.
 
 用途：
   当 yt-dlp --get-url 返回空（直播未开启/抓取失败）时，
-  用此脚本做二次确认和直接源地址抓取。
+  用此模块二次确认直播状态并直接抓取流地址。
 
 检测流程：
-  1. 用 curl_cffi 模拟浏览器访问 /live 页面
-  2. 解析 SIGI_STATE 中的 liveRoom status / roomId
-  3. 若 status==2 视为直播中，直接调用 webcast API 获取流地址
-  4. 输出流 URL（stdout），供 tk.sh 的 ffmpeg 使用
+  1. 直接重跑一次带 --impersonate 的 yt-dlp（换主/移动子域）
+  2. 用 curl_cffi 模拟浏览器访问 /live 页面
+  3. 解析 SIGI_STATE / __UNIVERSAL_DATA__ 中的 liveRoom status / roomId
+  4. 若 status==2 视为直播中，直接调用 webcast API 获取流地址
+  5. 返回一行流 URL（供 dlr 适配器使用）
 
-使用方法：
-  python3 live_check.py <username>
-  成功 → 输出一行流 URL
-  失败 → exit 1，stderr 输出错误原因
+用法：
+  from dlr.adapters.tiktok_extract import get_stream_url
+  url = get_stream_url(username)          # str | None
+
+  命令行诊断：
+  python3 tiktok_extract.py <username>    成功→输出一行流 URL，失败→exit 1
 
 依赖：
-  pip install curl_cffi
+  pip install curl_cffi  （缺失时 get_stream_url 返回 None，不影响主流程）
 """
 
-import sys
-import re
-import json
-import time
+from __future__ import annotations
 
-try:
-    from curl_cffi import requests
-except ImportError:
-    print("缺少 curl_cffi：pip install curl_cffi", file=sys.stderr)
-    sys.exit(1)
+import json
+import re
+import subprocess
+import sys
 
 
 def get_room_id_from_sigi(text: str) -> tuple[str | None, int]:
@@ -88,7 +86,7 @@ def get_room_id_from_universal(text: str) -> str | None:
     return None
 
 
-def check_live_via_webcast_api(session: requests.Session, room_id: str) -> str | None:
+def check_live_via_webcast_api(session, room_id: str) -> str | None:
     """直接调用 webcast API 检查直播状态，返回流 URL（如果有）。"""
     params = {"room_id": room_id, "aid": "1988"}
     try:
@@ -131,10 +129,8 @@ def check_live_via_webcast_api(session: requests.Session, room_id: str) -> str |
     return None
 
 
-def try_ytdlp_fallback(username: str) -> str | None:
+def _try_ytdlp_fallback(username: str) -> str | None:
     """兜底：用 yt-dlp 再试一次，带不同参数。"""
-    import subprocess
-
     urls_to_try = [
         f"https://www.tiktok.com/@{username}/live",
         f"https://m.tiktok.com/@{username}/live",
@@ -164,65 +160,75 @@ def try_ytdlp_fallback(username: str) -> str | None:
     return None
 
 
-def main():
-    if len(sys.argv) < 2:
-        print(f"用法：{sys.argv[0]} <TikTok 用户名>", file=sys.stderr)
-        sys.exit(1)
+def get_stream_url(username: str) -> str | None:
+    """兜底取流主入口：成功返回一行流 URL，失败返回 None。"""
+    try:
+        from curl_cffi import requests
+    except ImportError:
+        print("缺少 curl_cffi：pip install curl_cffi", file=sys.stderr)
+        return None
 
-    username = sys.argv[1]
     live_url = f"https://www.tiktok.com/@{username}/live"
 
     session = requests.Session()
     session.get("https://www.tiktok.com", impersonate="chrome131")
 
-    print(f"[live_check] 检查 @{username} ...", file=sys.stderr)
+    print(f"[tiktok_extract] 检查 @{username} ...", file=sys.stderr)
 
     # ---- 步骤1：直接 yt-dlp 再试 ----
-    stream_url = try_ytdlp_fallback(username)
+    stream_url = _try_ytdlp_fallback(username)
     if stream_url:
-        print(stream_url)
-        return
+        return stream_url
 
     # ---- 步骤2：用 curl_cffi 解析页面 ----
-    print("[live_check] yt-dlp 未返回源，尝试 curl_cffi 检测 ...", file=sys.stderr)
+    print("[tiktok_extract] yt-dlp 未返回源，尝试 curl_cffi 检测 ...", file=sys.stderr)
 
     r = session.get(live_url, impersonate="chrome131", timeout=20)
 
     # 方法A：SIGI_STATE 检测
     room_id, status = get_room_id_from_sigi(r.text)
     if status == 2 and room_id:
-        print(f"[live_check] SIGI_STATE status=2, roomId={room_id}", file=sys.stderr)
+        print(f"[tiktok_extract] SIGI_STATE status=2, roomId={room_id}", file=sys.stderr)
         stream_url = check_live_via_webcast_api(session, room_id)
         if stream_url:
-            print(stream_url)
-            return
+            return stream_url
 
     # 方法B：Universal Data 检测
     ud_room_id = get_room_id_from_universal(r.text)
     if ud_room_id:
         print(
-            f"[live_check] universal data roomId={ud_room_id}",
+            f"[tiktok_extract] universal data roomId={ud_room_id}",
             file=sys.stderr,
         )
         stream_url = check_live_via_webcast_api(session, ud_room_id)
         if stream_url:
-            print(stream_url)
-            return
+            return stream_url
 
     # ---- 步骤3：在页面中搜索 roomId 再试 ----
     all_room_ids = re.findall(r'"roomId":"(\d+)"', r.text)
     for rid in set(all_room_ids):
         if rid and rid != "0":
-            print(f"[live_check] 尝试 roomId={rid} ...", file=sys.stderr)
+            print(f"[tiktok_extract] 尝试 roomId={rid} ...", file=sys.stderr)
             stream_url = check_live_via_webcast_api(session, rid)
             if stream_url:
-                print(stream_url)
-                return
+                return stream_url
 
-    # ---- 步骤4：带--impersonate参数再跑yt-dlp ----
-    print("[live_check] 所有 API 检测均未发现直播", file=sys.stderr)
-    sys.exit(1)
+    print("[tiktok_extract] 所有 API 检测均未发现直播", file=sys.stderr)
+    return None
+
+
+def main() -> int:
+    if len(sys.argv) < 2:
+        print(f"用法：{sys.argv[0]} <TikTok 用户名>", file=sys.stderr)
+        return 1
+
+    username = sys.argv[1]
+    url = get_stream_url(username)
+    if url:
+        print(url)
+        return 0
+    return 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

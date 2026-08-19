@@ -8,7 +8,7 @@
 bash /root/tiktok/tk/record.sh <username>
 ```
 
-`tk.sh`、`fallback_tk.sh` 仅作为旧接口兼容保留；其余历史调试脚本（`tk_direct.sh`、`playwright_*.py`、`fallback_tk2/3.sh` 等）已移除。不要仅凭 Web API 的 GroupBlock 或离线结果判定无法录制；应首先直接运行正式入口，让引擎轮询实际流地址。
+历史调试脚本（`tk_direct.sh`、`tk.sh`、`fallback_tk*.sh`、`playwright_*.py` 等）已移除。不要仅凭 Web API 的 GroupBlock 或离线结果判定无法录制；应首先直接运行正式入口，让引擎轮询实际流地址。
 
 > 适用环境：Linux（root），ffmpeg ≥ 6.1，yt-dlp 已安装
 > 最后更新：2026-08-13
@@ -21,8 +21,8 @@ bash /root/tiktok/tk/record.sh <username>
 |------|------|
 | `scripts/dlr.py` | 统一录制引擎（所有平台共用） |
 | `scripts/dlr/adapters/tiktok.py` | TikTok 适配器：yt-dlp → impersonate → mobile → curl_cffi 四方法兜底 |
+| `scripts/dlr/adapters/tiktok_extract.py` | curl_cffi 解析页面 + webcast API 兜底取流（适配器直接调用） |
 | `tk/record.sh` | TikTok 转发入口（调用引擎） |
-| `tk.sh` / `fallback_tk.sh` | 旧接口兼容 |
 
 两个脚本均实现**无人值守自动录制**：检测到直播开播即录，断流自动重连，每 10 分钟切一个 MP4 分段。
 
@@ -105,7 +105,7 @@ bash /root/tiktok/tk/record.sh hana_kuraki87
 
 **现象**：clash 停止或代理失效后，走代理的旧会话所有请求指向死端口，一直"抓取失败"。
 
-**解决**：先检查当前代理环境；不要把一次 Web API 失败直接解释为直播不可录制，应让正式入口的 `live_check.py` 兜底继续轮询。
+**解决**：先检查当前代理环境；不要把一次 Web API 失败直接解释为直播不可录制，应让正式入口的 `get_stream.py` 兜底继续轮询。
 
 ### 6.3 一直显示"直播未开启 / 抓取失败"
 
@@ -159,13 +159,12 @@ bash /root/tiktok/tk/record.sh hana_kuraki87
 |------|------|
 | `tk/record.sh` | TikTok 转发入口 → 统一引擎 `scripts/dlr.py` |
 | `scripts/dlr/adapters/tiktok.py` | TikTok 适配器（含 4 方法兜底检测） |
-| `tk/live_check.py` | curl_cffi 直接解析页面 + webcast API，取流地址（引擎的兜底方法） |
-| `tk.sh` / `fallback_tk.sh` | 旧接口兼容入口 |
+| `scripts/dlr/adapters/tiktok_extract.py` | curl_cffi 直接解析页面 + webcast API，取流地址（引擎的兜底方法） |
 
-**live_check.py 单独使用**（yt-dlp 失败时二次确认）：
+**tiktok_extract.py 单独使用**（yt-dlp 失败时取流/二次确认）：
 
 ```bash
-python3 /root/tiktok/tk/live_check.py <username>
+python /root/tiktok/scripts/dlr/adapters/tiktok_extract.py <username>
 # 成功 → stdout 输出一行流 URL；失败 → exit 1
 ```
 

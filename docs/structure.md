@@ -15,6 +15,7 @@ scripts/
         ├── base.py        # 适配器接口 + 频道标识提取
         ├── ytdlp.py       # youtube / kick / chzzk / soop（yt-dlp 通用，含 impersonate 兜底）
         ├── tiktok.py      # TikTok：yt-dlp → impersonate → mobile → curl_cffi 四方法兜底
+        ├── tiktok_extract.py  # TikTok 兜底取流（curl_cffi 解析页面 + webcast API）
         └── douyin.py      # 抖音：复用 douyin/get_stream.py（DouyinLiveRecorder 子模块）
 ```
 
@@ -29,7 +30,7 @@ exec python3 "${SCRIPT_DIR}/../scripts/dlr.py" <platform> "$@"
 ## 平台目录
 
 ```text
-├── tk/                    # TikTok（record.sh 入口 + live_check.py 兜底解析）
+├── tk/                    # TikTok（record.sh 转发入口）
 ├── douyin/                # 抖音（record.sh + get_stream.py，依赖子模块 DouyinLiveRecorder）
 ├── soop/                  # SOOP（record.sh 入口）
 ├── youtube/               # YouTube（record.sh 入口）

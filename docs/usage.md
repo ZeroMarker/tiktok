@@ -10,7 +10,7 @@ Linux / macOS：
 bash tk/record.sh <tiktok_username>
 ```
 
-这是日常录制的正式入口，会持续轮询直播源（yt-dlp → 多方法兜底），断流后自动重新获取。`tk.sh`、`fallback_tk.sh` 仅作为旧接口兼容保留。
+这是日常录制的正式入口，会持续轮询直播源（yt-dlp → 多方法兜底），断流后自动重新获取。
 
 ### 抖音
 

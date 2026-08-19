@@ -4,14 +4,13 @@ yt-dlp 对 TikTok 有风控误判风险，因此按优先级依次尝试：
     1) yt-dlp https 主域（FLV 优先）
     2) yt-dlp + --impersonate chrome
     3) yt-dlp mobile 子域
-    4) tk/live_check.py（curl_cffi 直接解析页面 + webcast API）
+    4) curl_cffi 直接解析页面 + webcast API（tiktok_extract.get_stream_url）
 """
 
 from __future__ import annotations
 
-from dlr.adapters.base import BaseAdapter, PROJECT_ROOT, extract_last_segment
-
-LIVE_CHECK_PY = PROJECT_ROOT / "tk" / "live_check.py"
+from dlr.adapters.base import BaseAdapter, extract_last_segment
+from dlr.adapters.tiktok_extract import get_stream_url
 
 
 class TikTokAdapter(BaseAdapter):
@@ -43,12 +42,8 @@ class TikTokAdapter(BaseAdapter):
                 if stream:
                     return stream
 
-        # 方法4：Python (curl_cffi) 直接解析页面
-        if LIVE_CHECK_PY.is_file():
-            return self.run_capture(
-                ["python3", str(LIVE_CHECK_PY), self.identifier]
-            )
-        return None
+        # 方法4：Python (curl_cffi) 直接解析页面 + webcast API
+        return get_stream_url(self.identifier)
 
     def get_nickname(self) -> str | None:
         profile = f"https://www.tiktok.com/@{self.identifier}"
