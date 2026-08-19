@@ -1,18 +1,16 @@
 #!/bin/bash
 #
-# tk.sh — 兼容入口（保留原名 tk 函数供习惯用法）。
-# 实现在 lib.sh，此处仅保持旧接口：source 后调用 tk <username>。
+# tk.sh — TikTok 录制兼容入口（保留旧接口 tk <username>）。
+# 新架构：统一引擎 scripts/dlr.py，本文件仅做转发。
 #
-# 使用方法：
-#   source ~/scripts/tk.sh   （或 bash tk.sh）
-#   tk <tiktok_username>
+# 用法：
+#   bash tk.sh <tiktok_username>     （直接运行）
+#   source tk.sh && tk <username>    （source 用法）
 
-# shellcheck source=tk/lib.sh
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# 保持旧的 tk() 接口不变，内部复用统一实现
 tk() {
-    record_live "$@"
+    python3 "${PROJECT_ROOT}/scripts/dlr.py" tiktok "$@"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
