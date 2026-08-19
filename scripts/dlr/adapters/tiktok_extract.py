@@ -160,6 +160,70 @@ def _try_ytdlp_fallback(username: str) -> str | None:
     return None
 
 
+def get_nickname(username: str, cookies: str | None = None) -> str | None:
+    """从 profile 页的 __UNIVERSAL_DATA_FOR_REHYDRATION__ 解析显示昵称。
+
+    部分主播的昵称必须是显示名（如 emiri.okazaki → 丘咲エミリ 本人），
+    而 yt-dlp 只能拿到 handle 且不稳定；此函数用 curl_cffi + 可选 Cookie
+    直接解析页面 JSON。拿不到返回 None。
+    """
+    try:
+        from curl_cffi import requests
+    except ImportError:
+        return None
+
+    session = requests.Session()
+    session.get("https://www.tiktok.com", impersonate="chrome131")
+    if cookies:
+        try:
+            with open(cookies, encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    parts = line.split("\t")
+                    if len(parts) >= 7:
+                        session.cookies.set(
+                            parts[5], parts[6], domain=parts[0].lstrip("."), path=parts[2]
+                        )
+        except OSError:
+            pass
+
+    try:
+        r = session.get(
+            f"https://www.tiktok.com/@{username}", impersonate="chrome131", timeout=20
+        )
+    except Exception:
+        return None
+
+    match = re.search(
+        r'<script[^>]*id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>(.*?)</script>',
+        r.text,
+        re.DOTALL,
+    )
+    if not match:
+        return None
+    try:
+        data = json.loads(match.group(1))
+    except ValueError:
+        return None
+
+    scope = data.get("__DEFAULT_SCOPE__", {}) or {}
+    for value in scope.values():
+        if not isinstance(value, dict):
+            continue
+        ui = value.get("userInfo") or {}
+        if not isinstance(ui, dict):
+            continue
+        user = ui.get("user") or {}
+        if not isinstance(user, dict):
+            continue
+        nick = user.get("nickname")
+        if isinstance(nick, str) and nick.strip():
+            return nick.strip()
+    return None
+
+
 def get_stream_url(username: str) -> str | None:
     """兜底取流主入口：成功返回一行流 URL，失败返回 None。"""
     try:

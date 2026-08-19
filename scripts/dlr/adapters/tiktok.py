@@ -10,6 +10,7 @@ yt-dlp 对 TikTok 有风控误判风险，因此按优先级依次尝试：
 from __future__ import annotations
 
 from dlr.adapters.base import BaseAdapter, extract_last_segment
+from dlr.adapters.tiktok_extract import get_nickname as extract_nickname
 from dlr.adapters.tiktok_extract import get_stream_url
 
 
@@ -53,14 +54,21 @@ class TikTokAdapter(BaseAdapter):
         return get_stream_url(self.identifier)
 
     def get_nickname(self) -> str | None:
+        # 优先：curl_cffi + 可选 Cookie 解析显示昵称（更稳定）
+        nick = extract_nickname(self.identifier, cookies=self.cookies)
+        if nick:
+            return nick
+
+        # 兜底：yt-dlp（带 impersonate + Cookie 提高成功率）
         profile = f"https://www.tiktok.com/@{self.identifier}"
-        for field in ("channel", "uploader"):
+        for field in ("uploader", "channel"):
             value = self.run_capture(
                 [
                     "yt-dlp",
                     "--flat-playlist",
                     "--no-warnings",
                     "--skip-download",
+                    "--impersonate", "chrome",
                     "--print", f"%({field})s",
                     *self._ytdlp_cookie_args(),
                     profile,
