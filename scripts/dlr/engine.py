@@ -23,8 +23,9 @@ FFMPEG_UA = (
 
 
 def sanitize_path_part(value: str) -> str:
-    """清洗路径片段：去控制字符、空白转下划线、保留 120 字符以内。"""
-    cleaned = "".join(ch for ch in value if "\x20" <= ch <= "\x7e")
+    """清洗路径片段：保留可打印字符（含中文/日文/emoji 昵称），
+    去控制字符、空白转下划线、替换文件名非法字符、限长 120。"""
+    cleaned = "".join(ch for ch in value if ch.isprintable())
     cleaned = cleaned.strip()
     cleaned = re.sub(r'[\/\\:*?"<>|]', "_", cleaned)
     cleaned = re.sub(r"\s+", "_", cleaned).strip(" .")
@@ -127,7 +128,7 @@ class Engine:
             # 只打印去掉签名参数的开头，避免整串 token 进日志
             print(f"  → 成功抓到直播源：{stream_url.split('?')[0]}", flush=True)
             print("开始录制...", flush=True)
-            self._record(out_dir, log_dir, stream_url)
+            self._record(out_dir, log_dir, stream_url, nickname)
             print(
                 f"录制中断，等待 {self.break_seconds} 秒后重新抓取源...",
                 flush=True,
@@ -146,16 +147,26 @@ class Engine:
             print(f"获取昵称失败：{exc}", file=sys.stderr, flush=True)
             return None
 
-    def output_dir(self, nickname: str | None) -> Path:
+    def _name_parts(self, nickname: str | None) -> list[str]:
+        """输出目录/文件名的公共前缀片段：平台_频道标识[_昵称]。"""
         parts = [f"{self.platform}_{self.identifier}"]
         if nickname:
             safe = sanitize_path_part(nickname)
             if safe and safe != self.identifier:
                 parts.append(safe)
-        return self.recordings_root / "_".join(parts)
+        return parts
 
-    def _record(self, out_dir: Path, log_dir: Path, stream_url: str) -> None:
-        prefix = f"{self.platform}_{self.identifier}"
+    def output_dir(self, nickname: str | None) -> Path:
+        return self.recordings_root / "_".join(self._name_parts(nickname))
+
+    def _record(
+        self,
+        out_dir: Path,
+        log_dir: Path,
+        stream_url: str,
+        nickname: str | None = None,
+    ) -> None:
+        prefix = "_".join(self._name_parts(nickname))
         date = datetime.now().strftime("%Y%m%d")
         log_file = log_dir / f"ffmpeg_record_{prefix}_{date}.log"
         output_pattern = str(out_dir / f"{prefix}_%Y%m%d_%H%M%S.mp4")

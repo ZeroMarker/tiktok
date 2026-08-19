@@ -21,6 +21,12 @@ class TikTokAdapter(BaseAdapter):
     def _extract_identifier(self) -> str:
         return extract_last_segment(self.target)
 
+    def _ytdlp_cookie_args(self) -> list[str]:
+        """yt-dlp 可用的 Cookie 参数（Netscape 文件形式）。"""
+        if self.cookies:
+            return ["--cookies", self.cookies]
+        return []
+
     def detect_stream_url(self) -> str | None:
         # 方法1/2/3：yt-dlp 变体
         urls = (
@@ -35,6 +41,7 @@ class TikTokAdapter(BaseAdapter):
                         "--no-warnings",
                         "-f", "b[ext=flv]/best",
                         *extra,
+                        *self._ytdlp_cookie_args(),
                         "--get-url",
                         url,
                     ]
@@ -55,6 +62,7 @@ class TikTokAdapter(BaseAdapter):
                     "--no-warnings",
                     "--skip-download",
                     "--print", f"%({field})s",
+                    *self._ytdlp_cookie_args(),
                     profile,
                 ]
             )

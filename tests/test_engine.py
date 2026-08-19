@@ -23,6 +23,14 @@ class SanitizeTest(unittest.TestCase):
     def test_truncates_to_120(self):
         self.assertEqual(len(sanitize_path_part("x" * 500)), 120)
 
+    def test_keeps_unicode_nickname(self):
+        # 中文/日文/emoji 昵称应保留（路径与文件名均支持）
+        self.assertEqual(sanitize_path_part("エミリ"), "エミリ")
+        self.assertEqual(sanitize_path_part("张三 🎀"), "张三_🎀")
+        # 控制字符仍被剔除，空白转下划线
+        self.assertEqual(sanitize_path_part("a\x1fb"), "ab")
+        self.assertEqual(sanitize_path_part(" a  b "), "a_b")
+
 
 class ExtractSegmentTest(unittest.TestCase):
     def test_url_variants(self):
@@ -74,11 +82,24 @@ class OutputDirTest(unittest.TestCase):
     def test_output_dir_layout(self):
         engine = Engine("tiktok", "emiri.okazaki", "/tmp/rec", detect_interval=1, break_seconds=1)
         self.assertEqual(engine.output_dir(None), Path("/tmp/rec/tiktok_emiri.okazaki"))
-        self.assertEqual(engine.output_dir("エミリ"), Path("/tmp/rec/tiktok_emiri.okazaki"))
+        # 昵称保留并拼进目录名
+        self.assertEqual(engine.output_dir("エミリ"), Path("/tmp/rec/tiktok_emiri.okazaki_エミリ"))
 
     def test_output_dir_with_nickname(self):
         engine = Engine("soop", "player", "/tmp/rec", detect_interval=1, break_seconds=1)
         self.assertEqual(engine.output_dir("Nic Name"), Path("/tmp/rec/soop_player_Nic_Name"))
+
+    def test_name_parts(self):
+        engine = Engine("tiktok", "emiri.okazaki", "/tmp/rec", detect_interval=1, break_seconds=1)
+        self.assertEqual(engine._name_parts(None), ["tiktok_emiri.okazaki"])
+        self.assertEqual(engine._name_parts("エミリ"), ["tiktok_emiri.okazaki", "エミリ"])
+        # 昵称与频道标识相同（或清洗后为空）时不重复拼接
+        self.assertEqual(engine._name_parts("emiri.okazaki"), ["tiktok_emiri.okazaki"])
+
+    def test_record_prefix_includes_nickname(self):
+        engine = Engine("soop", "player", "/tmp/rec", detect_interval=1, break_seconds=1)
+        self.assertEqual("_".join(engine._name_parts(None)), "soop_player")
+        self.assertEqual("_".join(engine._name_parts("Nic Name")), "soop_player_Nic_Name")
 
 
 if __name__ == "__main__":
