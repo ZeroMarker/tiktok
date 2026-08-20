@@ -164,6 +164,21 @@ class WebUIHelpersTest(unittest.TestCase):
         self.assertEqual(mocked_run.call_count, 2)
         self.assertEqual([job["target"] for job in jobs], ["one", "two"])
 
+    def test_list_jobs_handles_unset_numeric_properties(self):
+        listed = CompletedProcess([], 0, stdout=(
+            "livestream-rec-tiktok-one.service loaded inactive dead one\n"
+        ), stderr="")
+        shown = CompletedProcess([], 0, stdout=(
+            "Id=livestream-rec-tiktok-one.service\nActiveState=inactive\nSubState=dead\n"
+            "Description=Live recorder: tiktok one\nMainPID=[not set]\n"
+            "MemoryCurrent=[not set]\nNRestarts=[not set]\n"
+        ), stderr="")
+        with patch.object(app, "run", side_effect=[listed, shown]):
+            jobs = app.list_jobs()
+        self.assertEqual(jobs[0]["pid"], 0)
+        self.assertEqual(jobs[0]["memory"], 0)
+        self.assertEqual(jobs[0]["restarts"], 0)
+
     def test_list_files_search_and_dirs(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

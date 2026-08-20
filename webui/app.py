@@ -59,6 +59,14 @@ def unit_name(platform: str, target: str) -> str:
     return f"livestream-rec-{platform}-{readable}-{digest}.service"
 
 
+def _parse_int(value: object, default: int = 0) -> int:
+    """Parse optional numeric systemd properties without breaking the API."""
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return default
+
+
 def list_jobs() -> list[dict[str, object]]:
     result = run(
         [SYSTEMCTL, "list-units", "livestream-rec-*.service", "--all", "--no-legend", "--plain"],
@@ -87,9 +95,9 @@ def list_jobs() -> list[dict[str, object]]:
                 "started": values.get("ExecMainStartTimestamp", ""),
                 "platform": match.group(1) if match else "unknown",
                 "target": match.group(2) if match else description,
-                "pid": int(values.get("MainPID", "0") or 0),
-                "memory": int(values.get("MemoryCurrent", "0") or 0),
-                "restarts": int(values.get("NRestarts", "0") or 0),
+                "pid": _parse_int(values.get("MainPID")),
+                "memory": _parse_int(values.get("MemoryCurrent")),
+                "restarts": _parse_int(values.get("NRestarts")),
             }
         )
     return jobs
