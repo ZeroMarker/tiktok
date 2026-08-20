@@ -66,11 +66,38 @@ LIVE_WEBUI_PORT=8766
 RECORDINGS_DIR=/root/tiktok/recordings
 ```
 
-认证已移除：后端不再校验令牌，页面可直接打开。请仅在内网、VPN 或带访问控制的反代后使用；如需恢复认证，在 `webui/app.py` 的 `Handler.authenticated()` 中启用校验，并在此重新设置 `LIVE_WEBUI_TOKEN`。修改配置后执行：
+后端不校验令牌，因此必须保持监听回环地址，并仅在内网、VPN 或带访问控制的反向代理后使用。修改配置后执行：
 
 ```bash
 sudo systemctl restart livestream-webui
 ```
+
+### Caddy 反向代理
+
+真实的 Caddy 配置由服务器上的 `/etc/caddy/Caddyfile` 管理，本仓库不会安装或覆盖它。下面是仅代理 WebUI 的最小示例；公开部署时不要删除 `basicauth`：
+
+```caddyfile
+example.com {
+    redir /tiktok /tiktok/ 308
+
+    handle_path /tiktok/* {
+        basicauth {
+            admin <PASSWORD_HASH>
+        }
+        reverse_proxy 127.0.0.1:8766
+    }
+}
+```
+
+使用 Caddy 生成密码哈希并替换 `<PASSWORD_HASH>`，不要把明文密码写入配置或仓库：
+
+```bash
+caddy hash-password --plaintext '替换为高强度密码'
+sudo caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+sudo systemctl reload caddy
+```
+
+如果在站点级配置 `basicauth`，它会保护该站点的全部子路径；放在 `handle_path /tiktok/*` 内则只保护 WebUI。
 
 `RECORDINGS_DIR` 可以指向仓库外的磁盘。使用自定义目录时，需要先创建目录，并同步调整 systemd unit 的 `ReadWritePaths`，否则 `ProtectSystem=strict` 会阻止服务写入：
 

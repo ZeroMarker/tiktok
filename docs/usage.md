@@ -212,9 +212,9 @@ journalctl -u '<任务名称>' -f
 ssh -L 8765:127.0.0.1:8766 <server>
 ```
 
-浏览器可直接打开 `https://20070809.xyz/tiktok/`。域名根路径继续转发 OpenList，只有 `/tiktok/` 子路径进入 WebUI。
+浏览器可打开 `https://20070809.xyz/tiktok/`。域名根路径继续转发其他服务，只有 `/tiktok/` 子路径进入 WebUI。
 
-WebUI 已移除访问认证：页面无需令牌即可直接使用。仅建议在内网、VPN 或带访问控制的网关后部署。
+WebUI 后端没有应用层认证；当前公网入口由站点级 Caddy Basic Auth 保护。不要直接对外开放后端端口。
 
 WebUI 的“最近文件”和磁盘统计均读取 `RECORDINGS_DIR`。修改录像目录后必须重启服务。
 
