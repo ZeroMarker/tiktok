@@ -111,6 +111,16 @@ class WebUIHTTPTest(unittest.TestCase):
             handler.do_GET()
             self.assertEqual(handler.wfile.getvalue().split(b"\r\n")[0], b"HTTP/1.1 200 OK")
 
+    def test_dynamic_values_are_not_interpolated_into_inline_handlers(self):
+        index = app.INDEX_FILE.read_text(encoding="utf-8")
+        self.assertNotIn('onclick="showLogs(\'', index)
+        self.assertNotIn('onclick="toggleDir(\'', index)
+        self.assertNotIn('onclick="askDelete(\'', index)
+        self.assertIn('data-job-action="logs"', index)
+        self.assertIn('data-file-action="toggle-dir"', index)
+        self.assertIn('data-file-action="delete"', index)
+        self.assertIn("function attr(s)", index)
+
 
 class WebUIHelpersTest(unittest.TestCase):
     def test_unit_name_is_stable_and_safe(self):
