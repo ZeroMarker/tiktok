@@ -54,26 +54,28 @@ class TikTokAdapter(BaseAdapter):
         return get_stream_url(self.identifier)
 
     def get_nickname(self) -> str | None:
-        # 优先：curl_cffi + 可选 Cookie 解析显示昵称（更稳定）
+        # 优先：curl_cffi + 可选 Cookie 解析显示昵称（更稳定）。
+        # 即使显示名恰好等于 handle（昵称=slug）也是合法昵称，直接返回。
         nick = extract_nickname(self.identifier, cookies=self.cookies)
         if nick:
             return nick
 
-        # 兜底：yt-dlp（带 impersonate + Cookie 提高成功率）
+        # 兜底：yt-dlp（带 impersonate + Cookie）。
+        # 对 TikTok，%(channel)s 才是显示昵称；%(uploader)s 只会返回 handle
+        # （对每个账号都恒等于 identifier，无信息量），故只取 channel。
         profile = f"https://www.tiktok.com/@{self.identifier}"
-        for field in ("uploader", "channel"):
-            value = self.run_capture(
-                [
-                    "yt-dlp",
-                    "--flat-playlist",
-                    "--no-warnings",
-                    "--skip-download",
-                    "--impersonate", "chrome",
-                    "--print", f"%({field})s",
-                    *self._ytdlp_cookie_args(),
-                    profile,
-                ]
-            )
-            if value and value != "NA":
-                return value
+        value = self.run_capture(
+            [
+                "yt-dlp",
+                "--flat-playlist",
+                "--no-warnings",
+                "--skip-download",
+                "--impersonate", "chrome",
+                "--print", "%(channel)s",
+                *self._ytdlp_cookie_args(),
+                profile,
+            ]
+        )
+        if value and value != "NA":
+            return value
         return None

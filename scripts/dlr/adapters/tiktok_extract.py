@@ -29,6 +29,7 @@ import json
 import re
 import subprocess
 import sys
+import time
 
 
 def get_room_id_from_sigi(text: str) -> tuple[str | None, int]:
@@ -160,12 +161,34 @@ def _try_ytdlp_fallback(username: str) -> str | None:
     return None
 
 
-def get_nickname(username: str, cookies: str | None = None) -> str | None:
+def _find_nickname(scope: dict) -> str | None:
+    """在 __DEFAULT_SCOPE__ 各命名空间里找 userInfo.user.nickname。"""
+    for value in scope.values():
+        if not isinstance(value, dict):
+            continue
+        ui = value.get("userInfo") or {}
+        if not isinstance(ui, dict):
+            continue
+        user = ui.get("user") or {}
+        if not isinstance(user, dict):
+            continue
+        nick = user.get("nickname")
+        if isinstance(nick, str) and nick.strip():
+            return nick.strip()
+    return None
+
+
+def get_nickname(
+    username: str, cookies: str | None = None, attempts: int = 3
+) -> str | None:
     """从 profile 页的 __UNIVERSAL_DATA_FOR_REHYDRATION__ 解析显示昵称。
 
     部分主播的昵称必须是显示名（如 emiri.okazaki → 丘咲エミリ 本人），
     而 yt-dlp 只能拿到 handle 且不稳定；此函数用 curl_cffi + 可选 Cookie
     直接解析页面 JSON。拿不到返回 None。
+
+    TikTok 对 profile 页有概率性风控（同账号同 Cookie 偶发返回无数据页），
+    故短间隔重试若干次，命中一个成功响应即可。
     """
     try:
         from curl_cffi import requests
@@ -189,38 +212,41 @@ def get_nickname(username: str, cookies: str | None = None) -> str | None:
         except OSError:
             pass
 
-    try:
-        r = session.get(
-            f"https://www.tiktok.com/@{username}", impersonate="chrome131", timeout=20
+    for attempt in range(attempts):
+        try:
+            r = session.get(
+                f"https://www.tiktok.com/@{username}",
+                impersonate="chrome131",
+                timeout=20,
+            )
+            text = r.text
+        except Exception:
+            if attempt + 1 < attempts:
+                time.sleep(1)
+            continue
+
+        match = re.search(
+            r'<script[^>]*id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>(.*?)</script>',
+            text,
+            re.DOTALL,
         )
-    except Exception:
-        return None
+        if not match:
+            if attempt + 1 < attempts:
+                time.sleep(1)
+            continue
+        try:
+            data = json.loads(match.group(1))
+        except ValueError:
+            if attempt + 1 < attempts:
+                time.sleep(1)
+            continue
 
-    match = re.search(
-        r'<script[^>]*id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>(.*?)</script>',
-        r.text,
-        re.DOTALL,
-    )
-    if not match:
-        return None
-    try:
-        data = json.loads(match.group(1))
-    except ValueError:
-        return None
-
-    scope = data.get("__DEFAULT_SCOPE__", {}) or {}
-    for value in scope.values():
-        if not isinstance(value, dict):
-            continue
-        ui = value.get("userInfo") or {}
-        if not isinstance(ui, dict):
-            continue
-        user = ui.get("user") or {}
-        if not isinstance(user, dict):
-            continue
-        nick = user.get("nickname")
-        if isinstance(nick, str) and nick.strip():
-            return nick.strip()
+        scope = data.get("__DEFAULT_SCOPE__", {}) or {}
+        nick = _find_nickname(scope)
+        if nick:
+            return nick
+        if attempt + 1 < attempts:
+            time.sleep(1)
     return None
 
 

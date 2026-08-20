@@ -10,6 +10,7 @@ import re
 import signal
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -45,12 +46,14 @@ class Engine:
         segment_seconds: int = 600,
         detect_interval: int = 60,
         break_seconds: int = 10,
+        dir_watch_interval: int = 3,
     ) -> None:
         self.platform = platform
         self.recordings_root = Path(recordings_dir).expanduser().resolve()
         self.segment_seconds = segment_seconds
         self.detect_interval = detect_interval
         self.break_seconds = break_seconds
+        self.dir_watch_interval = dir_watch_interval
 
         self.adapter = load_adapter(
             platform, target, cookies=cookies, cookie_header=cookie_header
@@ -165,6 +168,28 @@ class Engine:
         self.out_dir = new_dir
         print(f"补获取到主播昵称：{nickname}，新输出目录：{self.out_dir}", flush=True)
 
+    # ---- 目录健壮性：输出目录被删除时自动重建 ----
+
+    @staticmethod
+    def _ensure_dir(path: Path) -> None:
+        """确保目录存在（含父目录）。目录可能被外部清理（如 WebUI 删除/手动删空目录）。"""
+        if not path.is_dir():
+            path.mkdir(parents=True, exist_ok=True)
+
+    def _watch_dir(self, path: Path, stop: threading.Event) -> None:
+        """后台守护线程：录制期间定期检查输出目录，被删则立即重建。
+
+        删除目录不影响已打开的分段文件句柄，但会让下一次分段写盘失败；
+        这里在 ffmpeg 写下一个分段前把目录补回来，保证整场录制不中断。
+        """
+        while not stop.wait(self.dir_watch_interval):
+            try:
+                if not path.is_dir():
+                    path.mkdir(parents=True, exist_ok=True)
+                    print(f"检测到输出目录被删除，已自动重建：{path}", flush=True)
+            except Exception as exc:
+                print(f"重建输出目录失败：{exc}", file=sys.stderr, flush=True)
+
     def _name_parts(self, nickname: str | None) -> list[str]:
         """输出目录/文件名的公共前缀片段：平台_频道标识[_昵称]。"""
         parts = [f"{self.platform}_{self.identifier}"]
@@ -188,6 +213,17 @@ class Engine:
         date = datetime.now().strftime("%Y%m%d")
         log_file = log_dir / f"ffmpeg_record_{prefix}_{date}.log"
         output_pattern = str(out_dir / f"{prefix}_%Y%m%d_%H%M%S.mp4")
+
+        # 健壮性：目录可能在循环等待期间被外部删除，启动前再次确保存在；
+        # 任一目录创建失败则放弃本回合，由外层循环重试，不中断监控。
+        try:
+            self._ensure_dir(out_dir)
+            self._ensure_dir(log_dir)
+        except Exception as exc:
+            print(
+                f"创建输出/日志目录失败，本轮回合放弃：{exc}", file=sys.stderr, flush=True
+            )
+            return
 
         cmd = [
             "ffmpeg",
@@ -215,10 +251,30 @@ class Engine:
             output_pattern,
         ]
 
-        with open(log_file, "ab") as log_fh:
-            proc = subprocess.Popen(cmd, stdout=log_fh, stderr=log_fh)
-        self.ffmpeg_proc = proc
-        rc = proc.wait()
-        self.ffmpeg_proc = None
+        # 录制全程由守护线程盯着输出目录：中途被删也能在下个分段前重建。
+        stop = threading.Event()
+        watcher = threading.Thread(
+            target=self._watch_dir,
+            args=(out_dir, stop),
+            name=f"dirwatch-{self.identifier}",
+            daemon=True,
+        )
+        watcher.start()
+
+        proc: subprocess.Popen | None = None
+        try:
+            with open(log_file, "ab") as log_fh:
+                proc = subprocess.Popen(cmd, stdout=log_fh, stderr=log_fh)
+            self.ffmpeg_proc = proc
+            rc = proc.wait()
+        except Exception as exc:
+            # 启动或运行期的异常（如日志文件无法打开）不应压垮监控循环
+            print(f"录制回合异常：{exc}，即将重试...", file=sys.stderr, flush=True)
+            rc = -1
+        finally:
+            stop.set()
+            watcher.join(timeout=self.dir_watch_interval + 1)
+            self.ffmpeg_proc = None
+
         if rc != 0:
             print(f"ffmpeg 异常退出（rc={rc}，源可能已断），即将重试...", flush=True)
