@@ -2,7 +2,28 @@
 
 本项目按平台和用途组织代码，根目录只保留项目入口、说明和跨平台脚本。
 
-## 统一录制引擎（核心）
+## Rust 版（rust-rewrite 分支）
+
+```text
+Cargo.toml                # workspace（crates/dlr-core + crates/dlr-desktop）
+crates/
+├── dlr-core/
+│   ├── src/
+│   │   ├── adapter.rs    # 平台适配器：yt-dlp 链 + TikTok webcast 兜底
+│   │   ├── engine.rs     # 统一录制循环：检测、ffmpeg 分段、优雅停止、目录自愈
+│   │   ├── platform.rs   # 平台枚举与每平台配置（referer/格式/bsf_aac）
+│   │   ├── tiktok.rs     # TikTok 页面解析 + webcast API 兜底取流
+│   │   ├── util.rs       # 路径清洗、频道标识提取
+│   │   ├── ytdlp.rs      # yt-dlp 子进程封装
+│   │   └── main.rs       # CLI：dlr <platform> <target> [选项]
+│   └── tests/engine.rs   # 集成测试：本地 HTTP 流 + 分段/停止/自愈/重试
+└── dlr-desktop/
+    └── src/main.rs       # egui 桌面端：任务管理、实时日志、录制文件、设置
+```
+
+构建与使用见 [README](../README.md#rust-版本本分支新增)。
+
+## Python 统一录制引擎
 
 所有平台的无人值守录制统一由 Python 引擎实现，平台差异收敛为"适配器"：
 

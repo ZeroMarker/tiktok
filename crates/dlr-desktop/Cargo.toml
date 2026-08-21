@@ -1,0 +1,19 @@
+[package]
+name = "dlr-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "dlr-desktop"
+path = "src/main.rs"
+
+[dependencies]
+dlr-core = { path = "../dlr-core" }
+eframe = "0.36"
+parking_lot = "0.12"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+ab_glyph = "0.2"

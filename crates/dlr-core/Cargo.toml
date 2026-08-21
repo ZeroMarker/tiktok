@@ -1,0 +1,23 @@
+[package]
+name = "dlr-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "dlr_core"
+path = "src/lib.rs"
+
+[[bin]]
+name = "dlr"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+ctrlc = "3"
+libc = "0.2"
+parking_lot = "0.12"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ureq = "3"

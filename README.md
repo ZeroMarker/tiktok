@@ -2,6 +2,9 @@
 
 用于无人值守录制直播，或将直播源转推到 Bilibili。
 
+本分支（`rust-rewrite`）以 Rust 重写统一录制引擎，并新增桌面端管理功能；
+Python 版 WebUI/转推脚本仍保留可用，详见下文「Rust 版」。
+
 ## 支持范围
 
 - TikTok：本地分段录制、转推 Bilibili
@@ -11,6 +14,41 @@
 - YouTube：本地分段录制、转推 Bilibili
 - CHZZK：本地分段录制
 - Twitch：转推 Bilibili
+
+## Rust 版（本分支新增）
+
+Rust 工作区位于 `crates/`，覆盖 Python `scripts/dlr.py` 的全部录制能力：
+
+```text
+crates/
+├── dlr-core/     # 统一引擎：检测循环、ffmpeg 分段、优雅停止、目录自愈
+│                 #   平台适配器：tiktok / douyin / youtube / kick / chzzk / soop
+│                 #   CLI 入口（dlr 二进制）
+└── dlr-desktop/  # egui 桌面端（dlr-desktop 二进制）：任务管理 + 日志 + 录制文件
+```
+
+构建：
+
+```bash
+cargo build --release
+# 产物：target/release/dlr（CLI）、target/release/dlr-desktop（桌面端）
+```
+
+CLI 与 Python 版用法一致：
+
+```bash
+target/release/dlr tiktok <username> [--cookies cookies.txt] \
+  [--recordings-dir recordings] [--segment-seconds 600]
+target/release/dlr youtube <handle|直播URL>
+```
+
+桌面端（新增功能）：进程内线程运行引擎，不依赖 systemd，可直接在桌面机使用。
+提供任务添加/停止/删除、实时状态与日志、录制文件浏览/删除、参数设置
+（录制目录、分段时长、重试间隔、Cookie）。设置持久化在
+`~/.config/dlr-desktop/config.json`。中文界面字体自动从系统
+CJK 字体加载（如 Noto Sans CJK / 文泉驿）。
+
+Python 引擎与 WebUI 不受影响，仍按下文使用。
 
 ## 快速开始
 
