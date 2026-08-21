@@ -121,6 +121,14 @@ class WebUIHTTPTest(unittest.TestCase):
         self.assertIn('data-file-action="delete"', index)
         self.assertIn("function attr(s)", index)
 
+    def test_webui_has_persistent_snapshot_and_refresh_feedback(self):
+        index = app.INDEX_FILE.read_text(encoding="utf-8")
+        self.assertIn("livestream-webui-snapshot-v1", index)
+        self.assertIn("localStorage.setItem", index)
+        self.assertIn('id="sync-status"', index)
+        self.assertIn('id="refresh-btn"', index)
+        self.assertIn("new AbortController()", index)
+
 
 class WebUIHelpersTest(unittest.TestCase):
     def test_unit_name_is_stable_and_safe(self):
