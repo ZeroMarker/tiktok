@@ -90,25 +90,36 @@ class LiveURLTest(unittest.TestCase):
 class OutputDirTest(unittest.TestCase):
     def test_output_dir_layout(self):
         engine = Engine("tiktok", "emiri.okazaki", "/tmp/rec", detect_interval=1, break_seconds=1)
-        self.assertEqual(engine.output_dir(None), Path("/tmp/rec/tiktok_emiri.okazaki"))
+        self.assertEqual(engine.output_dir(None), Path("/tmp/rec/tiktok/emiri.okazaki"))
         # 昵称保留并拼进目录名
-        self.assertEqual(engine.output_dir("エミリ"), Path("/tmp/rec/tiktok_emiri.okazaki_エミリ"))
+        self.assertEqual(engine.output_dir("エミリ"), Path("/tmp/rec/tiktok/emiri.okazaki_エミリ"))
 
     def test_output_dir_with_nickname(self):
         engine = Engine("soop", "player", "/tmp/rec", detect_interval=1, break_seconds=1)
-        self.assertEqual(engine.output_dir("Nic Name"), Path("/tmp/rec/soop_player_Nic_Name"))
+        self.assertEqual(engine.output_dir("Nic Name"), Path("/tmp/rec/soop/player_Nic_Name"))
 
     def test_name_parts(self):
         engine = Engine("tiktok", "emiri.okazaki", "/tmp/rec", detect_interval=1, break_seconds=1)
-        self.assertEqual(engine._name_parts(None), ["tiktok_emiri.okazaki"])
-        self.assertEqual(engine._name_parts("エミリ"), ["tiktok_emiri.okazaki", "エミリ"])
+        self.assertEqual(engine._name_parts(None), ["emiri.okazaki"])
+        self.assertEqual(engine._name_parts("エミリ"), ["emiri.okazaki", "エミリ"])
         # 昵称与频道标识相同（或清洗后为空）时不重复拼接
-        self.assertEqual(engine._name_parts("emiri.okazaki"), ["tiktok_emiri.okazaki"])
+        self.assertEqual(engine._name_parts("emiri.okazaki"), ["emiri.okazaki"])
 
     def test_record_prefix_includes_nickname(self):
         engine = Engine("soop", "player", "/tmp/rec", detect_interval=1, break_seconds=1)
-        self.assertEqual("_".join(engine._name_parts(None)), "soop_player")
-        self.assertEqual("_".join(engine._name_parts("Nic Name")), "soop_player_Nic_Name")
+        self.assertEqual("_".join(engine._name_parts(None)), "player")
+        self.assertEqual("_".join(engine._name_parts("Nic Name")), "player_Nic_Name")
+
+    def test_log_file_separated_by_platform(self):
+        engine = Engine("tiktok", "emiri.okazaki", "/tmp/rec", detect_interval=1, break_seconds=1)
+        self.assertEqual(
+            engine.log_file(Path("/tmp/rec/logs"), "20260823"),
+            Path("/tmp/rec/logs/tiktok/ffmpeg_record_emiri.okazaki_20260823.log"),
+        )
+        self.assertEqual(
+            engine.log_file(Path("/tmp/rec/logs"), "20260823", "エミリ"),
+            Path("/tmp/rec/logs/tiktok/ffmpeg_record_emiri.okazaki_エミリ_20260823.log"),
+        )
 
     def test_refresh_nickname_updates_dir_once(self):
         engine = Engine("soop", "player", "/tmp/rec", detect_interval=1, break_seconds=1)
@@ -117,12 +128,12 @@ class OutputDirTest(unittest.TestCase):
         engine.adapter.get_nickname = lambda: "Nice"
         engine._refresh_nickname()
         self.assertEqual(engine.nickname, "Nice")
-        self.assertEqual(engine.out_dir, Path("/tmp/rec/soop_player_Nice"))
+        self.assertEqual(engine.out_dir, Path("/tmp/rec/soop/player_Nice"))
         # 已拿到昵称后不再重取，也不覆盖
         engine.adapter.get_nickname = lambda: "Other"
         engine._refresh_nickname()
         self.assertEqual(engine.nickname, "Nice")
-        self.assertEqual(engine.out_dir, Path("/tmp/rec/soop_player_Nice"))
+        self.assertEqual(engine.out_dir, Path("/tmp/rec/soop/player_Nice"))
 
     def test_refresh_nickname_noop_when_still_missing(self):
         engine = Engine("soop", "player", "/tmp/rec", detect_interval=1, break_seconds=1)
@@ -233,7 +244,7 @@ class TikTokNicknameSourceTest(unittest.TestCase):
     def test_nickname_equal_slug_dir_deduplicates(self):
         """昵称=slug（如 emma_kusunoki）时输出目录不重复拼后缀。"""
         engine = Engine("tiktok", "emma_kusunoki", "/tmp/rec", detect_interval=1, break_seconds=1)
-        self.assertEqual(engine.output_dir("emma_kusunoki"), Path("/tmp/rec/tiktok_emma_kusunoki"))
+        self.assertEqual(engine.output_dir("emma_kusunoki"), Path("/tmp/rec/tiktok/emma_kusunoki"))
 
 
 class NicknameGuardTest(unittest.TestCase):

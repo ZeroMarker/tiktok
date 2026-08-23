@@ -49,7 +49,7 @@ bash /root/tiktok/tk/record.sh hana_kuraki87
 主循环流程：
 
 ```
-获取主播昵称 → 确定输出目录（user_nickname）
+获取主播昵称 → 确定输出目录（channel[_nickname]）
    ↓
 ┌─────────────────────────────┐
 │ yt-dlp 抓取 FLV 直播流地址    │
@@ -66,18 +66,18 @@ bash /root/tiktok/tk/record.sh hana_kuraki87
 
 ## 4. 输出结构
 
-在**执行脚本时的当前目录**下生成（脚本内含 `cd`，之后相对路径均相对输出目录）：
+在**执行脚本时的当前目录**下生成（默认根目录 `./recordings/`，可用 `RECORDINGS_DIR` 修改）：
 
 ```
-./hana_kuraki87_華夏/                  ← 输出目录：用户名_昵称
-    hana_kuraki87_20260811_183000.mp4  ← 10 分钟一个分段
-    hana_kuraki87_20260811_184000.mp4
-./logs/
-    ffmpeg_record_hana_kuraki87_20260811.log  ← 当日 ffmpeg 日志
+./recordings/tiktok/hana_kuraki87_華夏/          ← 按平台分目录，平台下为 频道标识_昵称
+    hana_kuraki87_華夏_20260811_183000.mp4      ← 10 分钟一个分段（文件名不含平台前缀）
+    hana_kuraki87_華夏_20260811_184000.mp4
+./recordings/logs/tiktok/                       ← ffmpeg 日志按平台分目录
+    ffmpeg_record_hana_kuraki87_華夏_20260811.log  ← 当日 ffmpeg 日志
 ```
 
-- 目录命名失败（没抓到昵称）时退化为 `./<username>`
-- 分段文件名：`<用户名>_<日期>_<起始时间>.mp4`，时间戳从 0 开始
+- 目录命名失败（没抓到昵称）时退化为 `./recordings/tiktok/<username>/`
+- 分段文件名：`<频道标识>[_昵称]_<日期>_<起始时间>.mp4`，时间戳从 0 开始
 
 ## 5. 关键参数说明
 
@@ -185,8 +185,8 @@ python /root/tiktok/scripts/dlr/adapters/tiktok_extract.py <username>
 tmux ls
 
 # 查看某会话日志（确认是否真在录，而非空轮询）
-# 日志在"执行脚本时的当前目录"下的 logs/，例如从 ~/scripts 执行则为 ~/scripts/logs/
-tail -f ./logs/ffmpeg_record_<user>_$(date +%Y%m%d).log
+# 日志在 RECORDINGS_DIR/logs/<平台>/ 下，默认部署为 ./recordings/logs/tiktok/
+tail -f ./recordings/logs/tiktok/ffmpeg_record_<user>_$(date +%Y%m%d).log
 
 # 停止录制
 tmux kill-session -t <session名>

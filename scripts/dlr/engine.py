@@ -191,8 +191,8 @@ class Engine:
                 print(f"重建输出目录失败：{exc}", file=sys.stderr, flush=True)
 
     def _name_parts(self, nickname: str | None) -> list[str]:
-        """输出目录/文件名的公共前缀片段：平台_频道标识[_昵称]。"""
-        parts = [f"{self.platform}_{self.identifier}"]
+        """输出目录/文件名的公共片段：频道标识[_昵称]（平台已作为顶层目录）。"""
+        parts = [self.identifier]
         if nickname:
             safe = sanitize_path_part(nickname)
             if safe and safe != self.identifier:
@@ -200,7 +200,12 @@ class Engine:
         return parts
 
     def output_dir(self, nickname: str | None) -> Path:
-        return self.recordings_root / "_".join(self._name_parts(nickname))
+        return self.recordings_root / self.platform / "_".join(self._name_parts(nickname))
+
+    def log_file(self, log_dir: Path, date: str, nickname: str | None = None) -> Path:
+        """ffmpeg 日志路径：logs/<平台>/ffmpeg_record_<频道标识>[_昵称]_<日期>.log。"""
+        prefix = "_".join(self._name_parts(nickname))
+        return log_dir / self.platform / f"ffmpeg_record_{prefix}_{date}.log"
 
     def _record(
         self,
@@ -211,14 +216,14 @@ class Engine:
     ) -> None:
         prefix = "_".join(self._name_parts(nickname))
         date = datetime.now().strftime("%Y%m%d")
-        log_file = log_dir / f"ffmpeg_record_{prefix}_{date}.log"
+        log_file = self.log_file(log_dir, date, nickname)
         output_pattern = str(out_dir / f"{prefix}_%Y%m%d_%H%M%S.mp4")
 
         # 健壮性：目录可能在循环等待期间被外部删除，启动前再次确保存在；
         # 任一目录创建失败则放弃本回合，由外层循环重试，不中断监控。
         try:
             self._ensure_dir(out_dir)
-            self._ensure_dir(log_dir)
+            self._ensure_dir(log_file.parent)
         except Exception as exc:
             print(
                 f"创建输出/日志目录失败，本轮回合放弃：{exc}", file=sys.stderr, flush=True

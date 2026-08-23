@@ -50,15 +50,25 @@ exec python3 "${SCRIPT_DIR}/../scripts/dlr.py" <platform> "$@"
 ## 运行产物
 
 录制输出统一到 `RECORDINGS_DIR`（systemd 环境默认 `/home/ubuntu/tiktok/recordings`，
-手动运行默认 `./recordings`），按 `{platform}_{channel}[_{nickname}]/` 建目录：
+手动运行默认 `./recordings`），按平台分目录，平台下按 `{channel}[_{nickname}]/` 建频道目录：
 
 ```text
 recordings/
-├── tiktok_emiri.okazaki/
-├── soop_playerid_Nickname/
-├── youtube_ChannelName/
-└── logs/                  # ffmpeg 运行日志
+├── tiktok/
+│   ├── emiri.okazaki/
+│   └── emiri.okazaki_エミリ/
+├── soop/
+│   └── playerid_Nickname/
+├── youtube/
+│   └── ChannelName/
+└── logs/                      # ffmpeg 运行日志（按平台分目录）
+    ├── tiktok/
+    │   └── ffmpeg_record_emiri.okazaki_20260823.log
+    ├── soop/
+    └── youtube/
 ```
+
+分段文件名 `{channel}[_{nickname}]_%Y%m%d_%H%M%S.mp4`，不含平台前缀（平台已在目录层级体现）。
 
 WebUI 的最近文件列表扫描 `RECORDINGS_DIR`，不会遍历整个仓库。仓库已忽略
 `recordings/`、`logs/`、`*.mp4` 等运行产物。
