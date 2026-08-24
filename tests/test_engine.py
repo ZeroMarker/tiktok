@@ -14,7 +14,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
 from dlr.adapters import load_adapter  # noqa: E402
 from dlr.adapters.base import extract_last_segment  # noqa: E402
-from dlr.adapters.tiktok_extract import _find_nickname
+from dlr.adapters.tiktok_extract import _find_nickname, _find_nickname_from_sigi
 from dlr.engine import Engine, sanitize_path_part  # noqa: E402
 
 from unittest import mock  # noqa: E402
@@ -254,6 +254,37 @@ class NicknameGuardTest(unittest.TestCase):
         scope = {"webapp.user-detail": {"userInfo": {"user": {"nickname": "丘咲エミリ 本人"}}}}
         self.assertEqual(_find_nickname(scope), "丘咲エミリ 本人")
         self.assertIsNone(_find_nickname({"a": {}}))
+
+    def test_sigi_live_room_user(self):
+        """直播页 SIGI_STATE：liveRoomUserInfo.user 是频道本人时取昵称。"""
+        sigi = {
+            "LiveRoom": {
+                "liveRoomUserInfo": {
+                    "user": {"uniqueId": "emiri.okazaki", "nickname": "丘咲エミリ 本人"},
+                }
+            }
+        }
+        self.assertEqual(_find_nickname_from_sigi(sigi, "emiri.okazaki"), "丘咲エミリ 本人")
+
+    def test_sigi_user_module_match(self):
+        """liveRoomUserInfo 缺失时，从 UserModule 按 uniqueId 匹配频道用户。"""
+        sigi = {
+            "UserModule": {
+                "users": {
+                    "1": {"uniqueId": "other.user", "nickname": "别人"},
+                    "2": {"uniqueId": "emiri.okazaki", "nickname": "丘咲エミリ 本人"},
+                }
+            }
+        }
+        self.assertEqual(_find_nickname_from_sigi(sigi, "emiri.okazaki"), "丘咲エミリ 本人")
+
+    def test_sigi_no_matching_user(self):
+        """页面里没有该频道用户时返回 None，不误取他人昵称。"""
+        sigi = {
+            "UserModule": {"users": {"1": {"uniqueId": "other.user", "nickname": "别人"}}}
+        }
+        self.assertIsNone(_find_nickname_from_sigi(sigi, "emiri.okazaki"))
+        self.assertIsNone(_find_nickname_from_sigi({}, "emiri.okazaki"))
 
     def test_refresh_accepts_nickname_equal_slug(self):
         """昵称=slug（如 emma_kusunoki）是合法昵称，应接受并终止补获取（不再每轮重试）。"""

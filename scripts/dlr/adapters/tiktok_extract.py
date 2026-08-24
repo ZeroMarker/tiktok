@@ -178,17 +178,42 @@ def _find_nickname(scope: dict) -> str | None:
     return None
 
 
+def _find_nickname_from_sigi(sigi: dict, username: str) -> str | None:
+    """从 SIGI_STATE 取主播显示昵称：优先 liveRoomUserInfo.user（直播页必有），
+    其次 UserModule 中 uniqueId 匹配该频道的用户。"""
+    lru = (sigi.get("LiveRoom") or {}).get("liveRoomUserInfo") or {}
+    user = lru.get("user") or {}
+    nick = user.get("nickname")
+    if (
+        isinstance(nick, str)
+        and nick.strip()
+        and user.get("uniqueId") == username
+    ):
+        return nick.strip()
+    users = (sigi.get("UserModule") or {}).get("users") or {}
+    for user in users.values():
+        if not isinstance(user, dict):
+            continue
+        if user.get("uniqueId") != username:
+            continue
+        nick = user.get("nickname")
+        if isinstance(nick, str) and nick.strip():
+            return nick.strip()
+    return None
+
+
 def get_nickname(
     username: str, cookies: str | None = None, attempts: int = 3
 ) -> str | None:
-    """从 profile 页的 __UNIVERSAL_DATA_FOR_REHYDRATION__ 解析显示昵称。
+    """从直播页（/@user/live）解析显示昵称，优先 SIGI_STATE，其次 universal data。
 
     部分主播的昵称必须是显示名（如 emiri.okazaki → 丘咲エミリ 本人），
     而 yt-dlp 只能拿到 handle 且不稳定；此函数用 curl_cffi + 可选 Cookie
     直接解析页面 JSON。拿不到返回 None。
 
-    TikTok 对 profile 页有概率性风控（同账号同 Cookie 偶发返回无数据页），
-    故短间隔重试若干次，命中一个成功响应即可。
+    注意：profile 页（/@user）被 TikTok WAF 概率性拦截（返回无数据挑战页），
+    直播页（/@user/live）通过率高且 SIGI_STATE 含同样的主播信息，故优先抓直播页；
+    仍未命中则短间隔重试若干次。
     """
     try:
         from curl_cffi import requests
@@ -215,7 +240,7 @@ def get_nickname(
     for attempt in range(attempts):
         try:
             r = session.get(
-                f"https://www.tiktok.com/@{username}",
+                f"https://www.tiktok.com/@{username}/live",
                 impersonate="chrome131",
                 timeout=20,
             )
@@ -225,26 +250,37 @@ def get_nickname(
                 time.sleep(1)
             continue
 
+        # 优先 SIGI_STATE：直播页标准结构，含 liveRoomUserInfo.user.nickname
+        match = re.search(
+            r'<script id="SIGI_STATE"[^>]*>(.*?)</script>', text, re.DOTALL
+        )
+        if match:
+            try:
+                sigi = json.loads(match.group(1))
+            except ValueError:
+                sigi = None
+            if sigi:
+                nick = _find_nickname_from_sigi(sigi, username)
+                if nick:
+                    return nick
+
+        # 其次 universal data（与旧实现相同的解析路径）
         match = re.search(
             r'<script[^>]*id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>(.*?)</script>',
             text,
             re.DOTALL,
         )
-        if not match:
-            if attempt + 1 < attempts:
-                time.sleep(1)
-            continue
-        try:
-            data = json.loads(match.group(1))
-        except ValueError:
-            if attempt + 1 < attempts:
-                time.sleep(1)
-            continue
+        if match:
+            try:
+                data = json.loads(match.group(1))
+            except ValueError:
+                data = None
+            if data:
+                scope = data.get("__DEFAULT_SCOPE__", {}) or {}
+                nick = _find_nickname(scope)
+                if nick:
+                    return nick
 
-        scope = data.get("__DEFAULT_SCOPE__", {}) or {}
-        nick = _find_nickname(scope)
-        if nick:
-            return nick
         if attempt + 1 < attempts:
             time.sleep(1)
     return None

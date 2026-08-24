@@ -135,6 +135,10 @@ class Engine:
 
             # 只打印去掉签名参数的开头，避免整串 token 进日志
             print(f"  → 成功抓到直播源：{stream_url.split('?')[0]}", flush=True)
+            # 开播前最后补一次昵称：直播已确认时此路径对部分平台更可靠，
+            # 成功则本场录制直接用昵称目录（不影响已开始的检测）。
+            if not self.nickname:
+                self._refresh_nickname()
             print("开始录制...", flush=True)
             self._record(self.out_dir, log_dir, stream_url, self.nickname)
             print(
