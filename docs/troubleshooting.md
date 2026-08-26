@@ -34,6 +34,48 @@ python douyin/get_stream.py <web_rid|抖音号|完整URL> --get-url
 python douyin/get_stream.py <web_rid|抖音号|完整URL> --get-nickname
 ```
 
+## SOOP（Sooplive）订阅直播需要登录
+
+**现象**：`recordings/soop/<频道id>/` 一直为空，日志反复输出「直播未开启 / 抓取失败」，
+但浏览器里主播明明在播。
+
+**根因**：该频道是**会员订阅直播**（SOOP live API 返回 `RESULT=-6`）。yt-dlp 的 soop
+提取器要求登录凭据才能取流，未登录时直接报：
+
+```text
+This channel is streaming for subscribers only. Use --username and --password,
+--netrc-cmd, or --netrc (afreecatv) to provide account credentials
+```
+
+引擎已把该真实错误打印到日志（不再误报「未开播」）。取流命令应能看到同样的原因：
+
+```bash
+yt-dlp --no-warnings -f best --get-url "https://play.sooplive.co.kr/<频道id>"
+```
+
+**解决**：提供 SOOP 账号凭据（三选一），引擎会自动携带：
+
+1. **netrc（推荐）**——在运行用户主目录放 `~/.netrc`（权限 `600`）：
+   ```text
+   machine afreecatv login <SOOP用户ID> password <SOOP密码>
+   ```
+   然后直接 `bash soop/record.sh <频道id>`，引擎自动加 `--netrc`。
+
+2. **环境变量**——设置后启动引擎，自动带 `--username`/`--password`：
+   ```bash
+   export SOOP_USERNAME='<SOOP用户ID>'
+   export SOOP_PASSWORD='<SOOP密码>'
+   bash soop/record.sh <频道id>
+   ```
+
+3. **登录 Cookie**——导出 Netscape 格式的 sooplive 会话 Cookie 后显式传入：
+   ```bash
+   bash soop/record.sh <频道id> --cookies soop-cookies.txt
+   ```
+
+> 注意：会员直播通常还需对主播**订阅/付费**才能观看；仅有普通账号（未订阅该主播）
+> 时可能仍无法取流。凭据不要提交仓库。
+
 ## Bilibili 没有画面或推流失败
 
 检查项：

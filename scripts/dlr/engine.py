@@ -126,10 +126,17 @@ class Engine:
             )
             stream_url = self.adapter.detect_stream_url()
             if not stream_url:
-                print(
-                    f"  → 直播未开启 / 抓取失败，等待 {self.detect_interval} 秒后重试...",
-                    flush=True,
-                )
+                reason = getattr(self.adapter, "last_detect_error", None)
+                if reason:
+                    print(
+                        f"  → 未获取到直播源：{reason}（等待 {self.detect_interval} 秒后重试）",
+                        flush=True,
+                    )
+                else:
+                    print(
+                        f"  → 直播未开启 / 抓取失败，等待 {self.detect_interval} 秒后重试...",
+                        flush=True,
+                    )
                 time.sleep(self.detect_interval)
                 continue
 

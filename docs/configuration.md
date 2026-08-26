@@ -127,3 +127,14 @@ bash douyin/import_cookies.sh chrome ./douyin-cookies.txt
 ```
 
 导出文件会自动设置为仅当前用户可读写，并已被 `.gitignore` 排除。不要提交、分享或写入日志。
+
+## SOOP 凭据
+
+SOOP（Sooplive）的会员订阅直播需要登录才能取流。引擎会自动携带以下任一凭据：
+
+- **netrc**：在运行用户主目录放 `~/.netrc`（权限 `600`），内容为
+  `machine afreecatv login <SOOP用户ID> password <SOOP密码>`，引擎自动加 `--netrc`。
+- **环境变量**：`SOOP_USERNAME` / `SOOP_PASSWORD`，引擎自动带 `--username`/`--password`。
+- **Cookie**：登录后的 Netscape 会话 Cookie，`bash soop/record.sh <id> --cookies file`。
+
+凭据不要提交仓库、写入日志或日志系统。会员直播通常还需对主播订阅/付费才能观看。
