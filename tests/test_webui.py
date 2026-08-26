@@ -139,6 +139,21 @@ class WebUIHelpersTest(unittest.TestCase):
     def test_unit_name_distinguishes_targets(self):
         self.assertNotEqual(app.unit_name("kick", "one"), app.unit_name("kick", "two"))
 
+    def test_start_job_rejects_duplicate_target(self):
+        existing = [{"platform": "tiktok", "target": "@Some.User", "unit": "livestream-rec-tiktok-some-user-abc.service"}]
+        with patch.object(app, "list_jobs", return_value=existing), \
+                patch.object(app, "run") as mocked:
+            with self.assertRaises(ValueError) as ctx:
+                app.start_job({"platform": "tiktok", "target": " @some.user "})
+        self.assertIn("已存在", str(ctx.exception))
+        mocked.assert_not_called()
+
+    def test_start_job_allows_different_case_on_other_platform(self):
+        existing = [{"platform": "tiktok", "target": "@Some.User", "unit": "livestream-rec-tiktok-some-user-abc.service"}]
+        with patch.object(app, "list_jobs", return_value=existing), \
+                patch.object(app, "run", return_value=CompletedProcess([], 0, stdout="", stderr="")):
+            unit = app.start_job({"platform": "kick", "target": "@some.user"})
+        self.assertTrue(unit.startswith("livestream-rec-kick-"))
     def test_recent_files_uses_configured_recordings_directory(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

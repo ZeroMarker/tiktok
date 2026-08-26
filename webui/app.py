@@ -216,6 +216,11 @@ def start_job(data: dict) -> str:
         raise ValueError("不支持的平台")
     if not target or len(target) > 500 or "\x00" in target:
         raise ValueError("频道或直播 URL 无效")
+    # 校验重复：同一平台下相同频道（忽略大小写）不允许重复添加
+    normalized = target.casefold()
+    for job in list_jobs():
+        if job.get("platform") == platform and str(job.get("target", "")).strip().casefold() == normalized:
+            raise ValueError(f"录制任务已存在：{platform} {job.get('target')}，请勿重复添加，如需重跑请直接重启该任务")
 
     script = PROJECT_ROOT / PLATFORMS[platform][0]
     command = ["bash", str(script), target]
