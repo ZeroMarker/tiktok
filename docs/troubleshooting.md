@@ -68,9 +68,11 @@ yt-dlp --no-warnings -f best --get-url "https://play.sooplive.co.kr/<频道id>"
    bash soop/record.sh <频道id>
    ```
 
-3. **登录 Cookie**——导出 Netscape 格式的 sooplive 会话 Cookie 后显式传入：
+3. **登录 Cookie**——把登录后的 Netscape 会话 Cookie 存为 `soop-cookies.txt`
+   （项目根目录，已 gitignore），`soop/record.sh` 检测到会自动附带 `--cookies`：
    ```bash
-   bash soop/record.sh <频道id> --cookies soop-cookies.txt
+   # 存好 soop-cookies.txt 后直接录制即可
+   bash soop/record.sh <频道id>
    ```
 
 > 注意：会员直播通常还需对主播**订阅/付费**才能观看；仅有普通账号（未订阅该主播）
