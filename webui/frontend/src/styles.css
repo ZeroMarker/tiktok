@@ -186,6 +186,8 @@ pre{height:320px}
 
 /* Interaction and accessibility refinements */
 .install{display:inline-flex}
+.head-right .install,.head-right .refresh{height:36px;min-height:36px;display:inline-flex;align-items:center;justify-content:center;white-space:nowrap}
+.head-right .install{min-width:88px}
 .refresh{min-width:58px}
 .status-retry{min-height:28px;padding:4px 9px;border:1px solid currentColor;border-radius:7px;background:transparent;color:inherit;font-size:11px;box-shadow:none}
 .error-banner{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:10px 0;padding:10px 12px;border:1px solid rgba(255,127,141,.28);border-radius:10px;background:rgba(127,38,50,.14);color:#ffb7c0;font-size:12px}
