@@ -3,7 +3,7 @@
     <div class="logo" :style="{ color: logoColor }">{{ (job.platform || "?").slice(0, 2) }}</div>
     <div class="job-main">
       <div class="job-heading">
-        <h3 class="job-title" :title="job.target" @click="$emit('open', job)">{{ job.target }}</h3>
+        <button class="job-title link-button" type="button" :title="job.target" @click="$emit('open', job)">{{ job.target }}</button>
         <span class="platform-tag">{{ platformZh }}</span>
       </div>
       <div class="job-facts">
@@ -17,10 +17,10 @@
       </div>
     </div>
     <div class="actions">
-      <button class="secondary" @click="$emit('open', job)">日志</button>
-      <button class="secondary" @click="copy">复制名称</button>
-      <button class="secondary" @click="$emit('restart', job)">重启</button>
-      <button class="danger" @click="$emit('stop', job)">停止</button>
+      <button class="secondary" type="button" :disabled="pending" @click="$emit('open', job)">日志</button>
+      <button class="secondary optional-action" type="button" :disabled="pending" @click="copy">复制名称</button>
+      <button class="secondary optional-action" type="button" :disabled="pending" @click="$emit('restart', job)">{{ pending && state.pendingAction === 'restart' ? "重启中…" : "重启" }}</button>
+      <button class="danger" type="button" :disabled="pending || !canStop" @click="$emit('stop', job)">{{ pending && state.pendingAction === 'stop' ? "停止中…" : "停止" }}</button>
     </div>
   </article>
 </template>
@@ -34,6 +34,8 @@ import {
   fmtUptime,
 } from "../utils.js";
 import { toast } from "../ui.js";
+import { computed } from "vue";
+import { state } from "../store.js";
 
 const props = defineProps({
   job: { type: Object, required: true },
@@ -43,6 +45,8 @@ defineEmits(["open", "restart", "stop"]);
 
 const platformZh = (PLATFORM_ZH[props.job.platform] || props.job.platform || "—");
 const logoColor = LOGO_COLORS[props.job.platform] || "var(--blue)";
+const pending = computed(() => state.pendingUnit === props.job.unit);
+const canStop = computed(() => props.job.state === "active" || props.job.substate === "deactivating");
 
 async function copy() {
   try {
@@ -57,7 +61,7 @@ async function copy() {
     input.style.opacity = "0";
     document.body.appendChild(input);
     input.select();
-    document.execCommand("copy");
+    if (!document.execCommand("copy")) throw new Error("copy failed");
     input.remove();
     toast("任务名称已复制");
   } catch {

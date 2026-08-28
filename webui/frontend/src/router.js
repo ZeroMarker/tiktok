@@ -6,7 +6,13 @@ function parse() {
   const parts = h.split("/").filter(Boolean);
   if (parts.length === 0) return { name: "overview" };
   if (parts[0] === "tasks") {
-    if (parts[1]) return { name: "task", unit: decodeURIComponent(parts[1]) };
+    if (parts[1]) {
+      try {
+        return { name: "task", unit: decodeURIComponent(parts[1]) };
+      } catch {
+        return { name: "tasks" };
+      }
+    }
     return { name: "tasks" };
   }
   if (parts[0] === "library") return { name: "library" };

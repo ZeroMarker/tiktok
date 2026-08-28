@@ -1,5 +1,5 @@
 <template>
-  <main class="shell">
+  <main class="shell" :class="{ offline: state.offline, degraded: state.degraded }">
     <header>
       <div class="brand">
         <div class="brand-mark" aria-hidden="true"></div>
@@ -10,11 +10,14 @@
         </div>
       </div>
       <div class="head-right">
-        <div class="status-pill">
-          <div class="online"><i class="dot"></i><span>{{ connText }}</span></div>
+        <div class="status-pill" :title="statusText">
+          <div class="online"><i class="dot" aria-hidden="true"></i><span>{{ connText }}</span></div>
         </div>
-        <div class="clock-pill"><span>{{ clock }}</span></div>
+        <div class="clock-pill" :title="`本地时间 ${clock}`"><span>{{ clock }}</span></div>
         <button v-if="installable" id="install-btn" class="secondary install" @click="install">安装应用</button>
+        <button class="secondary refresh" :disabled="state.busy" :aria-busy="state.busy" @click="refreshAll">
+          {{ state.busy ? "同步中…" : "刷新" }}
+        </button>
       </div>
     </header>
 
@@ -24,26 +27,37 @@
         :key="item.path"
         class="nav-item"
         :class="{ active: isActive(item) }"
+        type="button"
+        :aria-current="isActive(item) ? 'page' : undefined"
         @click="navigate(item.path)"
       >
         {{ item.label }}
       </button>
     </nav>
 
-    <div class="statusline" :class="{ warn: state.degraded || state.offline }">
+    <div class="statusline" :class="{ warn: state.degraded || state.offline }" role="status" aria-live="polite">
       <span>{{ statusText }}</span>
       <span v-if="state.degraded" class="b-bad">服务异常</span>
+      <button v-if="state.degraded || state.offline" class="status-retry" type="button" @click="refreshAll">重试</button>
+    </div>
+
+    <div v-if="state.errors.jobs || state.errors.overview || state.errors.files" class="error-banner" role="alert">
+      <span>部分数据暂时不可用：</span>
+      <span v-if="state.errors.jobs">任务</span>
+      <span v-if="state.errors.overview">概览</span>
+      <span v-if="state.errors.files">文件</span>
+      <button type="button" class="status-retry" @click="refreshAll">重新同步</button>
     </div>
 
     <component :is="viewComponent" :key="viewKey" :unit="route.unit" />
 
-    <div id="modal" class="modal" :class="{ hidden: !ui.confirm.visible }" role="dialog" aria-modal="true" aria-labelledby="modal-title" aria-describedby="modal-text">
+    <div id="modal" class="modal" :class="{ hidden: !ui.confirm.visible }" role="dialog" aria-modal="true" aria-labelledby="modal-title" aria-describedby="modal-text" @click.self="closeConfirm" @keydown.esc="closeConfirm">
       <div class="modal-box">
         <h3 id="modal-title">{{ ui.confirm.title }}</h3>
         <p id="modal-text">{{ ui.confirm.text }}</p>
         <div class="modal-actions">
-          <button class="secondary" @click="closeConfirm">取消</button>
-          <button :class="ui.confirm.danger ? 'danger' : 'secondary'" @click="ok">{{ ui.confirm.okText }}</button>
+          <button class="secondary" type="button" @click="closeConfirm">取消</button>
+          <button type="button" :class="ui.confirm.danger ? 'danger' : 'secondary'" @click="ok">{{ ui.confirm.okText }}</button>
         </div>
       </div>
     </div>
@@ -60,6 +74,7 @@ import NewTask from "./views/NewTask.vue";
 import { state } from "./store.js";
 import { route, navigate } from "./router.js";
 import { ui, closeConfirm } from "./ui.js";
+import { refreshAll } from "./store.js";
 
 const views = { overview: Overview, tasks: Tasks, task: TaskDetail, library: Library, new: NewTask };
 const viewComponent = computed(() => views[route.value.name] || Overview);
@@ -80,8 +95,16 @@ let clockTimer = null;
 onMounted(() => {
   clock.value = new Date().toLocaleTimeString();
   clockTimer = setInterval(() => (clock.value = new Date().toLocaleTimeString()), 1000);
+  window.addEventListener("keydown", onEscape);
 });
-onUnmounted(() => clearInterval(clockTimer));
+onUnmounted(() => {
+  clearInterval(clockTimer);
+  window.removeEventListener("keydown", onEscape);
+});
+
+function onEscape(event) {
+  if (event.key === "Escape" && ui.confirm.visible) closeConfirm();
+}
 
 const connText = computed(() => (state.offline ? "离线" : state.degraded ? "服务异常" : "服务在线"));
 const statusText = computed(() => {

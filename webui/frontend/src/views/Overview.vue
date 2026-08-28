@@ -20,33 +20,22 @@
       <span class="sync-status" :class="{ warn: state.degraded }">{{ syncText }}</span>
     </div>
 
-    <div v-if="platforms.length" id="chips">
-      <span v-for="[p, n] in platforms" :key="p" class="chip">
+    <div v-if="platforms.length" id="chips" aria-label="平台任务统计">
+      <button v-for="[p, n] in platforms" :key="p" class="chip" type="button" @click="showPlatform(p)">
         {{ PLATFORM_ZH[p] || p }}
         <b :style="{ color: LOGO_COLORS[p] || 'var(--blue)' }">{{ n }}</b>
-      </span>
+      </button>
     </div>
 
     <section class="panel">
       <div class="panel-title">
         <div class="title-wrap">
-          <span class="section-icon" aria-hidden="true">＋</span>
-          <div><h2>新建录制</h2><span class="panel-kicker">选择平台并输入直播间信息</span></div>
-        </div>
-        <button class="secondary" @click="navigate('/new')">进入新建</button>
-      </div>
-      <div class="hint">输入 TikTok 用户名或完整直播地址。</div>
-    </section>
-
-    <section class="panel">
-      <div class="panel-title">
-        <div class="title-wrap">
           <span class="section-icon" aria-hidden="true">●</span>
-          <div><h2>最近任务</h2><span class="panel-kicker">点击查看日志与详情报</span></div>
+          <div><h2>最近任务</h2><span class="panel-kicker">点击查看日志与详情</span></div>
         </div>
         <div class="filter-bar">
           <input v-model="state.jobQuery" placeholder="搜索频道…" aria-label="搜索任务">
-          <button class="secondary" @click="navigate('/tasks')">全部任务</button>
+          <button class="secondary" type="button" @click="navigate('/tasks')">全部任务</button>
         </div>
       </div>
       <div class="jobs">
@@ -59,7 +48,11 @@
           @restart="askRestart"
           @stop="askStop"
         />
-        <div v-if="!recentJobs.length" class="empty">当前没有录制任务</div>
+        <div v-if="!recentJobs.length" class="empty">
+          <strong>{{ state.jobQuery ? "没有匹配的任务" : "还没有录制任务" }}</strong>
+          <span>{{ state.jobQuery ? "请尝试其他关键词" : "创建一个任务后，它会显示在这里" }}</span>
+          <button v-if="!state.jobQuery" class="secondary" type="button" @click="navigate('/new')">新建任务</button>
+        </div>
       </div>
     </section>
 
@@ -72,7 +65,7 @@
             <span class="panel-kicker">最近生成的媒体文件</span>
           </div>
         </div>
-        <button class="secondary" @click="navigate('/library')">文件库</button>
+        <button class="secondary" type="button" @click="navigate('/library')">查看全部</button>
       </div>
       <FileList :files="recentFiles" @delete="askDeleteFile" />
     </section>
@@ -110,5 +103,9 @@ const recentJobs = computed(() => {
   if (q) list = list.filter((j) => (j.target + " " + j.platform + " " + j.unit).toLowerCase().includes(q));
   return list.slice(0, 6);
 });
-const recentFiles = computed(() => state.files.slice(0, 8));
+const recentFiles = computed(() => state.overview.files || state.files.slice(0, 8));
+function showPlatform(platform) {
+  state.platformFilter = platform;
+  navigate("/tasks");
+}
 </script>

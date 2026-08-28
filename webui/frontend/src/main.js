@@ -36,6 +36,11 @@ window.addEventListener("online", () => {
   refreshAll();
 });
 
-// 首次加载 + 周期轮询。
+// 首次加载 + 周期轮询；页面隐藏时暂停，减少后台请求。
 refreshAll();
-setInterval(() => refreshAll(), 5000);
+setInterval(() => {
+  if (!document.hidden) refreshAll({ includeFiles: false });
+}, 5000);
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) refreshAll({ includeFiles: false });
+});

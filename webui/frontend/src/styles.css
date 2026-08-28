@@ -179,3 +179,38 @@ pre{height:320px}
 @media(max-width:680px){.sync-status{width:100%;margin-left:0}}
 /* 录制文件播放器 */
 .file-actions{display:flex;gap:6px;flex:none}
+
+/* Interaction and accessibility refinements */
+.install{display:inline-flex}
+.refresh{min-width:58px}
+.status-retry{min-height:28px;padding:4px 9px;border:1px solid currentColor;border-radius:7px;background:transparent;color:inherit;font-size:11px;box-shadow:none}
+.error-banner{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:10px 0;padding:10px 12px;border:1px solid rgba(255,127,141,.28);border-radius:10px;background:rgba(127,38,50,.14);color:#ffb7c0;font-size:12px}
+.error-banner .status-retry{margin-left:auto}
+.loading-state,.error-state{display:flex;align-items:center;justify-content:center;gap:12px;min-height:110px;padding:24px;color:var(--muted);text-align:center}
+.error-state{color:var(--red);flex-wrap:wrap}
+.empty{display:flex;flex-direction:column;align-items:center;gap:6px}
+.empty strong{color:var(--text);font-size:13px}
+.empty span{font-size:12px}
+.empty button{margin-top:8px}
+.link-button{display:block;min-width:0;width:100%;min-height:0;padding:0;border:0;background:transparent;color:var(--text);box-shadow:none;text-align:left;font-weight:650}
+.link-button:hover{filter:none;color:var(--brand)}
+.job-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.field-group{display:flex;flex-direction:column;gap:6px;min-width:0}
+.field-group label{color:var(--muted);font-size:11px;font-weight:650}
+.field-group input,.field-group select{width:100%}
+.start-grid>button{align-self:end}
+.cookie-row{display:flex;grid-column:1/-1}
+.form-help{margin:8px 2px 0;color:var(--muted);font-size:11px}
+.inline-error{margin-top:12px;padding:9px 11px;border:1px solid rgba(255,127,141,.28);border-radius:9px;background:rgba(127,38,50,.14);color:#ffb7c0;font-size:12px}
+.file-search{width:220px}
+.load-more{display:block;width:100%;margin-top:10px;min-height:36px;border:1px dashed var(--line-strong);background:transparent;color:var(--muted);box-shadow:none;font-size:12px}
+.load-more:hover{background:rgba(88,224,173,.06);color:var(--brand)}
+.load-more:disabled{opacity:.6}
+.chip{cursor:pointer}
+.chip:hover{border-color:var(--brand);color:var(--text)}
+button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+@media(max-width:680px){
+  .file-search{width:auto;flex:1;min-width:160px}
+  .start-grid>button{width:100%}
+  .error-banner .status-retry{margin-left:0}
+}

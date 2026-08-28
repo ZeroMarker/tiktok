@@ -11,12 +11,17 @@ export function openJob(job) {
 export function askStop(job, cb) {
   confirmDialog("停止任务", "确定停止此录制任务？当前 MP4 将正常收尾。", "停止", async () => {
     try {
+      state.pendingUnit = job.unit;
+      state.pendingAction = "stop";
       await stopJob(job.unit);
       toast("停止请求已发送");
       await refreshAll();
       cb && cb();
     } catch (e) {
       toast(e.message);
+    } finally {
+      state.pendingUnit = "";
+      state.pendingAction = "";
     }
   });
 }
@@ -24,12 +29,17 @@ export function askStop(job, cb) {
 export function askRestart(job, cb) {
   confirmDialog("重启任务", "确定重启此录制任务？录制进程将被终止并重新拉起。", "重启", async () => {
     try {
+      state.pendingUnit = job.unit;
+      state.pendingAction = "restart";
       await restartJob(job.unit);
       toast("重启请求已发送");
       await refreshAll();
       cb && cb();
     } catch (e) {
       toast(e.message);
+    } finally {
+      state.pendingUnit = "";
+      state.pendingAction = "";
     }
   });
 }
@@ -37,12 +47,17 @@ export function askRestart(job, cb) {
 export function askDeleteFile(f, cb) {
   confirmDialog("删除文件", "确定删除「" + f.name + "」吗？此操作不可恢复。", "删除", async () => {
     try {
+      state.pendingUnit = f.path;
+      state.pendingAction = "delete";
       await deleteFile(f.path);
       toast("文件已删除");
       await refreshAll();
       cb && cb();
     } catch (e) {
       toast(e.message);
+    } finally {
+      state.pendingUnit = "";
+      state.pendingAction = "";
     }
   });
 }

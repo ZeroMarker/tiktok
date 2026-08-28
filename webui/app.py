@@ -106,6 +106,8 @@ def list_jobs() -> list[dict[str, object]]:
 
 def list_files(query: str = "", limit: int = 300, offset: int = 0) -> dict[str, object]:
     """列出 RECORDINGS_DIR 下的录制文件（按修改时间倒序，支持搜索与分页）。"""
+    limit = max(1, min(int(limit), 500))
+    offset = max(0, int(offset))
     recordings_root = Path(RECORDINGS_DIR).expanduser().resolve()
     if not recordings_root.is_dir():
         return {"total": 0, "offset": offset, "files": []}

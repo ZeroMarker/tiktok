@@ -11,37 +11,69 @@
         </div>
         <div class="log-tools">
           <select v-model="platformFilter" aria-label="平台过滤">
-            <option value="">全部平台</option>
+            <option value="all">全部平台</option>
             <option v-for="p in platforms" :key="p" :value="p">{{ PLATFORM_ZH[p] || p }}</option>
           </select>
-          <button class="mini secondary" @click="refreshAll">刷新</button>
+          <button class="mini secondary" type="button" :disabled="state.filesBusy" @click="loadFiles">{{ state.filesBusy ? "加载中…" : "刷新" }}</button>
         </div>
       </div>
-      <FileList :files="filtered" @delete="askDeleteFile" />
+      <FileList
+        :files="state.files"
+        :total="state.filesTotal"
+        remote-search
+        :loading="state.filesBusy && !state.files.length"
+        :loading-more="state.filesBusy && !!state.files.length"
+        :error="state.errors.files"
+        @search="onSearch"
+        @load-more="loadMore"
+        @retry="loadFiles"
+        @delete="askDeleteFile"
+      />
     </section>
   </div>
 </template>
 <script setup>
-import { computed, ref } from "vue";
+import { computed, ref, watch, onMounted } from "vue";
 import FileList from "../components/FileList.vue";
-import { state, refreshAll } from "../store.js";
+import { state, refreshFiles, loadMoreFiles } from "../store.js";
 import { PLATFORM_ZH } from "../utils.js";
 import { askDeleteFile } from "../actions.js";
 
-const platformFilter = ref("");
+const platformFilter = ref("all");
+const fileQuery = ref("");
 
-const platforms = computed(() => {
-  const set = new Set();
-  for (const f of state.files) {
-    const top = f.dir.split("/")[0];
-    if (top) set.add(top);
-  }
-  return [...set];
-});
-const filtered = computed(() =>
-  platformFilter.value ? state.files.filter((f) => f.dir.split("/")[0] === platformFilter.value) : state.files
-);
+const platforms = ["tiktok", "douyin", "soop", "kick", "youtube", "chzzk"];
 const countText = computed(() => (state.files.length ? `${state.filesTotal || state.files.length} 个` : "无文件"));
+
+const effectiveQuery = computed(() => {
+  const parts = [fileQuery.value.trim()];
+  if (platformFilter.value !== "all") parts.push(platformFilter.value);
+  return parts.filter(Boolean).join(" ");
+});
+
+async function loadFiles() {
+  state.filesQuery = effectiveQuery.value;
+  try {
+    await refreshFiles({ query: effectiveQuery.value, offset: 0 });
+  } catch {
+    // 错误已写入全局状态，由 FileList 展示重试入口。
+  }
+}
+function onSearch(value) {
+  fileQuery.value = value;
+  loadFiles();
+}
+async function loadMore() {
+  try {
+    await loadMoreFiles();
+  } catch {
+    // 错误已写入全局状态。
+  }
+}
+watch(platformFilter, loadFiles);
+onMounted(() => {
+  if (state.filesQuery !== effectiveQuery.value) loadFiles();
+});
 </script>
 <style scoped>
 .files-panel .log-tools select { width: auto; }

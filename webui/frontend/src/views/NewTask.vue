@@ -8,28 +8,37 @@
         </div>
       </div>
       <form class="start-grid" @submit.prevent="submit">
-        <select v-model="platform" aria-label="选择平台">
-          <option value="tiktok">TikTok</option>
-          <option value="douyin">抖音</option>
-          <option value="soop">SOOP</option>
-          <option value="kick">Kick</option>
-          <option value="youtube">YouTube</option>
-          <option value="chzzk">CHZZK</option>
-        </select>
-        <input v-model="target" required :placeholder="placeholder" aria-label="频道或直播地址">
-        <select v-model="quality" aria-label="录制画质">
-          <option v-for="q in QUALITIES" :key="q" :value="q">{{ QUALITY_ZH[q] }}</option>
-        </select>
-        <button type="submit" :disabled="submitting">{{ submitting ? "启动中…" : "开始录制" }}</button>
-        <input
-          v-if="platform === 'douyin'"
-          v-model="cookie"
-          class="cookie-row"
-          placeholder="抖音 Cookie 文件路径（仅抖音可选）"
-          aria-label="抖音 Cookie 文件路径"
-        >
+        <div class="field-group">
+          <label for="platform">平台</label>
+          <select id="platform" v-model="platform" aria-describedby="platform-hint">
+            <option value="tiktok">TikTok</option>
+            <option value="douyin">抖音</option>
+            <option value="soop">SOOP</option>
+            <option value="kick">Kick</option>
+            <option value="youtube">YouTube</option>
+            <option value="chzzk">CHZZK</option>
+          </select>
+        </div>
+        <div class="field-group field-target">
+          <label for="target">频道或直播地址</label>
+          <input id="target" v-model="target" required :placeholder="placeholder" aria-describedby="target-hint" autocomplete="off">
+        </div>
+        <div class="field-group">
+          <label for="quality">录制画质</label>
+          <select id="quality" v-model="quality">
+            <option v-for="q in QUALITIES" :key="q" :value="q">{{ QUALITY_ZH[q] }}</option>
+          </select>
+        </div>
+        <button type="submit" :disabled="submitting" :aria-busy="submitting">{{ submitting ? "创建中…" : "开始录制" }}</button>
+        <div v-if="platform === 'douyin'" class="field-group cookie-row">
+          <label for="cookie-file">Cookie 文件路径（可选）</label>
+          <input id="cookie-file" v-model="cookie" placeholder="例如：/secure/douyin-cookies.txt" aria-describedby="cookie-hint">
+        </div>
       </form>
-      <div class="hint">{{ hint }}</div>
+      <div id="platform-hint" class="hint">{{ hint }}</div>
+      <div id="target-hint" class="form-help">输入用户名、频道 ID 或完整直播地址。</div>
+      <div v-if="platform === 'douyin'" id="cookie-hint" class="form-help">Cookie 文件留在服务器本机，不会上传到浏览器。</div>
+      <div v-if="errorMessage" class="inline-error" role="alert">{{ errorMessage }}</div>
     </section>
   </div>
 </template>
@@ -54,11 +63,13 @@ const target = ref("");
 const quality = ref("best");
 const cookie = ref("");
 const submitting = ref(false);
+const errorMessage = ref("");
 
 const placeholder = computed(() => hints[platform.value][0]);
 const hint = computed(() => hints[platform.value][1]);
 
 async function submit() {
+  errorMessage.value = "";
   const t = target.value.trim();
   if (!t) return toast("请输入频道或直播地址");
   const dup = state.jobs.some(
@@ -74,6 +85,7 @@ async function submit() {
     await refreshAll();
     navigate("/tasks/" + encodeURIComponent(d.unit));
   } catch (e) {
+    errorMessage.value = e.message;
     toast(e.message);
   } finally {
     submitting.value = false;

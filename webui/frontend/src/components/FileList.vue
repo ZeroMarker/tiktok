@@ -1,9 +1,9 @@
 <template>
   <div class="files-panel">
     <div class="log-tools">
-      <input v-model="query" placeholder="搜索…" aria-label="搜索文件" style="width:110px">
-      <button class="mini secondary" @click="expandAll(true)">展开</button>
-      <button class="mini secondary" @click="expandAll(false)">收起</button>
+      <input v-model="query" class="file-search" placeholder="搜索文件名或目录" aria-label="搜索文件" @input="searchChanged(query)">
+      <button class="mini secondary" type="button" @click="expandAll(true)">全部展开</button>
+      <button class="mini secondary" type="button" @click="expandAll(false)">全部收起</button>
     </div>
 
     <div v-if="playing" ref="playerEl" class="inline-player">
@@ -11,15 +11,23 @@
         <span class="player-title" :title="playing.path">{{ playing.name }}</span>
         <span class="fmeta">{{ fmtBytes(playing.size) }} · {{ fmtDate(playing.modified) }}</span>
         <a :href="fileUrl(playing.path)" download class="mini secondary">下载</a>
-        <button class="mini secondary" @click="closePlayer">收起</button>
+        <button class="mini secondary" type="button" @click="closePlayer">收起播放器</button>
       </div>
       <video ref="videoEl" :key="playing.path" controls autoplay playsinline :src="fileUrl(playing.path)"></video>
     </div>
 
-    <div v-if="!shown.length" class="empty">{{ query ? "无匹配文件" : "暂无录制文件" }}</div>
+    <div v-if="loading" class="loading-state" role="status">正在加载文件…</div>
+    <div v-else-if="error" class="error-state" role="alert">
+      <span>{{ error }}</span>
+      <button class="mini secondary" type="button" @click="$emit('retry')">重试</button>
+    </div>
+    <div v-else-if="!shown.length" class="empty">
+      <strong>{{ query ? "没有匹配的文件" : "暂无录制文件" }}</strong>
+      <span>{{ query ? "请尝试其他关键词" : "录制完成后，文件会显示在这里" }}</span>
+    </div>
     <div v-else class="files">
-      <div v-for="g in groups" :key="g.dir" class="fgroup" :class="{ open: !collapsed.has(g.dir) }">
-        <button class="fgroup-head" @click="toggle(g.dir)">
+      <div v-for="g in groups" :key="g.dir" class="fgroup" :class="{ open: isOpen(g.dir) }">
+        <button class="fgroup-head" type="button" :aria-expanded="isOpen(g.dir)" @click="toggle(g.dir)">
           <span class="chevron">▶</span>
           <span>{{ g.name }}</span>
           <span class="count">{{ g.files.length }} 个文件</span>
@@ -31,12 +39,15 @@
             </div>
             <div class="fmeta">{{ fmtBytes(f.size) }} · {{ fmtDate(f.modified) }}</div>
             <div class="file-actions">
-              <button class="mini secondary" @click="play(f)">{{ playing && playing.path === f.path ? "播放中" : "播放" }}</button>
-              <button class="mini danger" @click="$emit('delete', f)">删除</button>
+              <button class="mini secondary" type="button" @click="play(f)">{{ playing && playing.path === f.path ? "播放中" : "播放" }}</button>
+              <button class="mini danger" type="button" @click="$emit('delete', f)">删除</button>
             </div>
           </div>
         </div>
       </div>
+      <button v-if="hasMore" class="load-more" type="button" :disabled="loadingMore" @click="$emit('load-more')">
+        {{ loadingMore ? "加载中…" : `加载更多（${files.length}/${total}）` }}
+      </button>
     </div>
   </div>
 </template>
@@ -44,20 +55,35 @@
 import { ref, computed, nextTick, onMounted, onUnmounted } from "vue";
 import { fmtBytes, fileUrl } from "../utils.js";
 
-const props = defineProps({ files: { type: Array, default: () => [] } });
-defineEmits(["delete"]);
+const props = defineProps({
+  files: { type: Array, default: () => [] },
+  total: { type: Number, default: 0 },
+  remoteSearch: Boolean,
+  loading: Boolean,
+  loadingMore: Boolean,
+  error: { type: String, default: "" },
+});
+const emit = defineEmits(["delete", "search", "load-more", "retry"]);
 
 const query = ref("");
-const collapsed = ref(new Set());
+const collapsed = ref(null);
 const playing = ref(null);
 const playerEl = ref(null);
 const videoEl = ref(null);
 
 const shown = computed(() => {
+  if (props.remoteSearch) return props.files;
   const q = query.value.trim().toLowerCase();
   if (!q) return props.files;
   return props.files.filter((f) => (f.name + " " + f.dir).toLowerCase().includes(q));
 });
+
+let searchTimer = null;
+function searchChanged(value) {
+  if (!props.remoteSearch) return;
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => emit("search", value), 250);
+}
 
 const groups = computed(() => {
   const map = {};
@@ -72,6 +98,13 @@ const groups = computed(() => {
   }
   return out;
 });
+
+const hasMore = computed(() => props.remoteSearch && props.files.length < props.total);
+
+function isOpen(dir) {
+  if (collapsed.value === null) return groups.value[0] && groups.value[0].dir === dir;
+  return !collapsed.value.has(dir);
+}
 
 function play(f) {
   playing.value = f;
@@ -98,13 +131,14 @@ onMounted(() => document.addEventListener("keydown", onKey));
 onUnmounted(() => document.removeEventListener("keydown", onKey));
 
 function toggle(dir) {
+  if (collapsed.value === null) collapsed.value = new Set(groups.value.map((group) => group.dir));
   if (collapsed.value.has(dir)) collapsed.value.delete(dir);
   else collapsed.value.add(dir);
   collapsed.value = new Set(collapsed.value);
 }
 
 function expandAll(open) {
-  collapsed.value = new Set(open ? [] : props.files.map((f) => f.dir));
+  collapsed.value = new Set(open ? [] : shown.value.map((f) => f.dir));
 }
 
 function fmtDate(t) {
