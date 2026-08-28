@@ -16,6 +16,7 @@
     --segment-seconds N  每段 MP4 时长（默认 600）
     --detect-interval N  未开播时的重试间隔（默认 60）
     --break-seconds N    断流后重新抓取间隔（默认 10）
+    --quality 原画/1080p/720p/480p（默认 best 原画）
 """
 
 from __future__ import annotations
@@ -41,6 +42,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--segment-seconds", type=int, default=600, help="每段 MP4 时长（秒）")
     parser.add_argument("--detect-interval", type=int, default=60, help="未开播重试间隔（秒）")
     parser.add_argument("--break-seconds", type=int, default=10, help="断流后重试间隔（秒）")
+    parser.add_argument(
+        "--quality",
+        choices=("best", "1080p", "720p", "480p"),
+        default="best",
+        help="录制画质上限（best 为原画档）",
+    )
     return parser
 
 

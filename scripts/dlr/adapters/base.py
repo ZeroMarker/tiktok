@@ -23,6 +23,58 @@ def extract_last_segment(raw: str) -> str:
     return cleaned.rsplit("/", 1)[-1].lstrip("@")
 
 
+# 录制画质档位（best 为原画/不设上限）。
+QUALITY_CHOICES = ("best", "1080p", "720p", "480p")
+QUALITY_HEIGHT: dict[str, int | None] = {
+    "best": None,
+    "1080p": 1080,
+    "720p": 720,
+    "480p": 480,
+}
+# 各平台 FLV 拉流清晰度 key → 近似视频高度（ORIGIN 为源流，按 1080 处理）。
+FLV_QUALITY_KEYS: tuple[tuple[str, int | None], ...] = (
+    ("ORIGIN", 1080),
+    ("FULL_HD1", 1080),
+    ("HD1", 720),
+    ("SD1", 480),
+    ("SD2", 360),
+)
+
+
+def normalize_quality(quality: str) -> str:
+    """校验画质档位，非法输入抛 ValueError。"""
+    q = (quality or "best").strip().lower()
+    if q not in QUALITY_HEIGHT:
+        raise ValueError(f"不支持的录制画质：{quality}")
+    return q
+
+
+def quality_height(quality: str) -> int | None:
+    """画质档位 → 目标视频高度上限；None 表示原画/不设上限。"""
+    return QUALITY_HEIGHT.get(normalize_quality(quality))
+
+
+def pick_flv_url(flv: object, max_height: int | None = None) -> str | None:
+    """从 FLV 拉流字典中按目标高度挑选 URL。
+
+    max_height 为 None 时取最高可用清晰度（原画档）；否则返回不超过上限的最高
+    可用清晰度；若所有可用清晰度都超过上限，则退回最低可用清晰度，保证可录。
+    """
+    if not isinstance(flv, dict):
+        return None
+    candidates: list[tuple[int | None, str]] = []
+    for key, height in FLV_QUALITY_KEYS:
+        url = flv.get(key)
+        if isinstance(url, str) and url:
+            candidates.append((height, url))
+    if not candidates:
+        return None
+    for height, url in candidates:
+        if max_height is None or height is None or height <= max_height:
+            return url
+    return candidates[-1][1]
+
+
 class BaseAdapter(abc.ABC):
     """平台适配器基类。
 
@@ -39,10 +91,13 @@ class BaseAdapter(abc.ABC):
         target: str,
         cookies: str | None = None,
         cookie_header: str | None = None,
+        quality: str = "best",
     ) -> None:
         self.target = target.strip()
         self.cookies = cookies
         self.cookie_header = cookie_header
+        self.quality = normalize_quality(quality)
+        self.quality_height = quality_height(self.quality)
         self.identifier = self._extract_identifier()
 
     @abc.abstractmethod

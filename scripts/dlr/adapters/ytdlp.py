@@ -76,6 +76,7 @@ class YTDLPAdapter(BaseAdapter):
         target: str,
         cookies: str | None = None,
         cookie_header: str | None = None,
+        quality: str = "best",
     ) -> None:
         if platform not in CONFIG:
             raise ValueError(f"不支持的 yt-dlp 平台：{platform}")
@@ -84,7 +85,7 @@ class YTDLPAdapter(BaseAdapter):
         self.referer = self.config["referer"]
         self.bsf_aac = self.config["bsf_aac"]
         self.last_detect_error: str | None = None
-        super().__init__(target, cookies=cookies, cookie_header=cookie_header)
+        super().__init__(target, cookies=cookies, cookie_header=cookie_header, quality=quality)
 
     def _extract_identifier(self) -> str:
         return extract_last_segment(self.target)
@@ -117,8 +118,13 @@ class YTDLPAdapter(BaseAdapter):
         self.last_detect_error = None
         # 登录态/Cookie 对所有 yt-dlp 平台统一透传，soop 额外附加登录凭据
         login = [*self.cookie_args(), *self._login_args()]
+        if self.quality_height:
+            h = self.quality_height
+            formats = [f"best[height<={h}]", f"best[height<={h}][ext=flv]", *self.config["formats"]]
+        else:
+            formats = list(self.config["formats"])
         attempts: list[list[str]] = []
-        for fmt in self.config["formats"]:
+        for fmt in formats:
             attempts.append([*login, "-f", fmt])
         # 兜底：impersonate 一次
         attempts.append([*login, "-f", "b[ext=flv]/best", "--impersonate", "chrome"])

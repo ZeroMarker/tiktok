@@ -327,5 +327,46 @@ class WebUIHelpersTest(unittest.TestCase):
         self.assertEqual(json.loads(body)["total"], 0)
 
 
+    def test_start_job_forwards_quality(self):
+        with patch.object(app, "list_jobs", return_value=[]), \
+                patch.object(app, "run", return_value=CompletedProcess([], 0, stdout="", stderr="")) as mocked:
+            app.start_job({"platform": "tiktok", "target": "@user", "quality": "720p"})
+        argv = mocked.call_args.args[0]
+        self.assertIn("--quality", argv)
+        self.assertEqual(argv[argv.index("--quality") + 1], "720p")
+
+    def test_start_job_defaults_to_best_quality(self):
+        with patch.object(app, "list_jobs", return_value=[]), \
+                patch.object(app, "run", return_value=CompletedProcess([], 0, stdout="", stderr="")) as mocked:
+            app.start_job({"platform": "tiktok", "target": "@user"})
+        argv = mocked.call_args.args[0]
+        self.assertNotIn("--quality", argv)
+
+    def test_start_job_rejects_invalid_quality(self):
+        with patch.object(app, "list_jobs", return_value=[]), \
+                patch.object(app, "run") as mocked:
+            with self.assertRaises(ValueError):
+                app.start_job({"platform": "tiktok", "target": "@user", "quality": "4k"})
+        mocked.assert_not_called()
+
+    def test_download_serves_inline_for_playback(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            video = root / "clip.mp4"
+            video.write_bytes(b"0123456789")
+            with patch.object(app, "RECORDINGS_DIR", directory):
+                handler = _FakeHandler("/api/file?path=clip.mp4")
+                handler.do_GET()
+        head, _, _ = handler.wfile.getvalue().partition(b"\r\n\r\n")
+        self.assertIn("Content-Disposition: inline", head.decode("latin-1"))
+
+    def test_index_has_quality_selector_and_player(self):
+        index = app.INDEX_FILE.read_text(encoding="utf-8")
+        self.assertIn('id="quality"', index)
+        self.assertIn('value="1080p"', index)
+        self.assertIn('id="player-video"', index)
+        self.assertIn('data-file-action="play"', index)
+        self.assertIn("openPlayer", index)
+
 if __name__ == "__main__":
     unittest.main()

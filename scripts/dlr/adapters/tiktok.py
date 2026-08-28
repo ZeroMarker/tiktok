@@ -34,13 +34,18 @@ class TikTokAdapter(BaseAdapter):
             f"https://www.tiktok.com/@{self.identifier}/live",
             f"https://m.tiktok.com/@{self.identifier}/live",
         )
+        if self.quality_height:
+            h = self.quality_height
+            fmt = f"b[height<={h}][ext=flv]/best[height<={h}]/best"
+        else:
+            fmt = "b[ext=flv]/best"
         for url in urls:
             for extra in ([], ["--impersonate", "chrome"]):
                 stream = self.run_capture(
                     [
                         "yt-dlp",
                         "--no-warnings",
-                        "-f", "b[ext=flv]/best",
+                        "-f", fmt,
                         *extra,
                         *self._ytdlp_cookie_args(),
                         "--get-url",
@@ -51,7 +56,7 @@ class TikTokAdapter(BaseAdapter):
                     return stream
 
         # 方法4：Python (curl_cffi) 直接解析页面 + webcast API
-        return get_stream_url(self.identifier)
+        return get_stream_url(self.identifier, quality=self.quality)
 
     def get_nickname(self) -> str | None:
         # 优先：curl_cffi + 可选 Cookie 解析显示昵称（更稳定）。

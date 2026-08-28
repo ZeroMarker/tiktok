@@ -47,6 +47,7 @@ class Engine:
         detect_interval: int = 60,
         break_seconds: int = 10,
         dir_watch_interval: int = 3,
+        quality: str = "best",
     ) -> None:
         self.platform = platform
         self.recordings_root = Path(recordings_dir).expanduser().resolve()
@@ -56,7 +57,7 @@ class Engine:
         self.dir_watch_interval = dir_watch_interval
 
         self.adapter = load_adapter(
-            platform, target, cookies=cookies, cookie_header=cookie_header
+            platform, target, cookies=cookies, cookie_header=cookie_header, quality=quality
         )
         self.identifier = self.adapter.identifier
         self.ffmpeg_proc: subprocess.Popen | None = None
@@ -82,6 +83,7 @@ class Engine:
             segment_seconds=args.segment_seconds,
             detect_interval=args.detect_interval,
             break_seconds=args.break_seconds,
+            quality=args.quality,
         )
 
     # ---- 信号处理 ----

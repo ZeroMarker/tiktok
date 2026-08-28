@@ -14,6 +14,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
 from dlr.adapters import load_adapter  # noqa: E402
 from dlr.adapters.base import extract_last_segment  # noqa: E402
+from dlr.adapters.base import normalize_quality, pick_flv_url, quality_height  # noqa: E402
 from dlr.adapters.tiktok_extract import _find_nickname, _find_nickname_from_sigi
 from dlr.engine import Engine, sanitize_path_part  # noqa: E402
 
@@ -307,6 +308,38 @@ class NicknameGuardTest(unittest.TestCase):
         engine._refresh_nickname()
         self.assertEqual(engine.nickname, "ACT女子")
 
+
+class QualitySelectTest(unittest.TestCase):
+    def test_quality_height_map(self):
+        self.assertIsNone(quality_height("best"))
+        self.assertEqual(quality_height("1080p"), 1080)
+        self.assertEqual(quality_height("720p"), 720)
+        self.assertEqual(quality_height("480p"), 480)
+        with self.assertRaises(ValueError):
+            quality_height("4k")
+
+    def test_pick_flv_url(self):
+        flv = {"ORIGIN": "o", "FULL_HD1": "f", "HD1": "h", "SD1": "s", "SD2": "s2"}
+        self.assertEqual(pick_flv_url(flv, None), "o")
+        self.assertEqual(pick_flv_url(flv, 1080), "o")
+        self.assertEqual(pick_flv_url(flv, 720), "h")
+        self.assertEqual(pick_flv_url(flv, 480), "s")
+        # 全部超出上限 → 退回最低可用
+        self.assertEqual(pick_flv_url({"HD1": "h"}, 360), "h")
+        self.assertIsNone(pick_flv_url({}, 720))
+
+    def test_load_adapter_threads_quality(self):
+        adapter = load_adapter("tiktok", "@x", quality="720p")
+        self.assertEqual(adapter.quality_height, 720)
+        adapter2 = load_adapter("youtube", "ch", quality="best")
+        self.assertIsNone(adapter2.quality_height)
+        with self.assertRaises(ValueError):
+            load_adapter("tiktok", "@x", quality="bad")
+
+    def test_tiktok_adapter_builds_capped_format(self):
+        adapter = TikTokAdapter("@x", quality="720p")
+        fmt = "b[height<={h}][ext=flv]/best[height<={h}]/best".format(h=adapter.quality_height)
+        self.assertEqual(fmt, "b[height<=720][ext=flv]/best[height<=720]/best")
 
 if __name__ == "__main__":
     unittest.main()

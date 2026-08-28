@@ -34,6 +34,7 @@ PLATFORMS = {
     "youtube": ("youtube/record.sh",),
     "chzzk": ("chzzk/record.sh",),
 }
+QUALITY_CHOICES = {"best", "1080p", "720p", "480p"}
 
 # Static PWA assets served by the web UI.  Only whitelisted names, served
 # from webui/ with explicit content types.
@@ -230,6 +231,11 @@ def start_job(data: dict) -> str:
         if not cookie_path.is_file():
             raise ValueError("Cookie 文件不存在")
         command.extend(["--cookies", str(cookie_path)])
+    quality = str(data.get("quality", "best")).strip().lower()
+    if quality not in QUALITY_CHOICES:
+        raise ValueError("不支持的录制画质")
+    if quality != "best":
+        command.extend(["--quality", quality])
 
     unit = unit_name(platform, target)
     description = f"Live recorder: {platform} {target}"[:200]
@@ -349,7 +355,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Accept-Ranges", "bytes")
         if range_header:
             self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
-        self.send_header("Content-Disposition", f'attachment; filename="{quote(path.name)}"')
+        self.send_header("Content-Disposition", f'inline; filename="{quote(path.name)}"')
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         if self.command == "HEAD":

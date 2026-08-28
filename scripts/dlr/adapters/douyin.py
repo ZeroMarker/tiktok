@@ -22,6 +22,8 @@ class DouyinAdapter(BaseAdapter):
         if not GET_STREAM_PY.is_file():
             return None
         cmd = ["python3", str(GET_STREAM_PY), self.target, "--get-url"] + self.cookie_args()
+        if self.quality != "best":
+            cmd.extend(["--quality", self.quality])
         return self.run_capture(cmd)
 
     def get_nickname(self) -> str | None:

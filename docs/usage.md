@@ -217,6 +217,9 @@ ssh -L 8765:127.0.0.1:8766 <server>
 WebUI 后端没有应用层认证；当前公网入口由站点级 Caddy Basic Auth 保护。不要直接对外开放后端端口。
 
 WebUI 的“最近文件”和磁盘统计均读取 `RECORDINGS_DIR`。修改录像目录后必须重启服务。
+WebUI 新建录制时可选择画质（原画/1080p/720p/480p），画质经各平台 `record.sh` 透传给录制引擎，
+用于限制检测到的流清晰度；选择“原画”则不设上限。文件列表支持点击“播放”在内嵌播放器中
+预览任一录制片段（`/api/file` 支持 HTTP Range 拖动进度）。
 
 DouyinLiveRecorder 管理页面位于 `https://20070809.xyz/douyin/`。
 
