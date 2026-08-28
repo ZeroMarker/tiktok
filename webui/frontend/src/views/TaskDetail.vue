@@ -15,8 +15,8 @@
         <div class="actions">
           <button class="secondary" type="button" @click="navigate('/tasks')">返回任务</button>
           <button class="secondary" type="button" @click="navigate('/new')">新建任务</button>
-          <button class="secondary" type="button" :disabled="pending" @click="askRestart(job)">{{ pending && state.pendingAction === 'restart' ? "重启中…" : "重启" }}</button>
-          <button class="danger" type="button" :disabled="pending || !canStop" @click="askStop(job, () => navigate('/tasks'))">{{ pending && state.pendingAction === 'stop' ? "停止中…" : "停止" }}</button>
+          <button class="secondary" type="button" :disabled="pending" @click="askRestart(job)">{{ pending && taskState.pendingAction === 'restart' ? "重启中…" : "重启" }}</button>
+          <button class="danger" type="button" :disabled="pending || !canStop" @click="askStop(job, () => navigate('/tasks'))">{{ pending && taskState.pendingAction === 'stop' ? "停止中…" : "停止" }}</button>
         </div>
       </div>
     </section>
@@ -42,22 +42,22 @@
         </div>
           <button class="secondary" type="button" @click="navigate('/library')">录制文件</button>
       </div>
-      <LogConsole :unit="unit" />
+      <LogPanel :unit="unit" />
     </section>
   </div>
 </template>
 <script setup>
 import { computed } from "vue";
-import LogConsole from "../components/LogConsole.vue";
-import { state } from "../store.js";
+import LogPanel from "../features/logs/LogPanel.vue";
+import { taskState } from "../stores/taskStore.js";
 import { navigate } from "../router.js";
 import { PLATFORM_ZH, stateLabel, fmtBytes, fmtUptime } from "../utils.js";
-import { askStop, askRestart } from "../actions.js";
+import { askStop, askRestart } from "../features/tasks/taskActions.js";
 
 const props = defineProps({ unit: { type: String, required: true } });
 
-const job = computed(() => state.jobs.find((j) => j.unit === props.unit));
-const pending = computed(() => state.pendingUnit === props.unit);
+const job = computed(() => taskState.jobs.find((j) => j.unit === props.unit));
+const pending = computed(() => taskState.pendingUnit === props.unit);
 const canStop = computed(() => job.value && (job.value.state === "active" || job.value.substate === "deactivating"));
 const startedText = computed(() => {
   if (!job.value) return "启动时间未知";

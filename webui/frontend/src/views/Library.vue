@@ -14,36 +14,37 @@
             <option value="all">全部平台</option>
             <option v-for="p in platforms" :key="p" :value="p">{{ PLATFORM_ZH[p] || p }}</option>
           </select>
-          <button class="mini secondary" type="button" :disabled="state.filesBusy" @click="loadFiles">{{ state.filesBusy ? "加载中…" : "刷新" }}</button>
+          <button class="mini secondary" type="button" :disabled="recordingState.busy" @click="loadFiles">{{ recordingState.busy ? "加载中…" : "刷新" }}</button>
         </div>
       </div>
-      <FileList
-        :files="state.files"
-        :total="state.filesTotal"
+      <FileBrowser
+        :files="recordingState.files"
+        :total="recordingState.total"
+        :query="fileQuery"
         remote-search
-        :loading="state.filesBusy && !state.files.length"
-        :loading-more="state.filesBusy && !!state.files.length"
-        :error="state.errors.files"
+        :loading="recordingState.busy"
+        :error="recordingState.error"
+        :pending-path="recordingState.pendingPath"
         @search="onSearch"
         @load-more="loadMore"
         @retry="loadFiles"
-        @delete="askDeleteFile"
+        @delete="askDeleteRecording"
       />
     </section>
   </div>
 </template>
 <script setup>
 import { computed, ref, watch, onMounted } from "vue";
-import FileList from "../components/FileList.vue";
-import { state, refreshFiles, loadMoreFiles } from "../store.js";
+import FileBrowser from "../features/recordings/FileBrowser.vue";
+import { recordingState, refreshRecordings, loadMoreRecordings } from "../stores/recordingStore.js";
 import { PLATFORM_ZH } from "../utils.js";
-import { askDeleteFile } from "../actions.js";
+import { askDeleteRecording } from "../features/recordings/recordingActions.js";
 
 const platformFilter = ref("all");
 const fileQuery = ref("");
 
 const platforms = ["tiktok", "douyin", "soop", "kick", "youtube", "chzzk"];
-const countText = computed(() => (state.files.length ? `${state.filesTotal || state.files.length} 个` : "无文件"));
+const countText = computed(() => (recordingState.files.length ? `${recordingState.total || recordingState.files.length} 个` : "无文件"));
 
 const effectiveQuery = computed(() => {
   const parts = [fileQuery.value.trim()];
@@ -52,11 +53,11 @@ const effectiveQuery = computed(() => {
 });
 
 async function loadFiles() {
-  state.filesQuery = effectiveQuery.value;
+  recordingState.query = effectiveQuery.value;
   try {
-    await refreshFiles({ query: effectiveQuery.value, offset: 0 });
+    await refreshRecordings({ query: effectiveQuery.value, offset: 0 });
   } catch {
-    // 错误已写入全局状态，由 FileList 展示重试入口。
+    // 错误已写入录制文件状态，由 FileBrowser 展示重试入口。
   }
 }
 function onSearch(value) {
@@ -65,14 +66,14 @@ function onSearch(value) {
 }
 async function loadMore() {
   try {
-    await loadMoreFiles();
+    await loadMoreRecordings();
   } catch {
     // 错误已写入全局状态。
   }
 }
 watch(platformFilter, loadFiles);
 onMounted(() => {
-  if (state.filesQuery !== effectiveQuery.value) loadFiles();
+  loadFiles();
 });
 </script>
 <style scoped>

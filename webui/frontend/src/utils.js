@@ -1,22 +1,5 @@
-// utils.js — 平台文案、状态语义、格式化、URL 构造。
-export const PLATFORM_ZH = {
-  tiktok: "TikTok",
-  douyin: "抖音",
-  soop: "SOOP",
-  kick: "Kick",
-  youtube: "YouTube",
-  chzzk: "CHZZK",
-};
-export const LOGO_COLORS = {
-  tiktok: "#fb7185",
-  douyin: "#f43f5e",
-  soop: "#60a5fa",
-  kick: "#4ade80",
-  youtube: "#f87171",
-  chzzk: "#2dd4bf",
-};
-export const QUALITY_ZH = { best: "原画", "1080p": "1080p", "720p": "720p", "480p": "480p" };
-export const QUALITIES = ["best", "1080p", "720p", "480p"];
+// utils.js — 通用格式化与 URL 构造。
+export { PLATFORM_ZH, LOGO_COLORS, QUALITY_ZH, QUALITIES } from "./config/platforms.js";
 
 export function fmtBytes(n) {
   if (!Number.isFinite(+n)) return "—";

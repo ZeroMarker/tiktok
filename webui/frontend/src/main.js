@@ -2,7 +2,8 @@
 import { createApp } from "vue";
 import App from "./App.vue";
 import "./styles.css";
-import { refreshAll, state } from "./store.js";
+import { appState } from "./stores/appStore.js";
+import { refreshAll } from "./stores/syncStore.js";
 
 createApp(App).mount("#app");
 
@@ -28,11 +29,11 @@ if ("serviceWorker" in navigator) {
 
 // 在线/离线：离线显示缓存，联网自动刷新。
 window.addEventListener("offline", () => {
-  state.offline = true;
-  state.degraded = false;
+  appState.offline = true;
+  appState.degraded = false;
 });
 window.addEventListener("online", () => {
-  state.offline = false;
+  appState.offline = false;
   refreshAll();
 });
 

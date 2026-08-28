@@ -179,6 +179,10 @@ pre{height:320px}
 @media(max-width:680px){.sync-status{width:100%;margin-left:0}}
 /* 录制文件播放器 */
 .file-actions{display:flex;gap:6px;flex:none}
+.inline-player{margin-bottom:10px;border:1px solid var(--line-strong);border-radius:12px;background:#050b0a;overflow:hidden}
+.inline-player-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 12px;background:rgba(13,25,24,.9);border-bottom:1px solid var(--line)}
+.inline-player-head .player-title{flex:1;min-width:0;font-size:12px;font-weight:650;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.inline-player video{display:block;width:100%;max-height:52vh;background:#000}
 
 /* Interaction and accessibility refinements */
 .install{display:inline-flex}
