@@ -368,5 +368,19 @@ class WebUIHelpersTest(unittest.TestCase):
         self.assertIn('data-file-action="play"', index)
         self.assertIn("openPlayer", index)
 
+    def test_index_retains_grid_and_flex_layout(self):
+        # 单一 <style> 中必须保留布局原语（曾被合并后遗漏导致 UI 完全混乱）。
+        index = app.INDEX_FILE.read_text(encoding="utf-8")
+        style = index.split("<style>", 1)[1].split("</style>", 1)[0]
+        for fragment in (
+            ".stats{display:grid;grid-template-columns:repeat(4,1fr)",
+            ".split{display:grid;grid-template-columns:1.3fr .7fr",
+            "header{display:flex;justify-content:space-between",
+            ".jobs{display:grid;gap:10px}",
+            ".file-actions{display:flex",
+        ):
+            self.assertIn(fragment, style, fragment)
+
+
 if __name__ == "__main__":
     unittest.main()
