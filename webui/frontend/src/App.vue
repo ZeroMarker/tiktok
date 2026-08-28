@@ -37,7 +37,6 @@
 
     <component :is="viewComponent" :key="viewKey" :unit="route.unit" />
 
-    <PlayerModal />
     <div id="modal" class="modal" :class="{ hidden: !ui.confirm.visible }" role="dialog" aria-modal="true" aria-labelledby="modal-title" aria-describedby="modal-text">
       <div class="modal-box">
         <h3 id="modal-title">{{ ui.confirm.title }}</h3>
@@ -58,7 +57,6 @@ import Tasks from "./views/Tasks.vue";
 import TaskDetail from "./views/TaskDetail.vue";
 import Library from "./views/Library.vue";
 import NewTask from "./views/NewTask.vue";
-import PlayerModal from "./components/PlayerModal.vue";
 import { state } from "./store.js";
 import { route, navigate } from "./router.js";
 import { ui, closeConfirm } from "./ui.js";

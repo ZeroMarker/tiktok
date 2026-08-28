@@ -364,7 +364,7 @@ class WebUIHelpersTest(unittest.TestCase):
         index = app.INDEX_FILE.read_text(encoding="utf-8")
         self.assertIn("1080p", index)
         self.assertIn("quality", index)
-        self.assertIn("player-box", index)
+        self.assertIn("inline-player", index)
         self.assertIn("api/file", index)
         self.assertIn("播放", index)
 
@@ -377,7 +377,7 @@ class WebUIHelpersTest(unittest.TestCase):
             "header{display:flex;justify-content:space-between",
             ".jobs{display:grid;gap:10px}",
             ".file-actions{display:flex",
-            ".player-overlay{position:fixed",
+            ".inline-player",
         ):
             self.assertIn(fragment, index, fragment)
 

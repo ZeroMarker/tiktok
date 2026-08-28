@@ -17,7 +17,7 @@
           <button class="mini secondary" @click="refreshAll">刷新</button>
         </div>
       </div>
-      <FileList :files="filtered" @play="playFile" @delete="askDeleteFile" />
+      <FileList :files="filtered" @delete="askDeleteFile" />
     </section>
   </div>
 </template>
@@ -26,7 +26,7 @@ import { computed, ref } from "vue";
 import FileList from "../components/FileList.vue";
 import { state, refreshAll } from "../store.js";
 import { PLATFORM_ZH } from "../utils.js";
-import { playFile, askDeleteFile } from "../actions.js";
+import { askDeleteFile } from "../actions.js";
 
 const platformFilter = ref("");
 

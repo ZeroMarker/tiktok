@@ -74,7 +74,7 @@
         </div>
         <button class="secondary" @click="navigate('/library')">文件库</button>
       </div>
-      <FileList :files="recentFiles" @play="playFile" @delete="askDeleteFile" />
+      <FileList :files="recentFiles" @delete="askDeleteFile" />
     </section>
   </div>
 </template>
@@ -86,7 +86,7 @@ import FileList from "../components/FileList.vue";
 import { state } from "../store.js";
 import { navigate } from "../router.js";
 import { PLATFORM_ZH, LOGO_COLORS, fmtBytes } from "../utils.js";
-import { openJob, askStop, askRestart, playFile, askDeleteFile } from "../actions.js";
+import { openJob, askStop, askRestart, askDeleteFile } from "../actions.js";
 
 const diskPercent = computed(() => Number(state.overview.disk_percent) || 0);
 const load1 = computed(() => (state.overview.load && state.overview.load[0] != null ? state.overview.load[0].toFixed(2) : "—"));

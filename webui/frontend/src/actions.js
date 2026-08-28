@@ -1,5 +1,5 @@
 // actions.js — 统一的任务/文件操作（确认、请求、反馈、刷新）。
-import { confirmDialog, toast, openPlayer } from "./ui.js";
+import { confirmDialog, toast } from "./ui.js";
 import { navigate } from "./router.js";
 import { stopJob, restartJob, deleteFile, refreshAll, state } from "./store.js";
 
@@ -32,10 +32,6 @@ export function askRestart(job, cb) {
       toast(e.message);
     }
   });
-}
-
-export function playFile(f) {
-  openPlayer(f.path, f.name);
 }
 
 export function askDeleteFile(f, cb) {

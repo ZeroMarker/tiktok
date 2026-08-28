@@ -179,15 +179,3 @@ pre{height:320px}
 @media(max-width:680px){.sync-status{width:100%;margin-left:0}}
 /* 录制文件播放器 */
 .file-actions{display:flex;gap:6px;flex:none}
-.player-overlay{position:fixed;inset:0;z-index:70;display:grid;place-items:center;padding:20px;background:rgba(1,7,6,.82);backdrop-filter:blur(8px)}
-.player-overlay.hidden{display:none}
-.player-box{display:flex;flex-direction:column;width:min(1080px,100%);max-height:calc(100vh - 40px);overflow:hidden;background:#0d1918;border:1px solid var(--line-strong);border-radius:18px;box-shadow:var(--shadow)}
-.player-head{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
-.player-title{flex:1;min-width:0;font-size:13px;font-weight:650;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.player-actions{display:flex;gap:7px}
-.player-actions a{display:inline-flex;align-items:center;min-height:34px;padding:7px 12px;font-size:12px;font-weight:650;border-radius:8px;border:1px solid var(--line);background:#152522;color:var(--text);text-decoration:none}
-.player-actions a:hover{border-color:var(--line-strong);background:#1a2c29}
-.player-close{min-height:34px;padding:7px 12px;font-size:12px;border-radius:8px}
-.player-box video{width:100%;max-height:calc(100vh - 190px);background:#000;display:block}
-body.player-open{overflow:hidden}
-@media(max-width:440px){.player-box video{max-height:calc(100vh - 150px)}}
