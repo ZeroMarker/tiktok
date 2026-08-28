@@ -1,0 +1,19 @@
+{
+  "name": "livestream-webui",
+  "private": true,
+  "version": "2.0.0",
+  "type": "module",
+  "description": "直播录制中心 WebUI — Vue 3 前端源码（webui/index.html 为单文件构建产物）",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && cp dist/index.html ../index.html"
+  },
+  "dependencies": {
+    "vue": "^3.4.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.0",
+    "vite": "^5.4.0",
+    "vite-plugin-singlefile": "^2.0.0"
+  }
+}

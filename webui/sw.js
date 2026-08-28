@@ -6,7 +6,7 @@
  * All paths are relative to the SW script, so it works both directly
  * (127.0.0.1:8766/) and behind Caddy's /tiktok/ path stripping.
  */
-const CACHE = "livestream-webui-v4";
+const CACHE = "livestream-webui-v5";
 const ASSETS = [
   "./",
   "./manifest.webmanifest",

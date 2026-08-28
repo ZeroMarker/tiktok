@@ -218,3 +218,4 @@ recordings/
 cookies.txt
 douyin-cookies*.txt
 soop-cookies*.txt
+node_modules/

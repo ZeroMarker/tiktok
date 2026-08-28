@@ -112,22 +112,22 @@ class WebUIHTTPTest(unittest.TestCase):
             self.assertEqual(handler.wfile.getvalue().split(b"\r\n")[0], b"HTTP/1.1 200 OK")
 
     def test_dynamic_values_are_not_interpolated_into_inline_handlers(self):
+        # Vue 应用使用事件绑定而非内联 onclick="..." 拼接用户数据，防范持久型 XSS。
         index = app.INDEX_FILE.read_text(encoding="utf-8")
-        self.assertNotIn('onclick="showLogs(\'', index)
-        self.assertNotIn('onclick="toggleDir(\'', index)
-        self.assertNotIn('onclick="askDelete(\'', index)
-        self.assertIn('data-job-action="logs"', index)
-        self.assertIn('data-file-action="toggle-dir"', index)
-        self.assertIn('data-file-action="delete"', index)
-        self.assertIn("function attr(s)", index)
+        self.assertNotIn("onclick=", index)
+        self.assertNotIn("onerror=", index)
+        self.assertNotIn("javascript:", index)
+        self.assertIn("createApp", index)
+        self.assertIn("#app", index)
 
     def test_webui_has_persistent_snapshot_and_refresh_feedback(self):
         index = app.INDEX_FILE.read_text(encoding="utf-8")
         self.assertIn("livestream-webui-snapshot-v1", index)
         self.assertIn("localStorage.setItem", index)
-        self.assertIn('id="sync-status"', index)
-        self.assertIn('id="refresh-btn"', index)
-        self.assertIn("new AbortController()", index)
+        self.assertIn("AbortController", index)
+        self.assertIn("api/jobs", index)
+        self.assertIn("api/overview", index)
+        self.assertIn("serviceWorker", index)
 
 
 class WebUIHelpersTest(unittest.TestCase):
@@ -362,24 +362,24 @@ class WebUIHelpersTest(unittest.TestCase):
 
     def test_index_has_quality_selector_and_player(self):
         index = app.INDEX_FILE.read_text(encoding="utf-8")
-        self.assertIn('id="quality"', index)
-        self.assertIn('value="1080p"', index)
-        self.assertIn('id="player-video"', index)
-        self.assertIn('data-file-action="play"', index)
-        self.assertIn("openPlayer", index)
+        self.assertIn("1080p", index)
+        self.assertIn("quality", index)
+        self.assertIn("player-box", index)
+        self.assertIn("api/file", index)
+        self.assertIn("播放", index)
 
     def test_index_retains_grid_and_flex_layout(self):
-        # 单一 <style> 中必须保留布局原语（曾被合并后遗漏导致 UI 完全混乱）。
+        # 布局原语必须保留（曾被合并后遗漏导致 UI 完全混乱）。
         index = app.INDEX_FILE.read_text(encoding="utf-8")
-        style = index.split("<style>", 1)[1].split("</style>", 1)[0]
         for fragment in (
             ".stats{display:grid;grid-template-columns:repeat(4,1fr)",
             ".split{display:grid;grid-template-columns:1.3fr .7fr",
             "header{display:flex;justify-content:space-between",
             ".jobs{display:grid;gap:10px}",
             ".file-actions{display:flex",
+            ".player-overlay{position:fixed",
         ):
-            self.assertIn(fragment, style, fragment)
+            self.assertIn(fragment, index, fragment)
 
 
 if __name__ == "__main__":

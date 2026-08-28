@@ -220,6 +220,8 @@ WebUI 的“最近文件”和磁盘统计均读取 `RECORDINGS_DIR`。修改录
 WebUI 新建录制时可选择画质（原画/1080p/720p/480p），画质经各平台 `record.sh` 透传给录制引擎，
 用于限制检测到的流清晰度；选择“原画”则不设上限。文件列表支持点击“播放”在内嵌播放器中
 预览任一录制片段（`/api/file` 支持 HTTP Range 拖动进度）。
+WebUI 前端为 Vue 3 + Vite（源码在 `webui/frontend/src`），`webui/index.html` 是单文件构建产物。
+改动前端后需重新构建：`cd webui/frontend && npm run build`（构建脚本会把 `dist/index.html` 复制回 `../index.html`）。
 
 DouyinLiveRecorder 管理页面位于 `https://20070809.xyz/douyin/`。
 
