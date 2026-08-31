@@ -33,6 +33,44 @@ import time
 from dlr.adapters.base import pick_flv_url, quality_height
 
 
+def _request_with_retry(
+    session,
+    url: str,
+    *,
+    params: dict | None = None,
+    impersonate: str = "chrome131",
+    timeout: int = 20,
+    attempts: int = 3,
+    base_delay: float = 1.0,
+    max_delay: float = 8.0,
+) -> object | None:
+    """GET 请求容错封装：网络异常（TLS/超时/连接重置）按指数退避重试。
+
+    返回 Response；重试耗尽仍失败时返回 None，不抛异常（调用方继续判断/循环）。
+    curl_cffi 的 SSLError/Timeout/ConnectionError 均继承自 OSError，一并兜住 raw socket 异常。
+    """
+    from curl_cffi import requests as curl_requests
+
+    for attempt in range(attempts):
+        try:
+            return session.get(
+                url,
+                params=params,
+                impersonate=impersonate,
+                timeout=timeout,
+            )
+        except (curl_requests.exceptions.RequestException, OSError) as exc:
+            if attempt + 1 < attempts:
+                delay = min(base_delay * (2 ** attempt), max_delay)
+                print(
+                    f"[tiktok_extract] 请求失败({type(exc).__name__}) {url}，"
+                    f"{delay:g}s 后重试（{attempt + 1}/{attempts}）",
+                    file=sys.stderr,
+                )
+                time.sleep(delay)
+    return None
+
+
 def get_room_id_from_sigi(text: str) -> tuple[str | None, int]:
     """从 SIGI_STATE 中提取 liveRoom 信息。
     Returns: (room_id, status_code)
@@ -96,42 +134,46 @@ def check_live_via_webcast_api(
     max_height 为 None 时返回最高可用清晰度（原画档），否则返回不超过上限的清晰度。
     """
     params = {"room_id": room_id, "aid": "1988"}
-    try:
-        r = session.get(
-            "https://webcast.tiktok.com/webcast/room/info/",
-            params=params,
-            impersonate="chrome131",
-            timeout=15,
-        )
-        data = r.json()
-        status_code = data.get("status_code")
-        if status_code != 0:
-            return None
+    r = _request_with_retry(
+        session,
+        "https://webcast.tiktok.com/webcast/room/info/",
+        params=params,
+        impersonate="chrome131",
+        timeout=15,
+    )
+    if r is None:
+        return None
 
-        room_info = data.get("data", {})
-        if room_info.get("status") == 2:
-            # 提取流 URL：stream_url 可能是一个包含各清晰度/协议的字典
-            stream_url = room_info.get("stream_url") or {}
-            if isinstance(stream_url, dict):
-                # 优先 FLV 按清晰度挑选，其次 rtmp/hls
-                flv = stream_url.get("flv_pull_url") or {}
-                url = pick_flv_url(flv, max_height)
-                if url:
-                    return url
-                for key in ("rtmp_pull_url", "hls_pull_url", "liveUrl"):
-                    url = stream_url.get(key)
-                    if isinstance(url, str) and url.startswith("http"):
-                        return url
-            elif isinstance(stream_url, str) and stream_url.startswith("http"):
-                return stream_url
-            # 直接挂在 data 上的 rtmp/hls
+    try:
+        data = r.json()
+    except Exception:
+        return None
+
+    status_code = data.get("status_code")
+    if status_code != 0:
+        return None
+
+    room_info = data.get("data", {})
+    if room_info.get("status") == 2:
+        # 提取流 URL：stream_url 可能是一个包含各清晰度/协议的字典
+        stream_url = room_info.get("stream_url") or {}
+        if isinstance(stream_url, dict):
+            # 优先 FLV 按清晰度挑选，其次 rtmp/hls
+            flv = stream_url.get("flv_pull_url") or {}
+            url = pick_flv_url(flv, max_height)
+            if url:
+                return url
             for key in ("rtmp_pull_url", "hls_pull_url", "liveUrl"):
-                url = room_info.get(key)
+                url = stream_url.get(key)
                 if isinstance(url, str) and url.startswith("http"):
                     return url
-            return None
-    except Exception:
-        pass
+        elif isinstance(stream_url, str) and stream_url.startswith("http"):
+            return stream_url
+        # 直接挂在 data 上的 rtmp/hls
+        for key in ("rtmp_pull_url", "hls_pull_url", "liveUrl"):
+            url = room_info.get(key)
+            if isinstance(url, str) and url.startswith("http"):
+                return url
     return None
 
 
@@ -233,7 +275,7 @@ def get_nickname(
         return None
 
     session = requests.Session()
-    session.get("https://www.tiktok.com", impersonate="chrome131")
+    _request_with_retry(session, "https://www.tiktok.com", attempts=1)
     if cookies:
         try:
             with open(cookies, encoding="utf-8") as fh:
@@ -250,17 +292,18 @@ def get_nickname(
             pass
 
     for attempt in range(attempts):
-        try:
-            r = session.get(
-                f"https://www.tiktok.com/@{username}/live",
-                impersonate="chrome131",
-                timeout=20,
-            )
-            text = r.text
-        except Exception:
+        r = _request_with_retry(
+            session,
+            f"https://www.tiktok.com/@{username}/live",
+            impersonate="chrome131",
+            timeout=20,
+            attempts=1,
+        )
+        if r is None:
             if attempt + 1 < attempts:
-                time.sleep(1)
+                time.sleep(min(1.0 * (2 ** attempt), 8.0))
             continue
+        text = r.text
 
         # 优先 SIGI_STATE：直播页标准结构，含 liveRoomUserInfo.user.nickname
         match = re.search(
@@ -294,7 +337,7 @@ def get_nickname(
                     return nick
 
         if attempt + 1 < attempts:
-            time.sleep(1)
+            time.sleep(min(1.0 * (2 ** attempt), 8.0))
     return None
 
 
@@ -313,7 +356,7 @@ def get_stream_url(username: str, quality: str = "best") -> str | None:
     live_url = f"https://www.tiktok.com/@{username}/live"
 
     session = requests.Session()
-    session.get("https://www.tiktok.com", impersonate="chrome131")
+    _request_with_retry(session, "https://www.tiktok.com", attempts=1)
 
     print(f"[tiktok_extract] 检查 @{username} ...", file=sys.stderr)
 
@@ -325,7 +368,10 @@ def get_stream_url(username: str, quality: str = "best") -> str | None:
     # ---- 步骤2：用 curl_cffi 解析页面 ----
     print("[tiktok_extract] yt-dlp 未返回源，尝试 curl_cffi 检测 ...", file=sys.stderr)
 
-    r = session.get(live_url, impersonate="chrome131", timeout=20)
+    r = _request_with_retry(session, live_url, impersonate="chrome131", timeout=20)
+    if r is None:
+        print("[tiktok_extract] 多次重试仍无法访问直播页，本次放弃", file=sys.stderr)
+        return None
 
     # 方法A：SIGI_STATE 检测
     room_id, status = get_room_id_from_sigi(r.text)
