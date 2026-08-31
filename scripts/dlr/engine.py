@@ -119,43 +119,53 @@ class Engine:
         print(f"输出目录：{self.out_dir}", flush=True)
 
         while not self._stopping:
-            # 未开播轮询期间补获取昵称（仅当首次失败时才有动作）
-            self._refresh_nickname()
-
-            print(
-                f"[{datetime.now():%Y-%m-%d %H:%M:%S}] 尝试抓取直播源 @{self.identifier} ...",
-                flush=True,
-            )
-            stream_url = self.adapter.detect_stream_url()
-            if not stream_url:
-                reason = getattr(self.adapter, "last_detect_error", None)
-                if reason:
-                    print(
-                        f"  → 未获取到直播源：{reason}（等待 {self.detect_interval} 秒后重试）",
-                        flush=True,
-                    )
-                else:
-                    print(
-                        f"  → 直播未开启 / 抓取失败，等待 {self.detect_interval} 秒后重试...",
-                        flush=True,
-                    )
-                time.sleep(self.detect_interval)
-                continue
-
-            # 只打印去掉签名参数的开头，避免整串 token 进日志
-            print(f"  → 成功抓到直播源：{stream_url.split('?')[0]}", flush=True)
-            # 开播前最后补一次昵称：直播已确认时此路径对部分平台更可靠，
-            # 成功则本场录制直接用昵称目录（不影响已开始的检测）。
-            if not self.nickname:
+            try:
+                # 未开播轮询期间补获取昵称（仅当首次失败时才有动作）
                 self._refresh_nickname()
-            print("开始录制...", flush=True)
-            self._record(self.out_dir, log_dir, stream_url, self.nickname)
-            print(
-                f"录制中断，等待 {self.break_seconds} 秒后重新抓取源...",
-                flush=True,
-            )
-            if not self._stopping:
-                time.sleep(self.break_seconds)
+
+                print(
+                    f"[{datetime.now():%Y-%m-%d %H:%M:%S}] 尝试抓取直播源 @{self.identifier} ...",
+                    flush=True,
+                )
+                stream_url = self.adapter.detect_stream_url()
+                if not stream_url:
+                    reason = getattr(self.adapter, "last_detect_error", None)
+                    if reason:
+                        print(
+                            f"  → 未获取到直播源：{reason}（等待 {self.detect_interval} 秒后重试）",
+                            flush=True,
+                        )
+                    else:
+                        print(
+                            f"  → 直播未开启 / 抓取失败，等待 {self.detect_interval} 秒后重试...",
+                            flush=True,
+                        )
+                    time.sleep(self.detect_interval)
+                    continue
+
+                # 只打印去掉签名参数的开头，避免整串 token 进日志
+                print(f"  → 成功抓到直播源：{stream_url.split('?')[0]}", flush=True)
+                # 开播前最后补一次昵称：直播已确认时此路径对部分平台更可靠，
+                # 成功则本场录制直接用昵称目录（不影响已开始的检测）。
+                if not self.nickname:
+                    self._refresh_nickname()
+                print("开始录制...", flush=True)
+                self._record(self.out_dir, log_dir, stream_url, self.nickname)
+                print(
+                    f"录制中断，等待 {self.break_seconds} 秒后重新抓取源...",
+                    flush=True,
+                )
+                if not self._stopping:
+                    time.sleep(self.break_seconds)
+            except Exception as exc:
+                # 单次检测/录制回合的异常不应压垮监控循环：记录后继续下一轮回合。
+                print(
+                    f"[{self.platform}] 检测回合异常：{exc}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                if not self._stopping:
+                    time.sleep(self.detect_interval)
 
         return 0
 
