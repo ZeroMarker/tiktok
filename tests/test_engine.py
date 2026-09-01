@@ -122,19 +122,16 @@ class OutputDirTest(unittest.TestCase):
             Path("/tmp/rec/logs/tiktok/ffmpeg_record_emiri.okazaki_エミリ_20260823.log"),
         )
 
-    def test_refresh_nickname_updates_dir_once(self):
+    def test_refresh_nickname_sets_nickname_once(self):
         engine = Engine("soop", "player", "/tmp/rec", detect_interval=1, break_seconds=1)
         engine.nickname = None
-        engine.out_dir = engine.output_dir(None)
         engine.adapter.get_nickname = lambda: "Nice"
         engine._refresh_nickname()
         self.assertEqual(engine.nickname, "Nice")
-        self.assertEqual(engine.out_dir, Path("/tmp/rec/soop/player_Nice"))
         # 已拿到昵称后不再重取，也不覆盖
         engine.adapter.get_nickname = lambda: "Other"
         engine._refresh_nickname()
         self.assertEqual(engine.nickname, "Nice")
-        self.assertEqual(engine.out_dir, Path("/tmp/rec/soop/player_Nice"))
 
     def test_refresh_nickname_noop_when_still_missing(self):
         engine = Engine("soop", "player", "/tmp/rec", detect_interval=1, break_seconds=1)
@@ -144,6 +141,50 @@ class OutputDirTest(unittest.TestCase):
         engine._refresh_nickname()
         self.assertIsNone(engine.nickname)
         self.assertEqual(engine.out_dir, engine.output_dir(None))
+
+
+class OutputDirCreationTest(unittest.TestCase):
+    """开播确认后才创建输出目录：杜绝"无昵称空目录 + 昵称目录"双目录残留。"""
+
+    def test_no_stale_nickname_dir_when_nickname_appears_late(self):
+        base = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, base, ignore_errors=True)
+        root = Path(base) / "rec"
+        engine = Engine("tiktok", "emiri", str(root), detect_interval=1, break_seconds=1)
+        engine.nickname = None
+        engine.out_dir = None
+
+        nickname_calls = {"n": 0}
+
+        def fake_nickname():
+            nickname_calls["n"] += 1
+            # 首轮拿不到昵称（未开播），开播后能拿到
+            return None if nickname_calls["n"] == 1 else "エミリ"
+
+        engine.adapter.get_nickname = fake_nickname
+
+        detect_calls = {"n": 0}
+
+        def fake_detect():
+            detect_calls["n"] += 1
+            # 第一轮未开播，第二轮抓到源
+            return None if detect_calls["n"] == 1 else "http://stream"
+
+        engine.adapter.detect_stream_url = fake_detect
+
+        def fake_record(out_dir, log_dir, stream_url, nickname):
+            engine.out_dir = out_dir
+            engine.nickname = nickname
+            engine._stopping = True
+
+        engine._record = fake_record
+        engine.run()
+
+        # 只在开播确认后用昵称目录；无昵称前缀目录从未被创建
+        self.assertEqual(engine.nickname, "エミリ")
+        self.assertEqual(engine.out_dir, engine.output_dir("エミリ"))
+        self.assertTrue(engine.output_dir("エミリ").is_dir())
+        self.assertFalse(engine.output_dir(None).exists())
 
 
 class DirWatchTest(unittest.TestCase):

@@ -104,23 +104,16 @@ class Engine:
     def run(self) -> int:
         print(f"开始无人值守录制 {self.platform}：{self.identifier}", flush=True)
 
-        self.nickname = self._safe_nickname()
-        if self.nickname:
-            print(f"主播昵称：{self.nickname}", flush=True)
-        else:
-            print("未获取到昵称，输出目录将只使用频道标识（后续会尝试补获取）。", flush=True)
-
-        self.out_dir = self.output_dir(self.nickname)
-        self.out_dir.mkdir(parents=True, exist_ok=True)
+        # 不在启动时解析昵称/创建输出目录：此时可能尚未开播，昵称常解析失败，
+        # 先建只会留下"无昵称"空目录。输出目录推迟到开播确认后创建（见下方）。
         log_dir = self.recordings_root / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
 
         print(f"每 {self.segment_seconds} 秒生成一个分段", flush=True)
-        print(f"输出目录：{self.out_dir}", flush=True)
 
         while not self._stopping:
             try:
-                # 未开播轮询期间补获取昵称（仅当首次失败时才有动作）
+                # 轮询期间可先补取昵称（仅更新状态，不建目录）
                 self._refresh_nickname()
 
                 print(
@@ -145,10 +138,25 @@ class Engine:
 
                 # 只打印去掉签名参数的开头，避免整串 token 进日志
                 print(f"  → 成功抓到直播源：{stream_url.split('?')[0]}", flush=True)
-                # 开播前最后补一次昵称：直播已确认时此路径对部分平台更可靠，
-                # 成功则本场录制直接用昵称目录（不影响已开始的检测）。
-                if not self.nickname:
-                    self._refresh_nickname()
+                # 开播确认后再补一次昵称：此时直播页 live 数据齐全，最可靠。
+                # 成功则本场录制直接用昵称目录；失败则回退为仅频道标识目录。
+                self._refresh_nickname()
+
+                # 开播确认后才创建输出目录，避免"先无昵称、后有昵称"的双目录残留。
+                out_dir = self.output_dir(self.nickname)
+                try:
+                    out_dir.mkdir(parents=True, exist_ok=True)
+                except Exception as exc:
+                    print(
+                        f"创建输出目录失败，本轮回合放弃：{exc}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    time.sleep(self.break_seconds)
+                    continue
+                self.out_dir = out_dir
+                print(f"输出目录：{self.out_dir}", flush=True)
+
                 print("开始录制...", flush=True)
                 self._record(self.out_dir, log_dir, stream_url, self.nickname)
                 print(
@@ -179,17 +187,18 @@ class Engine:
             return None
 
     def _refresh_nickname(self) -> None:
-        """首次昵称获取失败时，在未开播轮询期间补获取（不影响已开始的录制）。"""
+        """补取主播昵称：只更新 self.nickname，不创建/切换目录。
+
+        目录统一在 run() 开播确认后创建（此时昵称已定），避免轮询期间先建
+        无昵称目录、补取后再建昵称目录的双目录残留。
+        """
         if self.nickname:
             return
         nickname = self._safe_nickname()
         if not nickname:
             return
         self.nickname = nickname
-        new_dir = self.output_dir(nickname)
-        new_dir.mkdir(parents=True, exist_ok=True)
-        self.out_dir = new_dir
-        print(f"补获取到主播昵称：{nickname}，新输出目录：{self.out_dir}", flush=True)
+        print(f"获取到主播昵称：{nickname}", flush=True)
 
     # ---- 目录健壮性：输出目录被删除时自动重建 ----
 
