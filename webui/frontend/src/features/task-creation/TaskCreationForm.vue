@@ -1,22 +1,23 @@
 <template>
-  <form class="start-grid" @submit.prevent="submit">
-    <div class="field-group">
-      <label for="platform">平台</label>
-      <select id="platform" v-model="platform" aria-describedby="platform-hint">
-        <option v-for="name in PLATFORM_KEYS" :key="name" :value="name">{{ PLATFORM_ZH[name] }}</option>
-      </select>
+  <form @submit.prevent="submit">
+    <div class="plat-grid" role="radiogroup" aria-label="平台">
+      <button v-for="name in PLATFORM_KEYS" :key="name" class="plat-card" :class="{ on: platform === name }" type="button" role="radio" :aria-checked="platform === name" :style="{ '--pc': LOGO_COLORS[name] }" @click="platform = name">
+        <span class="pdot" aria-hidden="true"></span>{{ PLATFORM_ZH[name] }}
+      </button>
     </div>
-    <div class="field-group field-target">
-      <label for="target">频道或直播地址</label>
-      <input id="target" v-model="target" required :placeholder="placeholder" aria-describedby="target-hint" autocomplete="off">
+    <div class="create-grid">
+      <div class="field-group field-target">
+        <label for="target">频道或直播地址</label>
+        <input id="target" v-model="target" required :placeholder="placeholder" aria-describedby="target-hint" autocomplete="off">
+      </div>
+      <div class="field-group">
+        <span class="field-label" id="quality-label">录制画质</span>
+        <div class="seg" role="radiogroup" aria-labelledby="quality-label">
+          <button v-for="value in QUALITIES" :key="value" class="seg-btn" :class="{ on: quality === value }" type="button" role="radio" :aria-checked="quality === value" @click="quality = value">{{ QUALITY_ZH[value] }}</button>
+        </div>
+      </div>
+      <button type="submit" :disabled="submitting" :aria-busy="submitting">{{ submitting ? "创建中…" : "开始录制" }}</button>
     </div>
-    <div class="field-group">
-      <label for="quality">录制画质</label>
-      <select id="quality" v-model="quality">
-        <option v-for="value in QUALITIES" :key="value" :value="value">{{ QUALITY_ZH[value] }}</option>
-      </select>
-    </div>
-    <button type="submit" :disabled="submitting" :aria-busy="submitting">{{ submitting ? "创建中…" : "开始录制" }}</button>
     <div v-if="platform === 'douyin'" class="field-group cookie-row">
       <label for="cookie-file">Cookie 文件路径（可选）</label>
       <input id="cookie-file" v-model="cookie" placeholder="例如：/secure/douyin-cookies.txt" aria-describedby="cookie-hint">
@@ -33,7 +34,7 @@ import { taskState, startTask } from "../../stores/taskStore.js";
 import { refreshAll } from "../../stores/syncStore.js";
 import { navigate } from "../../router.js";
 import { toast } from "../../ui.js";
-import { PLATFORM_KEYS, PLATFORM_ZH, PLATFORM_HINTS, QUALITIES, QUALITY_ZH } from "../../config/platforms.js";
+import { PLATFORM_KEYS, PLATFORM_ZH, PLATFORM_HINTS, QUALITIES, QUALITY_ZH, LOGO_COLORS } from "../../config/platforms.js";
 
 const platform = ref("tiktok");
 const target = ref("");

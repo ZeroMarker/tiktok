@@ -14,14 +14,13 @@ export const recordingState = reactive({
 
 let requestId = 0;
 
-export async function refreshRecordings({ query = recordingState.query, offset = 0, append = false } = {}) {
+export async function refreshRecordings({ query = recordingState.query, offset = 0, append = false, limit = recordingState.limit } = {}) {
   if (recordingState.busy && append) return;
   recordingState.busy = true;
   recordingState.error = "";
   const currentRequest = ++requestId;
   try {
-    const data = await recordingService.list({ query: String(query || "").trim(), limit: recordingState.limit, offset });
-    if (currentRequest !== requestId) return data;
+    const data = await recordingService.list({ query: String(query || "").trim(), limit, offset });
     const files = data.files || [];
     recordingState.files = append ? [...recordingState.files, ...files] : files;
     recordingState.total = Number(data.total) || 0;

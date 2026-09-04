@@ -1,5 +1,5 @@
 <template>
-  <header>
+  <header class="topbar">
     <div class="brand">
       <div class="brand-mark" aria-hidden="true"></div>
       <div><p class="eyebrow">Live Control</p><h1>直播录制中心</h1><p class="sub">聚合管理跨平台录制任务</p></div>

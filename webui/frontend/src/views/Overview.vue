@@ -1,12 +1,27 @@
 <template>
   <div class="overview">
+    <section class="hero" aria-label="实时状态">
+      <div class="hero-live">
+        <span class="rec-dot" :class="{ idle: !overviewState.running }" aria-hidden="true"></span>
+        <div><div class="hero-num">{{ overviewState.running ?? "—" }}</div><div class="hero-cap">正在录制</div></div>
+      </div>
+      <div class="hero-meta">
+        <span>任务 <b>{{ overviewState.jobs ?? "—" }}</b></span>
+        <span>失败 <b>{{ overviewState.failed ?? "—" }}</b></span>
+        <span>可用 <b>{{ fmtBytes(overviewState.disk_free) }}</b></span>
+        <span>占用 <b>{{ overviewState.disk_percent ?? "—" }}%</b></span>
+      </div>
+      <div class="hero-actions">
+        <button v-if="overviewState.failed" class="danger" type="button" @click="navigate('/tasks')">查看失败任务</button>
+        <button class="secondary" type="button" @click="navigate('/new')">新建任务</button>
+      </div>
+    </section>
     <section class="stats">
       <MetricCard label="正在录制" icon="REC" :value="overviewState.running ?? '—'" note="个活动任务" />
       <MetricCard label="任务总数" icon="ALL" :value="overviewState.jobs ?? '—'" note="个托管任务" />
       <MetricCard label="可用空间" icon="SSD" :value="fmtBytes(overviewState.disk_free)" note="录制目录剩余" />
       <MetricCard label="磁盘占用" icon="%" :value="(overviewState.disk_percent ?? '—') + '%'" note="" :bar="diskPercent" />
     </section>
-
     <div class="sysinfo">
       <span>负载 <b>{{ load1 }}</b></span>
       <span>内存 <b>{{ memPercent }}</b></span>
@@ -14,11 +29,18 @@
       <span class="sync-status" :class="{ warn: appState.degraded }">{{ syncText }}</span>
     </div>
 
-    <div v-if="platforms.length" id="chips" aria-label="平台任务统计">
-      <button v-for="[platform, count] in platforms" :key="platform" class="chip" type="button" @click="showPlatform(platform)">
-        {{ PLATFORM_ZH[platform] || platform }} <b :style="{ color: LOGO_COLORS[platform] || 'var(--blue)' }">{{ count }}</b>
-      </button>
-    </div>
+    <section v-if="platforms.length" class="panel" aria-label="平台任务统计">
+      <div class="panel-title">
+        <div class="title-wrap"><span class="section-icon" aria-hidden="true">▦</span><div><h2>平台分布</h2><span class="panel-kicker">各平台托管任务占比</span></div></div>
+      </div>
+      <div class="dist">
+        <button v-for="[platform, count] in platforms" :key="platform" class="dist-row link-button" type="button" @click="showPlatform(platform)" :title="'查看' + (PLATFORM_ZH[platform] || platform) + '任务'">
+          <span class="dist-name">{{ PLATFORM_ZH[platform] || platform }}</span>
+          <span class="dist-track"><i class="dist-fill" :style="{ width: distWidth(count) + '%', background: LOGO_COLORS[platform] || undefined }"></i></span>
+          <span class="dist-num">{{ count }}</span>
+        </button>
+      </div>
+    </section>
 
     <section class="panel">
       <div class="panel-title">
@@ -66,4 +88,8 @@ const syncText = computed(() => {
   return appState.lastSynced ? "已同步 " + new Date(appState.lastSynced).toLocaleTimeString() : "等待同步";
 });
 function showPlatform(platform) { taskState.platformFilter = platform; navigate("/tasks"); }
+function distWidth(count) {
+  const max = Math.max(1, ...platforms.value.map(([, n]) => n));
+  return Math.max(6, Math.round((count / max) * 100));
+}
 </script>

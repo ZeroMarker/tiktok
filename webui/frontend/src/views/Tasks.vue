@@ -13,7 +13,15 @@
           {{ PLATFORM_ZH[platform] || platform }} <b :style="{ color: LOGO_COLORS[platform] || 'var(--blue)' }">{{ count }}</b>
         </button>
       </div>
-      <TaskList :jobs="filteredJobs" :filtered="hasFilter" @open="openTask" @restart="askRestart" @stop="askStop" />
+      <div v-if="!filteredJobs.length" class="empty">
+        <strong>{{ hasFilter ? "没有符合条件的任务" : "还没有录制任务" }}</strong>
+        <span>{{ hasFilter ? "请调整搜索关键词或筛选条件" : "创建一个任务后，它会显示在这里" }}</span>
+        <button v-if="!hasFilter" class="secondary" type="button" @click="navigate('/new')">新建任务</button>
+      </div>
+      <div v-for="group in groups" :key="group.key" class="task-group">
+        <h3 class="task-group-title"><span class="gdot" :style="{ color: group.color }" aria-hidden="true"></span>{{ group.title }}<span class="count">{{ group.jobs.length }}</span></h3>
+        <TaskList :jobs="group.jobs" :filtered="true" @open="openTask" @restart="askRestart" @stop="askStop" />
+      </div>
     </section>
   </div>
 </template>
@@ -26,7 +34,7 @@ import { appState } from "../stores/appStore.js";
 import { overviewState } from "../stores/overviewStore.js";
 import { refreshAll } from "../stores/syncStore.js";
 import { PLATFORM_ZH, LOGO_COLORS } from "../config/platforms.js";
-import { openTask, askStop, askRestart } from "../features/tasks/taskActions.js";
+import { navigate } from "../router.js";
 
 const platforms = computed(() => Object.entries(overviewState.platforms || {}).sort((a, b) => b[1] - a[1]));
 const platformNames = computed(() => Object.keys(overviewState.platforms || {}).sort());
@@ -38,4 +46,23 @@ const filteredJobs = computed(() => taskState.jobs.filter((job) => {
   return !query || (job.target + " " + job.platform + " " + job.unit).toLowerCase().includes(query);
 }));
 const countText = computed(() => taskState.jobs.length ? `${filteredJobs.value.length}/${taskState.jobs.length} 个` : "无任务");
+const groups = computed(() => {
+  const running = [];
+  const failed = [];
+  const other = [];
+  for (const job of filteredJobs.value) {
+    if (job.state === "active") running.push(job);
+    else if (job.state === "failed") failed.push(job);
+    else other.push(job);
+  }
+  const byTarget = (a, b) => String(a.target || "").localeCompare(String(b.target || ""));
+  running.sort(byTarget);
+  failed.sort(byTarget);
+  other.sort(byTarget);
+  return [
+    { key: "running", title: "运行中", color: "var(--brand)", jobs: running },
+    { key: "failed", title: "已失败", color: "var(--red)", jobs: failed },
+    { key: "other", title: "已停止", color: "var(--muted)", jobs: other },
+  ].filter((group) => group.jobs.length);
+});
 </script>
