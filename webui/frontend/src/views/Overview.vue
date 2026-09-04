@@ -17,10 +17,10 @@
       </div>
     </section>
     <section class="stats">
-      <MetricCard label="正在录制" icon="REC" :value="overviewState.running ?? '—'" note="个活动任务" />
-      <MetricCard label="任务总数" icon="ALL" :value="overviewState.jobs ?? '—'" note="个托管任务" />
-      <MetricCard label="可用空间" icon="SSD" :value="fmtBytes(overviewState.disk_free)" note="录制目录剩余" />
-      <MetricCard label="磁盘占用" icon="%" :value="(overviewState.disk_percent ?? '—') + '%'" note="" :bar="diskPercent" />
+      <MetricCard label="正在录制" icon="record" :value="overviewState.running ?? '—'" note="个活动任务" />
+      <MetricCard label="任务总数" icon="tasks" :value="overviewState.jobs ?? '—'" note="个托管任务" />
+      <MetricCard label="可用空间" icon="storage" :value="fmtBytes(overviewState.disk_free)" note="录制目录剩余" />
+      <MetricCard label="磁盘占用" icon="activity" :value="(overviewState.disk_percent ?? '—') + '%'" note="" :bar="diskPercent" />
     </section>
     <div class="sysinfo">
       <span>负载 <b>{{ load1 }}</b></span>
@@ -31,7 +31,7 @@
 
     <section v-if="platforms.length" class="panel" aria-label="平台任务统计">
       <div class="panel-title">
-        <div class="title-wrap"><span class="section-icon" aria-hidden="true">▦</span><div><h2>平台分布</h2><span class="panel-kicker">各平台托管任务占比</span></div></div>
+        <div class="title-wrap"><span class="section-icon"><AppIcon name="distribution" /></span><div><h2>平台分布</h2><span class="panel-kicker">各平台托管任务占比</span></div></div>
       </div>
       <div class="dist">
         <button v-for="[platform, count] in platforms" :key="platform" class="dist-row link-button" type="button" @click="showPlatform(platform)" :title="'查看' + (PLATFORM_ZH[platform] || platform) + '任务'">
@@ -44,7 +44,7 @@
 
     <section class="panel">
       <div class="panel-title">
-        <div class="title-wrap"><span class="section-icon" aria-hidden="true">●</span><div><h2>最近任务</h2><span class="panel-kicker">点击查看日志与详情</span></div></div>
+        <div class="title-wrap"><span class="section-icon"><AppIcon name="tasks" /></span><div><h2>最近任务</h2><span class="panel-kicker">点击查看日志与详情</span></div></div>
         <div class="filter-bar"><input v-model="taskState.query" placeholder="搜索频道或平台" aria-label="搜索最近任务"><button class="secondary" type="button" @click="navigate('/tasks')">全部任务</button></div>
       </div>
       <TaskList :jobs="recentJobs" :filtered="Boolean(taskState.query)" @open="openTask" @restart="askRestart" @stop="askStop" />
@@ -52,7 +52,7 @@
 
     <section class="panel">
       <div class="panel-title">
-        <div class="title-wrap"><span class="section-icon" aria-hidden="true">□</span><div><h2>最近文件</h2><span class="panel-kicker">最近生成的媒体文件</span></div></div>
+        <div class="title-wrap"><span class="section-icon"><AppIcon name="library" /></span><div><h2>最近文件</h2><span class="panel-kicker">最近生成的媒体文件</span></div></div>
         <button class="secondary" type="button" @click="navigate('/library')">查看全部</button>
       </div>
       <FileBrowser :files="overviewState.files || []" :total="(overviewState.files || []).length" @delete="askDeleteRecording" />
@@ -62,6 +62,7 @@
 <script setup>
 import { computed } from "vue";
 import MetricCard from "../features/dashboard/MetricCard.vue";
+import AppIcon from "../features/app/AppIcon.vue";
 import TaskList from "../features/tasks/TaskList.vue";
 import FileBrowser from "../features/recordings/FileBrowser.vue";
 import { appState } from "../stores/appStore.js";

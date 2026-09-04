@@ -3,7 +3,7 @@
     <section class="panel">
       <div class="panel-title">
         <div class="title-wrap">
-          <span class="section-icon" aria-hidden="true">□</span>
+          <span class="section-icon"><AppIcon name="library" /></span>
           <div>
             <h2>录制文件<span class="count">{{ countText }}</span></h2>
             <span class="panel-kicker">按平台/目录浏览，播放、下载或清理</span>
@@ -33,6 +33,7 @@
 </template>
 <script setup>
 import { computed, ref, watch, onMounted } from "vue";
+import AppIcon from "../features/app/AppIcon.vue";
 import FileBrowser from "../features/recordings/FileBrowser.vue";
 import { recordingState, refreshRecordings, loadMoreRecordings } from "../stores/recordingStore.js";
 import { PLATFORM_ZH } from "../utils.js";

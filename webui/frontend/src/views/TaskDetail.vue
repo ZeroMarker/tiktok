@@ -3,7 +3,7 @@
     <section v-if="!job" class="panel">
       <div class="panel-title">
         <div class="title-wrap">
-          <span class="section-icon" aria-hidden="true">●</span>
+          <span class="section-icon"><AppIcon name="tasks" /></span>
           <div><h2>任务详情</h2><span class="panel-kicker">{{ unit }}</span></div>
         </div>
         <div class="actions">
@@ -16,7 +16,7 @@
       <section v-if="job" class="panel">
         <div class="panel-title">
           <div class="title-wrap">
-            <span class="section-icon" aria-hidden="true">●</span>
+            <span class="section-icon"><AppIcon name="tasks" /></span>
             <div>
               <h2>{{ job.target }}<span class="platform-tag">{{ PLATFORM_ZH[job.platform] || job.platform }}</span></h2>
               <span class="panel-kicker">{{ stateLabel(job.state, job.substate) }}</span>
@@ -39,7 +39,7 @@
       <section class="panel">
         <div class="panel-title">
           <div class="title-wrap">
-            <span class="section-icon" aria-hidden="true">›_</span>
+            <span class="section-icon"><AppIcon name="terminal" /></span>
             <div><h2>任务日志</h2><span class="panel-kicker">Journal 实时输出</span></div>
           </div>
             <button class="secondary" type="button" @click="navigate('/library')">录制文件</button>
@@ -51,6 +51,7 @@
 </template>
 <script setup>
 import { computed } from "vue";
+import AppIcon from "../features/app/AppIcon.vue";
 import LogPanel from "../features/logs/LogPanel.vue";
 import { taskState } from "../stores/taskStore.js";
 import { navigate } from "../router.js";
