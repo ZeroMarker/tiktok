@@ -54,7 +54,39 @@ source ~/.bashrc
 ${BILIBILI_PUSH_URL}${BILIBILI_PUSH_CODE}
 ```
 
-如果任一变量为空，转推脚本会在启动 ffmpeg 前退出。脚本不会在终端输出完整推流地址、推流码或直播源签名 URL。
+### 自动开播（推荐）
+
+`bili/live.py` 移植自 [obs-bilibili-stream](https://github.com/Zarosmm/obs-bilibili-stream)
+的扫码登录/开播逻辑（标准库 + 同目录 vendored 的 Nayuki 二维码库，无新增依赖），
+自动获取 RTMP 地址与推流码。完整来源与许可证说明见 `bili/live.py` 头部文档
+（该文件为上游 GPL-2.0 代码的衍生移植）：
+
+```bash
+python3 bili/live.py login        # 终端直接显示二维码，Bilibili App 扫码；会话存 bili/.bilibili_session.json（600，已忽略）
+python3 bili/live.py status       # 检查登录态
+python3 bili/live.py areas        # 列出分区，记下子分区 ID
+python3 bili/live.py start --area 646 --title "今晚直播" --print-export
+python3 bili/live.py update --title "新标题"
+python3 bili/live.py stop         # 关闭 Bilibili 直播间
+```
+
+`start` 成功后把 `rtmp_addr`/`rtmp_code` 写回会话文件（推流码不打终端）；
+`--print-export` 给出 `BILIBILI_PUSH_URL` 导出语句供转推脚本使用。
+也可以把两行 export 写入 `~/.bashrc`，转推脚本会读取（非交互 shell 下
+`~/.bashrc` 头部提前 return 时，`bili/replay.sh` 会兜底直读其中的导出项）。
+
+已知限制（2026-09-06 实测）：
+
+- 直播间标题不能含 emoji（B 站接口拒绝并提示“房间名不能有表情符号”），用纯文本。
+- `update` 返回成功只代表提交进审核：响应体 `audit_info.audit_title_reason`
+  为“进入审核”时，公示标题保持默认直到过审，需调 `Room/get_info` 确认，
+  不要只看返回码。含真实艺人名的标题（如偶像本名）会被判疑似冒充而长期
+  卡审或驳回；纯 ASCII 标题约 1 分钟过审。推他人直播流本就踩盗播/录播红线，
+  标题避开真人姓名。
+- 开播表单不带 `build` 参数：与上游一致的全参数签名必回 `-3 签名错误`，
+  去掉 `build` 后签名通过；该偏离已在 `bili/live.py` 注释与
+  `tests/test_bili_live.py` 回归测试中锁定。
+- 开播可能触发人脸验证（接口码 60024/60043），按终端提示扫码完成后再重试。
 
 ## WebUI
 

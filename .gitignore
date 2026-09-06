@@ -219,3 +219,5 @@ cookies.txt
 douyin-cookies*.txt
 soop-cookies*.txt
 node_modules/
+bili/.bilibili_session.json
+.bilibili_session.json

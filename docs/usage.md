@@ -163,6 +163,40 @@ bash yt.sh @PewDiePie
 bash yt.sh https://www.youtube.com/@MrBeast/live
 ```
 
+### 本地录制文件轮播
+
+把已录制的 `.mp4` 循环推到 Bilibili（无人值守重播）。先用
+`python3 bili/live.py start --area <子分区ID>` 开播，再跑推流：
+
+```bash
+bash bili/replay.sh "recordings/tiktok/<频道目录>"   # 目录按文件名排序连播，播完循环
+bash bili/replay.sh a.mp4 b.mp4                     # 也可传多个文件/目录混排
+```
+
+默认 `-c copy`（录制文件已是 h264+aac，几乎不占 CPU）；录制文件含断流空洞
+或跨分段卡顿时加 `--encode` 重编码（`setpts`/`aresample` 重建时间戳，
+640x1280 约占半核）。`--dry-run` 只打印 ffmpeg 命令不推流。日志写入
+`./logs/ffmpeg_replay_*.log`，断线 5 秒后自动重推。
+
+完整开播→推流→停播（标题禁 emoji，用纯文本）：
+
+```bash
+python3 bili/live.py login
+python3 bili/live.py start --area 646 --title "频道名" --print-export
+bash bili/replay.sh "recordings/tiktok/<频道目录>" --encode
+python3 bili/live.py update --title "新标题"
+pkill -f bili/replay.sh
+python3 bili/live.py stop
+```
+
+切片源：先改标题，再重启推流（开播状态保持）：
+
+```bash
+python3 bili/live.py update --title "新频道名"
+pkill -f bili/replay.sh
+bash bili/replay.sh "recordings/tiktok/<新频道目录>" --encode
+```
+
 ## 直播源检测
 
 TikTok：

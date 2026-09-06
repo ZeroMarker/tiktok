@@ -36,7 +36,7 @@ exec python3 "${SCRIPT_DIR}/../scripts/dlr.py" <platform> "$@"
 ├── youtube/               # YouTube（record.sh 入口）
 ├── kick/                  # Kick（record.sh 入口）
 ├── chzzk/                 # CHZZK（record.sh 入口）
-├── bili/                  # 转推 Bilibili 的平台脚本
+├── bili/                  # Bilibili：live.py 开播工具（扫码登录/开闭直播间/取推流码）+ push.sh/soop.sh 转推 + replay.sh 本地文件轮播
 ├── twitch/                # Twitch -> Bilibili 脚本
 ├── scripts/               # 统一录制引擎（见上）
 ├── systemd/               # WebUI systemd unit 与安装脚本
