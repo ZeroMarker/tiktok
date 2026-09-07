@@ -66,7 +66,7 @@ bash douyin/import_cookies.sh chrome
 bash douyin/record.sh <直播间> --cookies douyin-cookies.txt
 ```
 
-转推前先配置 Bilibili 推流地址，详见 [配置](docs/configuration.md)。
+转推 Bilibili（开播、推流、轮播）见独立仓库 [ZeroMarker/bili](https://github.com/ZeroMarker/bili)。
 
 ## WebUI 与 systemd
 
@@ -95,7 +95,7 @@ WebUI 同时提供 PWA 支持：可安装到桌面/主屏幕，断网时仍可�
 - [使用说明](docs/usage.md)
 - [排障](docs/troubleshooting.md)
 - [TikTok 直播录制使用与排障](docs/tiktok-live-recording.md)
-- [B站视频上传接口文档](docs/bilibili-upload-api.md)
+- [Bilibili 推流（独立仓库 ZeroMarker/bili）](https://github.com/ZeroMarker/bili)
 
 ## 运行产物
 
