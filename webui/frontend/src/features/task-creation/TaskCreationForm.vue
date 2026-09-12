@@ -49,8 +49,14 @@ async function submit() {
   errorMessage.value = "";
   const value = target.value.trim();
   if (!value) return toast("请输入频道或直播地址");
-  const duplicate = taskState.jobs.some((job) => job.platform === platform.value && (job.target || "").trim().toLowerCase() === value.toLowerCase());
-  if (duplicate) return toast("该频道已存在录制任务，请勿重复添加");
+  const duplicate = taskState.jobs.find((job) => job.platform === platform.value && (job.target || "").trim().toLowerCase() === value.toLowerCase());
+  if (duplicate) {
+    // 暂停中的任务保留在列表里：提示去「继续」，而不是当作重复任务重新创建。
+    const message = duplicate.state === "paused"
+      ? "该频道的录制任务处于暂停状态，请在任务列表中「继续」"
+      : "该频道已存在录制任务，请勿重复添加";
+    return toast(message);
+  }
   submitting.value = true;
   try {
     const data = await startTask({ platform: platform.value, target: value, quality: quality.value, cookie_file: cookie.value.trim() });

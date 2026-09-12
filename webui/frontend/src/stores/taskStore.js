@@ -5,6 +5,7 @@ export const taskState = reactive({
   jobs: [],
   query: "",
   stateFilter: "all",
+  liveFilter: "all",
   platformFilter: "all",
   selectedUnit: "",
   pendingUnit: "",
@@ -24,6 +25,8 @@ export async function refreshTasks() {
 }
 
 export function startTask(form) { return taskService.start(form); }
-export function stopTask(unit) { return taskService.stop(unit); }
+export function pauseTask(unit) { return taskService.pause(unit); }
+export function resumeTask(unit) { return taskService.resume(unit); }
 export function restartTask(unit) { return taskService.restart(unit); }
+export function removeTask(unit) { return taskService.remove(unit); }
 export function fetchTaskLogs(unit, tail) { return taskService.logs(unit, tail); }

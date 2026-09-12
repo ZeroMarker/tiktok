@@ -7,8 +7,10 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
+import threading
 import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -21,6 +23,9 @@ WEBUI_DIR = Path(__file__).resolve().parent
 INDEX_FILE = WEBUI_DIR / "index.html"
 SYSTEMCTL = os.environ.get("SYSTEMCTL", "systemctl")
 SYSTEMD_RUN = os.environ.get("SYSTEMD_RUN", "systemd-run")
+# 单元启动时设置 TimeoutStopSec=30s；停止/重启必须等它走完才能拿到真实结果，
+# 否则 subprocess 超时会把"仍在收尾"误报成失败（前端也会先超时）。
+CONTROL_TIMEOUT = 35
 RECORDINGS_DIR = os.environ.get("RECORDINGS_DIR", str(PROJECT_ROOT / "recordings"))
 # 录制进程运行的非 root 身份。留空则仍以 root 运行（不推荐）。
 # 设置后，systemd-run 生成的各频道单元将以该用户运行，需确保其可写输出目录/日志目录。
@@ -36,6 +41,18 @@ PLATFORMS = {
 }
 QUALITY_CHOICES = {"best", "1080p", "720p", "480p"}
 
+# 任务目录：systemd 临时单元在停止后会被回收（`--collect`），暂停中的任务因此需要
+# 单独持久化启动参数，才能「继续」时按原样重新拉起单元。
+# 目录可由 WEBUI_STATE_DIR / STATE_DIRECTORY 覆盖；生产由 systemd 单元的
+# ReadWritePaths 放行（见 systemd/livestream-webui.service）。
+STATE_DIR = Path(
+    os.environ.get("WEBUI_STATE_DIR")
+    or os.environ.get("STATE_DIRECTORY")
+    or (PROJECT_ROOT / "state")
+)
+CATALOG_FILE = STATE_DIR / "tasks.json"
+_CATALOG_LOCK = threading.Lock()
+
 # Static PWA assets served by the web UI.  Only whitelisted names, served
 # from webui/ with explicit content types.
 STATIC_FILES: dict[str, tuple[str, str]] = {
@@ -50,8 +67,10 @@ STATIC_FILES: dict[str, tuple[str, str]] = {
 }
 
 
-def run(command: list[str], check: bool = True) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(command, text=True, capture_output=True, check=check, timeout=20)
+def run(
+    command: list[str], check: bool = True, timeout: int = 20
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(command, text=True, capture_output=True, check=check, timeout=timeout)
 
 
 def unit_name(platform: str, target: str) -> str:
@@ -68,39 +87,183 @@ def _parse_int(value: object, default: int = 0) -> int:
         return default
 
 
-def list_jobs() -> list[dict[str, object]]:
+def _ffmpeg_descendant(root_pid: int) -> bool | None:
+    """检查录制主进程是否有 ffmpeg 子孙进程（即是否正在写分段）。
+
+    True=直播中（ffmpeg 在跑）, False=等待开播（只有引擎轮询进程）,
+    None=无法判断（/proc 不可用或进程已消失）。只读 /proc，不做额外平台探测。
+    """
+    if root_pid <= 0:
+        return None
+    try:
+        children: dict[int, list[int]] = {}
+        cmds: dict[int, bytes] = {}
+        for entry in os.listdir("/proc"):
+            if not entry.isdigit():
+                continue
+            pid = int(entry)
+            try:
+                with open(f"/proc/{pid}/stat", "rb") as fh:
+                    stat = fh.read()
+                ppid = int(stat.rsplit(b")", 1)[-1].split()[1])
+                with open(f"/proc/{pid}/cmdline", "rb") as fh:
+                    cmds[pid] = fh.read()
+            except (OSError, ValueError, IndexError):
+                continue
+            children.setdefault(ppid, []).append(pid)
+        if root_pid not in cmds and root_pid not in children and all(root_pid not in kids for kids in children.values()):
+            return None
+        seen = {root_pid}
+        stack = list(children.get(root_pid, []))
+        while stack:
+            pid = stack.pop()
+            if pid in seen:
+                continue
+            seen.add(pid)
+            cmd = cmds.get(pid, b"").lower()
+            if cmd.split(b"\x00", 1)[0].rsplit(b"/", 1)[-1].strip() == b"ffmpeg":
+                return True
+            stack.extend(children.get(pid, []))
+        return False
+    except OSError:
+        return None
+
+
+def _live_status(state: object, pid: int) -> str:
+    """systemd 状态 + ffmpeg 子进程 → 主播直播状态。"""
+    if state != "active":
+        return "offline"
+    hit = _ffmpeg_descendant(pid)
+    if hit is True:
+        return "live"
+    if hit is False:
+        return "waiting"
+    return "unknown"
+
+
+def _live_units() -> list[str]:
+    """当前 systemd 中仍存在的录制单元（暂停后单元被回收，只剩任务目录里的记录）。"""
     result = run(
         [SYSTEMCTL, "list-units", "livestream-rec-*.service", "--all", "--no-legend", "--plain"],
         check=False,
     )
-    units = [line.split(None, 1)[0] for line in result.stdout.splitlines() if line.strip()]
-    if not units:
-        return []
-    details = run(
-        [SYSTEMCTL, "show", *units, "--property=Id,ActiveState,SubState,Description,ExecMainStartTimestamp,MainPID,MemoryCurrent,NRestarts"],
-        check=False,
+    return [line.split(None, 1)[0] for line in result.stdout.splitlines() if line.strip()]
+
+
+def _load_catalog() -> dict[str, dict[str, object]]:
+    """读取任务目录（启动参数 + 暂停标记）。文件损坏时按空目录处理，不影响服务。"""
+    try:
+        raw = json.loads(CATALOG_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    return {
+        str(unit): spec
+        for unit, spec in raw.items()
+        if isinstance(spec, dict) and _valid_unit(str(unit))
+    }
+
+
+def _save_catalog(catalog: dict[str, dict[str, object]]) -> None:
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = CATALOG_FILE.with_name(CATALOG_FILE.name + ".tmp")
+    tmp.write_text(
+        json.dumps(catalog, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8"
     )
+    tmp.replace(CATALOG_FILE)
+
+
+def _prune_catalog(catalog: dict[str, dict[str, object]], live: set[str]) -> None:
+    """丢弃既未暂停、systemd 里也不存在的条目（如命令行手动 stop 掉的任务）。"""
+    for unit in [u for u, spec in catalog.items() if not spec.get("paused") and u not in live]:
+        catalog.pop(unit, None)
+
+
+def _spec_from_unit(unit: str) -> dict[str, object] | None:
+    """目录里没有记录时（命令行或旧版本创建的单元），从 systemd 反推启动参数。"""
+    result = run([SYSTEMCTL, "show", unit, "--property=Id,Description,ExecStart"], check=False)
+    values = dict(item.split("=", 1) for item in result.stdout.splitlines() if "=" in item)
+    match = re.match(r"Live recorder: (\S+) (.+)", values.get("Description", ""))
+    if values.get("Id") != unit or not match or match.group(1) not in PLATFORMS:
+        return None
+    argv_match = re.search(r"argv\[\]=([^;]*)", values.get("ExecStart", ""))
+    argv = shlex.split(argv_match.group(1)) if argv_match else []
+    quality = "best"
+    cookie_file = ""
+    for index, token in enumerate(argv):
+        if token == "--quality" and index + 1 < len(argv):
+            quality = argv[index + 1]
+        elif token == "--cookies" and index + 1 < len(argv):
+            cookie_file = argv[index + 1]
+    return {
+        "platform": match.group(1),
+        "target": argv[2] if len(argv) > 2 else match.group(2),
+        "quality": quality if quality in QUALITY_CHOICES else "best",
+        "cookie_file": cookie_file,
+        "paused": False,
+    }
+
+
+def _paused_jobs(live: set[str]) -> list[dict[str, object]]:
+    """暂停中的任务：单元已被 systemd 回收，仅存在于任务目录。"""
     jobs = []
-    for block in details.stdout.strip().split("\n\n"):
-        values = dict(item.split("=", 1) for item in block.splitlines() if "=" in item)
-        if not values.get("Id"):
+    for unit, spec in _load_catalog().items():
+        if not spec.get("paused") or unit in live:
             continue
-        description = values.get("Description", "")
-        match = re.match(r"Live recorder: (\S+) (.+)", description)
+        platform = str(spec.get("platform", "unknown"))
+        target = str(spec.get("target", ""))
         jobs.append(
             {
-                "unit": values["Id"],
-                "state": values.get("ActiveState", "unknown"),
-                "substate": values.get("SubState", "unknown"),
-                "description": description,
-                "started": values.get("ExecMainStartTimestamp", ""),
-                "platform": match.group(1) if match else "unknown",
-                "target": match.group(2) if match else description,
-                "pid": _parse_int(values.get("MainPID")),
-                "memory": _parse_int(values.get("MemoryCurrent")),
-                "restarts": _parse_int(values.get("NRestarts")),
+                "unit": unit,
+                "state": "paused",
+                "substate": "paused",
+                "description": f"Live recorder: {platform} {target}",
+                "started": "",
+                "platform": platform,
+                "target": target,
+                "pid": 0,
+                "memory": 0,
+                "restarts": 0,
+                "live": "paused",
+                "quality": spec.get("quality", "best"),
             }
         )
+    return jobs
+
+
+def list_jobs() -> list[dict[str, object]]:
+    units = _live_units()
+    jobs = []
+    if units:
+        details = run(
+            [SYSTEMCTL, "show", *units, "--property=Id,ActiveState,SubState,Description,ExecMainStartTimestamp,MainPID,MemoryCurrent,NRestarts"],
+            check=False,
+        )
+        for block in details.stdout.strip().split("\n\n"):
+            values = dict(item.split("=", 1) for item in block.splitlines() if "=" in item)
+            if not values.get("Id"):
+                continue
+            description = values.get("Description", "")
+            match = re.match(r"Live recorder: (\S+) (.+)", description)
+            state = values.get("ActiveState", "unknown")
+            pid = _parse_int(values.get("MainPID"))
+            jobs.append(
+                {
+                    "unit": values["Id"],
+                    "state": state,
+                    "substate": values.get("SubState", "unknown"),
+                    "description": description,
+                    "started": values.get("ExecMainStartTimestamp", ""),
+                    "platform": match.group(1) if match else "unknown",
+                    "target": match.group(2) if match else description,
+                    "pid": pid,
+                    "memory": _parse_int(values.get("MemoryCurrent")),
+                    "restarts": _parse_int(values.get("NRestarts")),
+                    "live": _live_status(state, pid),
+                }
+            )
+    jobs.extend(_paused_jobs(set(units)))
     return jobs
 
 
@@ -198,6 +361,8 @@ def overview() -> dict[str, object]:
     return {
         "jobs": len(jobs),
         "running": sum(job["state"] == "active" for job in jobs),
+        "live": sum(job.get("live") == "live" for job in jobs),
+        "waiting": sum(job.get("live") == "waiting" for job in jobs),
         "failed": sum(job["state"] == "failed" for job in jobs),
         "platforms": platforms,
         "disk_total": usage.total,
@@ -212,30 +377,29 @@ def overview() -> dict[str, object]:
     }
 
 
-def start_job(data: dict) -> str:
-    platform = str(data.get("platform", "")).lower()
-    target = str(data.get("target", "")).strip()
+def _validate_spec(spec: dict[str, object]) -> None:
+    platform = str(spec.get("platform", "")).lower()
+    target = str(spec.get("target", "")).strip()
     if platform not in PLATFORMS:
         raise ValueError("不支持的平台")
     if not target or len(target) > 500 or "\x00" in target:
         raise ValueError("频道或直播 URL 无效")
-    # 校验重复：同一平台下相同频道（忽略大小写）不允许重复添加
-    normalized = target.casefold()
-    for job in list_jobs():
-        if job.get("platform") == platform and str(job.get("target", "")).strip().casefold() == normalized:
-            raise ValueError(f"录制任务已存在：{platform} {job.get('target')}，请勿重复添加，如需重跑请直接重启该任务")
-
-    script = PROJECT_ROOT / PLATFORMS[platform][0]
-    command = ["bash", str(script), target]
-    cookie_file = str(data.get("cookie_file", "")).strip()
-    if platform == "douyin" and cookie_file:
-        cookie_path = Path(cookie_file).expanduser().resolve()
-        if not cookie_path.is_file():
-            raise ValueError("Cookie 文件不存在")
-        command.extend(["--cookies", str(cookie_path)])
-    quality = str(data.get("quality", "best")).strip().lower()
-    if quality not in QUALITY_CHOICES:
+    if str(spec.get("quality", "best")).lower() not in QUALITY_CHOICES:
         raise ValueError("不支持的录制画质")
+    cookie_file = str(spec.get("cookie_file", "")).strip()
+    if platform == "douyin" and cookie_file and not Path(cookie_file).expanduser().is_file():
+        raise ValueError("Cookie 文件不存在")
+
+
+def _spawn(spec: dict[str, object]) -> str:
+    """按任务参数启动 systemd 临时单元（新建与「继续」共用同一条启动路径）。"""
+    platform = str(spec["platform"]).lower()
+    target = str(spec["target"]).strip()
+    command = ["bash", str(PROJECT_ROOT / PLATFORMS[platform][0]), target]
+    cookie_file = str(spec.get("cookie_file", "")).strip()
+    if platform == "douyin" and cookie_file:
+        command.extend(["--cookies", str(Path(cookie_file).expanduser().resolve())])
+    quality = str(spec.get("quality", "best")).lower()
     if quality != "best":
         command.extend(["--quality", quality])
 
@@ -269,22 +433,101 @@ def start_job(data: dict) -> str:
     return unit
 
 
+def start_job(data: dict) -> str:
+    spec = {
+        "platform": str(data.get("platform", "")).lower(),
+        "target": str(data.get("target", "")).strip(),
+        "quality": str(data.get("quality", "best")).strip().lower(),
+        "cookie_file": str(data.get("cookie_file", "")).strip(),
+    }
+    _validate_spec(spec)
+    # 校验重复：同一平台下相同频道（忽略大小写）不允许重复添加
+    normalized = str(spec["target"]).casefold()
+    with _CATALOG_LOCK:
+        catalog = _load_catalog()
+        live = set(_live_units())
+        _prune_catalog(catalog, live)
+        for unit, stored in catalog.items():
+            if stored.get("paused") and str(stored.get("platform")) == spec["platform"] \
+                    and str(stored.get("target", "")).strip().casefold() == normalized:
+                raise ValueError(
+                    f"录制任务已存在且处于暂停：{spec['platform']} {stored.get('target')}，"
+                    f"请使用「继续」恢复（{unit}）"
+                )
+        for job in list_jobs():
+            if job.get("state") == "paused":
+                continue
+            if job.get("platform") == spec["platform"] and str(job.get("target", "")).strip().casefold() == normalized:
+                raise ValueError(f"录制任务已存在：{spec['platform']} {job.get('target')}，请勿重复添加，如需重跑请直接重启该任务")
+        unit = _spawn(spec)
+        catalog[unit] = spec
+        _save_catalog(catalog)
+    return unit
+
+
 def _valid_unit(unit: str) -> bool:
     return bool(re.fullmatch(r"livestream-rec-[a-z0-9-]+\.service", unit))
 
 
-def stop_job(unit: str) -> None:
+def pause_job(unit: str) -> None:
+    """暂停任务：停止单元并把启动参数留在任务目录，稍后可「继续」。"""
     if not _valid_unit(unit):
         raise ValueError("任务名称无效")
-    result = run([SYSTEMCTL, "stop", unit], check=False)
-    if result.returncode != 0:
-        raise RuntimeError(result.stderr.strip() or "停止任务失败")
+    with _CATALOG_LOCK:
+        catalog = _load_catalog()
+        live = set(_live_units())
+        _prune_catalog(catalog, live)
+        if unit not in live:
+            raise ValueError("任务当前未在运行，无需暂停")
+        spec = catalog.get(unit) or _spec_from_unit(unit)
+        if spec is None:
+            raise RuntimeError("无法识别该任务的启动参数，请在服务器上手动停止")
+        result = run([SYSTEMCTL, "stop", unit], check=False, timeout=CONTROL_TIMEOUT)
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr.strip() or "暂停任务失败")
+        catalog[unit] = {**spec, "paused": True}
+        _save_catalog(catalog)
+
+
+def resume_job(unit: str) -> str:
+    """继续任务：按任务目录里保存的参数重新拉起单元。"""
+    if not _valid_unit(unit):
+        raise ValueError("任务名称无效")
+    with _CATALOG_LOCK:
+        catalog = _load_catalog()
+        live = set(_live_units())
+        _prune_catalog(catalog, live)
+        spec = catalog.get(unit)
+        if spec is None or not spec.get("paused"):
+            raise ValueError("该任务不在暂停列表中")
+        if unit in live:
+            raise RuntimeError("任务已在运行")
+        _validate_spec(spec)
+        started = _spawn(spec)
+        catalog[started] = {**spec, "paused": False}
+        _save_catalog(catalog)
+    return started
+
+
+def delete_job(unit: str) -> None:
+    """删除任务：停止单元并移除任务目录记录（录制文件不受影响）。"""
+    if not _valid_unit(unit):
+        raise ValueError("任务名称无效")
+    with _CATALOG_LOCK:
+        catalog = _load_catalog()
+        live = set(_live_units())
+        if unit in live:
+            result = run([SYSTEMCTL, "stop", unit], check=False, timeout=CONTROL_TIMEOUT)
+            if result.returncode != 0:
+                raise RuntimeError(result.stderr.strip() or "删除前停止任务失败")
+        catalog.pop(unit, None)
+        _save_catalog(catalog)
 
 
 def restart_job(unit: str) -> None:
     if not _valid_unit(unit):
         raise ValueError("任务名称无效")
-    result = run([SYSTEMCTL, "restart", unit], check=False)
+    result = run([SYSTEMCTL, "restart", unit], check=False, timeout=CONTROL_TIMEOUT)
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or "重启任务失败")
 
@@ -427,11 +670,16 @@ class Handler(BaseHTTPRequestHandler):
             data = json.loads(self.rfile.read(length) or b"{}")
             if self.path == "/api/start":
                 self.send_json(HTTPStatus.CREATED, {"unit": start_job(data)})
-            elif self.path == "/api/stop":
-                stop_job(str(data.get("unit", "")))
+            elif self.path == "/api/pause":
+                pause_job(str(data.get("unit", "")))
                 self.send_json(HTTPStatus.OK, {"ok": True})
+            elif self.path == "/api/resume":
+                self.send_json(HTTPStatus.OK, {"unit": resume_job(str(data.get("unit", "")))})
             elif self.path == "/api/restart":
                 restart_job(str(data.get("unit", "")))
+                self.send_json(HTTPStatus.OK, {"ok": True})
+            elif self.path == "/api/delete-task":
+                delete_job(str(data.get("unit", "")))
                 self.send_json(HTTPStatus.OK, {"ok": True})
             elif self.path == "/api/delete":
                 delete_file(str(data.get("path", "")))

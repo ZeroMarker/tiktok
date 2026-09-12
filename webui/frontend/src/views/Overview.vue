@@ -2,11 +2,12 @@
   <div class="overview">
     <section class="hero" aria-label="实时状态">
       <div class="hero-live">
-        <span class="rec-dot" :class="{ idle: !overviewState.running }" aria-hidden="true"></span>
-        <div><div class="hero-num">{{ overviewState.running ?? "—" }}</div><div class="hero-cap">正在录制</div></div>
+        <span class="rec-dot" :class="{ idle: !(overviewState.live ?? overviewState.running) }" aria-hidden="true"></span>
+        <div><div class="hero-num">{{ overviewState.live ?? overviewState.running ?? "—" }}</div><div class="hero-cap">直播中</div></div>
       </div>
       <div class="hero-meta">
         <span>任务 <b>{{ overviewState.jobs ?? "—" }}</b></span>
+        <span>等待开播 <b>{{ overviewState.waiting ?? "—" }}</b></span>
         <span>失败 <b>{{ overviewState.failed ?? "—" }}</b></span>
         <span>可用 <b>{{ fmtBytes(overviewState.disk_free) }}</b></span>
         <span>占用 <b>{{ overviewState.disk_percent ?? "—" }}%</b></span>
@@ -17,7 +18,7 @@
       </div>
     </section>
     <section class="stats">
-      <MetricCard label="正在录制" icon="record" :value="overviewState.running ?? '—'" note="个活动任务" />
+      <MetricCard label="直播中" icon="record" :value="overviewState.live ?? overviewState.running ?? '—'" note="个主播正在开播" />
       <MetricCard label="任务总数" icon="tasks" :value="overviewState.jobs ?? '—'" note="个托管任务" />
       <MetricCard label="可用空间" icon="storage" :value="fmtBytes(overviewState.disk_free)" note="录制目录剩余" />
       <MetricCard label="磁盘占用" icon="activity" :value="(overviewState.disk_percent ?? '—') + '%'" note="" :bar="diskPercent" />
@@ -47,7 +48,7 @@
         <div class="title-wrap"><span class="section-icon"><AppIcon name="tasks" /></span><div><h2>最近任务</h2><span class="panel-kicker">点击查看日志与详情</span></div></div>
         <div class="filter-bar"><input v-model="taskState.query" placeholder="搜索频道或平台" aria-label="搜索最近任务"><button class="secondary" type="button" @click="navigate('/tasks')">全部任务</button></div>
       </div>
-      <TaskList :jobs="recentJobs" :filtered="Boolean(taskState.query)" @open="openTask" @restart="askRestart" @stop="askStop" />
+      <TaskList :jobs="recentJobs" :filtered="Boolean(taskState.query)" @open="openTask" @pause="askPause" @resume="askResume" @restart="askRestart" @delete="askDeleteTask" />
     </section>
 
     <section class="panel">
@@ -71,7 +72,7 @@ import { overviewState } from "../stores/overviewStore.js";
 import { PLATFORM_ZH, LOGO_COLORS } from "../config/platforms.js";
 import { fmtBytes } from "../utils.js";
 import { navigate } from "../router.js";
-import { openTask, askStop, askRestart } from "../features/tasks/taskActions.js";
+import { openTask, askPause, askResume, askRestart, askDeleteTask } from "../features/tasks/taskActions.js";
 import { askDeleteRecording } from "../features/recordings/recordingActions.js";
 
 const diskPercent = computed(() => Number(overviewState.disk_percent) || 0);

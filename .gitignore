@@ -215,6 +215,7 @@ logs/
 *.mkv
 *.ts
 recordings/
+state/
 cookies.txt
 douyin-cookies*.txt
 soop-cookies*.txt

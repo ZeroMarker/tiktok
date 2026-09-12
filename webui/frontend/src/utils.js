@@ -15,18 +15,61 @@ export function fmtBytes(n) {
 export function stateLabel(s, sub) {
   const m = {
     active: { running: "运行中", activating: "启动中", deactivating: "停止中" },
+    activating: { "auto-restart": "重启中", start: "启动中", reload: "重载中" },
+    // 停止过程中 systemd 上报的是 deactivating + stop-sigterm 之类的 SubState
+    deactivating: {
+      "stop-sigterm": "停止中",
+      "final-sigterm": "停止中",
+      "stop-sigkill": "强制停止中",
+      "final-sigkill": "强制停止中",
+      "stop-post": "停止中",
+      stop: "停止中",
+    },
     inactive: { dead: "已停止" },
     failed: { failed: "已失败" },
+    paused: { paused: "已暂停" },
   };
   const t = m[s] && m[s][sub];
-  return t || (s === "failed" ? "失败" : s);
+  if (t) return t;
+  if (s === "deactivating") return "停止中";
+  if (s === "paused") return "已暂停";
+  if (s === "failed") return "失败";
+  if (s === "activating") return "启动中";
+  return s;
+}
+
+/** 该单元是否正在停止：systemd 收尾期间 ActiveState=deactivating、SubState=stop-*。
+ *  引擎收尾当前分段通常几秒，最坏受单元 TimeoutStopSec（30s）约束。 */
+export function isStopping(job) {
+  if (!job) return false;
+  const sub = String(job.substate || "");
+  return job.state === "deactivating" || sub === "stop" || sub.startsWith("stop-") || sub.startsWith("final-");
+}
+
+/** 该任务是否已暂停：单元被 systemd 回收，仅存在于后端任务目录。 */
+export function isPaused(job) {
+  return Boolean(job) && job.state === "paused";
 }
 
 export function stateClass(s, sub) {
   if (s === "failed") return "b-bad";
   if (s === "active") return sub === "running" ? "b-good" : sub === "activating" ? "b-warn" : "b-info";
-  if (s === "inactive" || s === "dead") return "b-muted";
+  if (s === "paused" || s === "inactive" || s === "dead") return "b-muted";
   if (s === "activating" || s === "deactivating") return "b-warn";
+  return "b-info";
+}
+
+export function liveLabel(live) {
+  if (live === "live") return "直播中";
+  if (live === "waiting") return "等待开播";
+  if (live === "offline") return "未开播";
+  if (live === "paused") return "已暂停";
+  return "直播状态未知";
+}
+export function liveClass(live) {
+  if (live === "live") return "b-live";
+  if (live === "waiting") return "b-warn";
+  if (live === "offline" || live === "paused") return "b-muted";
   return "b-info";
 }
 

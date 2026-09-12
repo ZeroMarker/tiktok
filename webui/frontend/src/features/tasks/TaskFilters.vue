@@ -4,8 +4,17 @@
     <select v-model="taskState.stateFilter" aria-label="状态筛选">
       <option value="all">全部状态</option>
       <option value="active">运行中</option>
+      <option value="activating">重启中</option>
+      <option value="paused">已暂停</option>
       <option value="failed">失败</option>
       <option value="inactive">已停止</option>
+    </select>
+    <select v-model="taskState.liveFilter" aria-label="直播状态筛选">
+      <option value="all">全部直播状态</option>
+      <option value="live">直播中</option>
+      <option value="waiting">等待开播</option>
+      <option value="offline">未开播</option>
+      <option value="unknown">状态未知</option>
     </select>
     <select v-model="taskState.platformFilter" aria-label="平台筛选">
       <option value="all">全部平台</option>
@@ -22,10 +31,11 @@ import { PLATFORM_ZH } from "../../config/platforms.js";
 
 defineProps({ platforms: { type: Array, default: () => [] }, busy: Boolean });
 defineEmits(["refresh"]);
-const hasFilter = computed(() => Boolean(taskState.query.trim() || taskState.stateFilter !== "all" || taskState.platformFilter !== "all"));
+const hasFilter = computed(() => Boolean(taskState.query.trim() || taskState.stateFilter !== "all" || taskState.liveFilter !== "all" || taskState.platformFilter !== "all"));
 function clearFilters() {
   taskState.query = "";
   taskState.stateFilter = "all";
+  taskState.liveFilter = "all";
   taskState.platformFilter = "all";
 }
 </script>

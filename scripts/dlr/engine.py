@@ -89,15 +89,29 @@ class Engine:
     # ---- 信号处理 ----
 
     def _on_signal(self, signum: int, _frame) -> None:
+        """SIGTERM/SIGINT：先让 ffmpeg 收尾当前分段，再立即结束进程。
+
+        信号处理器经常在 curl_cffi / subprocess 的 C 回调栈里执行，此处 `sys.exit()`
+        抛出的 SystemExit 会被 C 层吞掉（"Exception ignored from cffi callback"），
+        进程随后继续检测轮询，直到 systemd `TimeoutStopSec`（30s）到期被 SIGKILL ——
+        WebUI 的停止请求因此超时，看起来"停不下来"。ffmpeg 已收尾后直接 os._exit，
+        保证停止立即生效。
+        """
         self._stopping = True
         print(f"收到信号 {signum}，正在停止录制...", flush=True)
-        if self.ffmpeg_proc and self.ffmpeg_proc.poll() is None:
-            self.ffmpeg_proc.terminate()
+        proc = self.ffmpeg_proc
+        if proc is not None and proc.poll() is None:
+            proc.terminate()
             try:
-                self.ffmpeg_proc.wait(timeout=10)
+                proc.wait(timeout=10)
             except subprocess.TimeoutExpired:
-                self.ffmpeg_proc.kill()
-        sys.exit(0)
+                proc.kill()
+        for stream in (sys.stdout, sys.stderr):
+            try:
+                stream.flush()
+            except Exception:
+                pass
+        os._exit(0)
 
     # ---- 生命周期 ----
 

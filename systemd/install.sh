@@ -8,7 +8,7 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
-install -d -m 755 "$PROJECT_ROOT/recordings" "$PROJECT_ROOT/logs"
+install -d -m 755 "$PROJECT_ROOT/recordings" "$PROJECT_ROOT/logs" "$PROJECT_ROOT/state"
 sed "s|__PROJECT_ROOT__|$PROJECT_ROOT|g" \
     "$PROJECT_ROOT/systemd/livestream-webui.service" \
     > /etc/systemd/system/livestream-webui.service

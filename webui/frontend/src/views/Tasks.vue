@@ -20,7 +20,7 @@
       </div>
       <div v-for="group in groups" :key="group.key" class="task-group">
         <h3 class="task-group-title"><span class="gdot" :style="{ color: group.color }" aria-hidden="true"></span>{{ group.title }}<span class="count">{{ group.jobs.length }}</span></h3>
-        <TaskList :jobs="group.jobs" :filtered="true" @open="openTask" @restart="askRestart" @stop="askStop" />
+        <TaskList :jobs="group.jobs" :filtered="true" @open="openTask" @pause="askPause" @resume="askResume" @restart="askRestart" @delete="askDeleteTask" />
       </div>
     </section>
   </div>
@@ -36,12 +36,14 @@ import { overviewState } from "../stores/overviewStore.js";
 import { refreshAll } from "../stores/syncStore.js";
 import { PLATFORM_ZH, LOGO_COLORS } from "../config/platforms.js";
 import { navigate } from "../router.js";
+import { openTask, askPause, askResume, askRestart, askDeleteTask } from "../features/tasks/taskActions.js";
 
 const platforms = computed(() => Object.entries(overviewState.platforms || {}).sort((a, b) => b[1] - a[1]));
 const platformNames = computed(() => Object.keys(overviewState.platforms || {}).sort());
-const hasFilter = computed(() => Boolean(taskState.query.trim() || taskState.stateFilter !== "all" || taskState.platformFilter !== "all"));
+const hasFilter = computed(() => Boolean(taskState.query.trim() || taskState.stateFilter !== "all" || taskState.liveFilter !== "all" || taskState.platformFilter !== "all"));
 const filteredJobs = computed(() => taskState.jobs.filter((job) => {
   if (taskState.stateFilter !== "all" && job.state !== taskState.stateFilter) return false;
+  if (taskState.liveFilter !== "all" && (job.live || "unknown") !== taskState.liveFilter) return false;
   if (taskState.platformFilter !== "all" && job.platform !== taskState.platformFilter) return false;
   const query = taskState.query.trim().toLowerCase();
   return !query || (job.target + " " + job.platform + " " + job.unit).toLowerCase().includes(query);
@@ -49,19 +51,27 @@ const filteredJobs = computed(() => taskState.jobs.filter((job) => {
 const countText = computed(() => taskState.jobs.length ? `${filteredJobs.value.length}/${taskState.jobs.length} 个` : "无任务");
 const groups = computed(() => {
   const running = [];
+  const restarting = [];
+  const paused = [];
   const failed = [];
   const other = [];
   for (const job of filteredJobs.value) {
-    if (job.state === "active") running.push(job);
-    else if (job.state === "failed") failed.push(job);
-    else other.push(job);
+    // activating（SubState=auto-restart）= 进程已退出、systemd 正在重试；单列一组，
+    // 避免和真正的"已停止"混在一起（这类行之前还无法停止/移除）。
+    switch (job.state) {
+      case "active": running.push(job); break;
+      case "activating": restarting.push(job); break;
+      case "paused": paused.push(job); break;
+      case "failed": failed.push(job); break;
+      default: other.push(job);
+    }
   }
   const byTarget = (a, b) => String(a.target || "").localeCompare(String(b.target || ""));
-  running.sort(byTarget);
-  failed.sort(byTarget);
-  other.sort(byTarget);
+  for (const list of [running, restarting, paused, failed, other]) list.sort(byTarget);
   return [
     { key: "running", title: "运行中", color: "var(--brand)", jobs: running },
+    { key: "restarting", title: "重启中", color: "var(--warn)", jobs: restarting },
+    { key: "paused", title: "已暂停", color: "var(--blue)", jobs: paused },
     { key: "failed", title: "已失败", color: "var(--red)", jobs: failed },
     { key: "other", title: "已停止", color: "var(--muted)", jobs: other },
   ].filter((group) => group.jobs.length);

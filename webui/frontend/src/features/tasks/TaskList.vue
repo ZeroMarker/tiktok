@@ -1,6 +1,16 @@
 <template>
   <div class="jobs">
-    <TaskCard v-for="job in jobs" :key="job.unit" :job="job" :selected="job.unit === taskState.selectedUnit" @open="$emit('open', job)" @restart="$emit('restart', job)" @stop="$emit('stop', job)" />
+    <TaskCard
+      v-for="job in jobs"
+      :key="job.unit"
+      :job="job"
+      :selected="job.unit === taskState.selectedUnit"
+      @open="$emit('open', job)"
+      @pause="$emit('pause', job)"
+      @resume="$emit('resume', job)"
+      @restart="$emit('restart', job)"
+      @delete="$emit('delete', job)"
+    />
     <div v-if="!jobs.length" class="empty">
       <strong>{{ filtered ? "没有符合条件的任务" : "还没有录制任务" }}</strong>
       <span>{{ filtered ? "请调整搜索关键词或筛选条件" : "创建一个任务后，它会显示在这里" }}</span>
@@ -14,5 +24,5 @@ import { taskState } from "../../stores/taskStore.js";
 import { navigate } from "../../router.js";
 
 defineProps({ jobs: { type: Array, default: () => [] }, filtered: Boolean });
-defineEmits(["open", "restart", "stop"]);
+defineEmits(["open", "pause", "resume", "restart", "delete"]);
 </script>

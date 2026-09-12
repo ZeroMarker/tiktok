@@ -3,6 +3,8 @@ import { api } from "../api.js";
 
 export const overviewState = reactive({
   running: 0,
+  live: 0,
+  waiting: 0,
   jobs: 0,
   failed: 0,
   disk_total: 0,

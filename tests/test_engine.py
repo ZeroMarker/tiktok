@@ -2,8 +2,11 @@
 
 import os
 import shutil
+import signal
+import subprocess
 import sys
 import tempfile
+import textwrap
 import threading
 import time
 import unittest
@@ -381,6 +384,123 @@ class QualitySelectTest(unittest.TestCase):
         adapter = TikTokAdapter("@x", quality="720p")
         fmt = "b[height<={h}][ext=flv]/best[height<={h}]/best".format(h=adapter.quality_height)
         self.assertEqual(fmt, "b[height<=720][ext=flv]/best[height<=720]/best")
+
+
+class SignalStopTest(unittest.TestCase):
+    """SIGTERM 必须即时生效，且先让 ffmpeg 收尾当前分段。
+
+    历史故障：WebUI 点"停止"后任务要 ~30 秒才消失、前端 12 秒即报超时。
+    原因：信号处理器常在 curl_cffi/subprocess 的 C 回调里执行，`sys.exit()` 抛出的
+    SystemExit 被 C 层吞掉（"Exception ignored from cffi callback"），进程继续轮询，
+    直到 systemd TimeoutStopSec（30s）到期被 SIGKILL。
+    """
+
+    def setUp(self):
+        self.base = Path(tempfile.mkdtemp(prefix="dlr_signal_test_"))
+        self.addCleanup(shutil.rmtree, self.base, ignore_errors=True)
+
+    def _spawn_engine(self, body: str) -> subprocess.Popen:
+        """在子进程里启动 Engine 并执行 body，等它打印 ready 后返回该进程。"""
+        script = (
+            "import sys\n"
+            f"sys.path.insert(0, {str(PROJECT_ROOT / 'scripts')!r})\n"
+            "import ctypes, ctypes.util, subprocess, time\n"
+            "from pathlib import Path\n"
+            "from dlr.engine import Engine\n"
+            f"engine = Engine('tiktok', 'sig.ch', {str(self.base)!r}, detect_interval=30, break_seconds=1)\n"
+            "engine.adapter.get_nickname = lambda: None\n"
+            + textwrap.dedent(body)
+        )
+        proc = subprocess.Popen(
+            [sys.executable, "-c", script],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        self.addCleanup(proc.kill)
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            line = proc.stdout.readline()
+            if line.strip() == "ready":
+                return proc
+            if not line:
+                break
+        self.fail("子进程未进入 ready 状态：\n" + (proc.stderr.read() or ""))
+
+    def _assert_exited(self, proc: subprocess.Popen) -> None:
+        try:
+            rc = proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            _, stderr = proc.communicate(timeout=5)
+            self.fail("SIGTERM 后引擎未及时退出：\n" + (stderr or ""))
+        self.assertEqual(rc, 0)
+
+    def test_sigterm_exits_promptly_inside_c_callback(self):
+        """检测轮询里信号处理器落在 C 回调栈内时，进程也必须立刻退出。
+
+        真实场景：`adapter.detect_stream_url()` 走 curl_cffi，信号在 cffi 回调中被处理；
+        `sys.exit()` 无效时会继续跑完 `detect_interval`（默认 60s）等待，表现为"停止不了"。
+        """
+        proc = self._spawn_engine(
+            """
+            libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+            comparator = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p)
+            state = {"first": True}
+
+            @comparator
+            def _cmp(_a, _b):
+                # 回调里打印 ready：此时主线程正在 C 调用栈内执行 python 回调，
+                # 等测试发来的 SIGTERM 就在这里被处理。
+                if state["first"]:
+                    state["first"] = False
+                    print("ready", flush=True)
+                    time.sleep(1.5)
+                return 0
+
+            def detect():
+                libc.qsort((ctypes.c_int * 8)(), 8, ctypes.sizeof(ctypes.c_int), _cmp)
+                return None  # 未开播 → 引擎将进入 detect_interval 等待
+
+            engine.adapter.detect_stream_url = detect
+            engine.run()
+            """
+        )
+        proc.send_signal(signal.SIGTERM)
+        self._assert_exited(proc)
+
+    def test_sigterm_finalizes_ffmpeg_before_exit(self):
+        """停止时先给 ffmpeg 发送 SIGTERM 并等它退出（MP4 正常收尾），再结束进程。"""
+        marker = self.base / "ffmpeg-finalized"
+        child_code = textwrap.dedent(
+            """
+            import signal, sys, time
+            from pathlib import Path
+
+            def _done(*_):
+                Path(sys.argv[1]).write_text("finalized")
+                sys.exit(0)
+
+            signal.signal(signal.SIGTERM, _done)
+            time.sleep(120)
+            """
+        )
+        proc = self._spawn_engine(
+            f"""
+            engine.ffmpeg_proc = subprocess.Popen(
+                [sys.executable, "-c", {child_code!r}, {str(marker)!r}],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            time.sleep(0.5)
+            print("ready", flush=True)
+            time.sleep(120)
+            """
+        )
+        proc.send_signal(signal.SIGTERM)
+        self._assert_exited(proc)
+        self.assertEqual(marker.read_text(), "finalized")
+
 
 if __name__ == "__main__":
     unittest.main()

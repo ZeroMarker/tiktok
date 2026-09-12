@@ -82,6 +82,17 @@ WebUI 的最近文件列表扫描 `RECORDINGS_DIR`，不会遍历整个仓库。
 `webui/app.py`（常驻 systemd 服务）通过 `systemd-run` 按需生成每频道临时单元
 `livestream-rec-{platform}-{channel}.service`，调用各平台 `record.sh`。
 临时单元带 `KillMode=mixed`、`TimeoutStopSec=30s`、网络就绪依赖与崩溃自动重启。
+`KillMode=mixed` 只把 SIGTERM 发给主进程（bash→python 引擎），由引擎给 ffmpeg 收尾当前
+分段后再退出；引擎的信号处理器在 C 回调栈（curl_cffi）里也直接 `os._exit`，因此停止请求
+不会等到 `TimeoutStopSec` 到期才生效。控制类接口（暂停/继续/重启/删除）超时设为 35s
+（`CONTROL_TIMEOUT`），前端对应请求也与之对齐。
+
+**任务目录（`state/tasks.json`）**：`systemd-run --collect` 创建的单元在停止后即被 systemd
+回收（对已回收单元 `systemctl start` 会报 "Unit not found"）。因此 WebUI 在创建任务时把
+启动参数（平台/频道/画质/Cookie）写入任务目录；「暂停」置 `paused=true`，「继续」按记录重建
+同名单元，「删除」清理记录。目录读取失败或损坏时按空目录处理，不影响列表以外的功能。
+文件为运行产物（已 gitignore），路径可用 `WEBUI_STATE_DIR`/`STATE_DIRECTORY` 覆盖；
+服务单元通过 `ReadWritePaths=.../state` 放行写入。
 
 **运行用户**：录制服务应以安装了 yt-dlp/curl_cffi 的普通用户运行（本部署为
 `ubuntu`，依赖其 `~/.local` 站点目录），否则子进程 yt-dlp 会因找不到 `yt_dlp`

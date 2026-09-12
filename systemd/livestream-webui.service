@@ -14,7 +14,7 @@ RestartSec=5s
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ReadWritePaths=__PROJECT_ROOT__/recordings __PROJECT_ROOT__/logs /run /var/log/journal
+ReadWritePaths=__PROJECT_ROOT__/recordings __PROJECT_ROOT__/logs __PROJECT_ROOT__/state /run /var/log/journal
 
 [Install]
 WantedBy=multi-user.target

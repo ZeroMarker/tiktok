@@ -1,5 +1,5 @@
 <template>
-  <article class="job" :class="{ sel: selected }" :data-state="job.state">
+  <article class="job" :class="{ sel: selected }" :data-state="job.state" :data-live="job.live || 'unknown'" :style="{ '--pc': logoColor }">
     <div class="logo" :style="{ color: logoColor }">{{ (job.platform || "?").slice(0, 2) }}</div>
     <div class="job-main">
       <div class="job-heading">
@@ -8,32 +8,43 @@
       </div>
       <div class="job-facts">
         <span class="status" :class="stateClass(job.state, job.substate)">{{ stateLabel(job.state, job.substate) }}</span>
-        <span>PID {{ job.pid || "—" }}</span>
-        <span>内存 {{ fmtBytes(job.memory) }}</span>
+        <span class="status" :class="liveClass(job.live)">{{ liveLabel(job.live) }}</span>
+        <span v-if="!paused">PID {{ job.pid || "—" }}</span>
+        <span v-if="!paused">内存 {{ fmtBytes(job.memory) }}</span>
         <span v-if="job.restarts">重启 {{ job.restarts }}</span>
         <span v-if="job.state === 'active'">已运行 {{ fmtUptime(job.started) }}</span>
       </div>
     </div>
     <div class="actions">
-      <button class="secondary" type="button" :disabled="pending" @click="$emit('open', job)">日志</button>
-      <button class="secondary optional-action" type="button" :disabled="pending" @click="copy">复制名称</button>
-      <button class="secondary optional-action" type="button" :disabled="pending" @click="$emit('restart', job)">{{ pending && taskState.pendingAction === 'restart' ? "重启中…" : "重启" }}</button>
-      <button class="danger" type="button" :disabled="pending || !canStop" @click="$emit('stop', job)">{{ pending && taskState.pendingAction === 'stop' ? "停止中…" : "停止" }}</button>
+      <button class="secondary" type="button" :disabled="busy" @click="$emit('open', job)">日志</button>
+      <button class="secondary optional-action" type="button" :disabled="busy" @click="copy">复制名称</button>
+      <button v-if="paused" class="secondary" type="button" :disabled="busy" @click="$emit('resume', job)">{{ pending && taskState.pendingAction === 'resume' ? "继续中…" : "继续" }}</button>
+      <template v-else>
+        <button class="secondary optional-action" type="button" :disabled="busy || !canPause" @click="$emit('pause', job)">{{ stopping || (pending && taskState.pendingAction === 'pause') ? "暂停中…" : "暂停" }}</button>
+        <button class="secondary optional-action" type="button" :disabled="busy" @click="$emit('restart', job)">{{ pending && taskState.pendingAction === 'restart' ? "重启中…" : "重启" }}</button>
+      </template>
+      <button class="danger" type="button" :disabled="busy" @click="$emit('delete', job)">{{ pending && taskState.pendingAction === 'delete' ? "删除中…" : "删除" }}</button>
     </div>
   </article>
 </template>
 <script setup>
 import { computed } from "vue";
-import { PLATFORM_ZH, LOGO_COLORS, stateClass, stateLabel, fmtBytes, fmtUptime } from "../../utils.js";
+import { PLATFORM_ZH, LOGO_COLORS, stateClass, stateLabel, liveClass, liveLabel, isStopping, isPaused, fmtBytes, fmtUptime } from "../../utils.js";
 import { toast } from "../../ui.js";
 import { taskState } from "../../stores/taskStore.js";
 
 const props = defineProps({ job: { type: Object, required: true }, selected: Boolean });
-defineEmits(["open", "restart", "stop"]);
+defineEmits(["open", "pause", "resume", "restart", "delete"]);
 const platformZh = PLATFORM_ZH[props.job.platform] || props.job.platform || "—";
 const logoColor = LOGO_COLORS[props.job.platform] || "var(--blue)";
 const pending = computed(() => taskState.pendingUnit === props.job.unit);
-const canStop = computed(() => props.job.state === "active" || props.job.substate === "deactivating");
+// 停止/暂停收尾期间（systemd ActiveState=deactivating）由服务端状态驱动：
+// 刷新或重开页面后依然显示"暂停中…"并禁用该行操作。
+const stopping = computed(() => isStopping(props.job));
+const paused = computed(() => isPaused(props.job));
+const busy = computed(() => pending.value || stopping.value);
+// 只有运行中的任务可以暂停；已停止/失败的任务直接删除即可。
+const canPause = computed(() => props.job.state !== "inactive" && props.job.state !== "failed");
 
 async function copy() {
   try {
