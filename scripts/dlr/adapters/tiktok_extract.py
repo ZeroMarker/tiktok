@@ -26,7 +26,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import signal
 import shutil
 import subprocess
 import sys
@@ -225,17 +227,39 @@ def _get_stream_url_with_browser(username: str, timeout: int = 35) -> str | None
         return None
     try:
         with tempfile.TemporaryDirectory(prefix="tiktok-chromium-") as profile:
-            result = subprocess.run(
+            proc = subprocess.Popen(
                 [browser, "--headless=new", "--no-sandbox", "--disable-gpu",
                  "--disable-dev-shm-usage", f"--user-data-dir={profile}",
                  "--virtual-time-budget=15000", "--dump-dom",
                  f"https://www.tiktok.com/@{username}/live"],
-                capture_output=True, text=True, timeout=timeout,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                start_new_session=True,
             )
+            try:
+                stdout, _ = proc.communicate(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                # Chromium forks several renderer/crashpad processes. Killing
+                # only the parent leaves those children holding the temporary
+                # profile open, so TemporaryDirectory cannot remove it.
+                try:
+                    os.killpg(proc.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+                try:
+                    proc.communicate(timeout=5)
+                except subprocess.TimeoutExpired:
+                    try:
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    proc.communicate()
+                raise
     except (OSError, subprocess.TimeoutExpired) as exc:
         print(f"[tiktok_extract] 浏览器兜底失败：{exc}", file=sys.stderr)
         return None
-    stream_url = _stream_url_from_sigi(result.stdout or "")
+    stream_url = _stream_url_from_sigi(stdout or "")
     if stream_url:
         print("[tiktok_extract] 浏览器渲染通过 WAF，已从页面取得 FLV", file=sys.stderr)
     return stream_url
