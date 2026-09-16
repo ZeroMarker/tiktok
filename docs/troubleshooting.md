@@ -118,6 +118,50 @@ yt-dlp --impersonate chrome --cookies cookies.txt \
 [使用说明](usage.md) 的“TikTok 登录 Cookie”。历史案例（emma_kusunoki 等）见
 [tk/error.md](../tk/error.md) 与 [TikTok 录制排障](tiktok-live-recording.md)。
 
+### TikTok 未获取到流与 Chromium 临时目录
+
+“未获取到流”首先不等于程序故障。若主播已经下播，`yt-dlp`、Web API 和浏览器兜底
+都可能没有流地址；正式入口会按间隔继续轮询。先查看任务日志：
+
+```bash
+sudo journalctl -u livestream-rec-tiktok-<频道对应单元>.service -n 100 --no-pager -o cat
+```
+
+重点区分以下两种情况：
+
+- `所有 API 检测均未发现直播`：通常是未开播，也可能是地区/IP、登录态或反爬限制。
+- `浏览器兜底失败 ... timed out`：TikTok 页面或 WAF 在规定时间内没有返回；如果主播
+  确实正在直播，再单独验证 `yt-dlp`、Cookie 和网络出口。
+
+浏览器兜底会创建临时 profile。代码使用独立 Chromium 进程组；超时会终止整个进程组，
+然后由 `TemporaryDirectory` 回收 profile。正常情况下临时目录不会持续增长。运行中可观察：
+
+```bash
+find /tmp -maxdepth 1 -type d -name 'tiktok-chromium-*' | wc -l
+find ~/snap/chromium/common/chromium-headless -mindepth 1 -maxdepth 1 2>/dev/null | wc -l
+ps -eo pid,ppid,etime,args | grep -E '/snap/chromium/.+--headless' | grep -v grep
+```
+
+如果确认任务已经停止，但仍有残留临时目录，先停止全部 TikTok 录制单元并确认没有
+Headless Chromium 进程，再只清理下面两个临时目录。不要删除 `~/tiktok` 或
+`recordings/`：
+
+```bash
+units=$(systemctl list-units 'livestream-rec-tiktok-*.service' --all --no-legend | awk '{print $1}')
+[ -z "$units" ] || sudo systemctl stop $units
+
+find /tmp -maxdepth 1 -type d -name 'tiktok-chromium-*' -exec rm -rf -- {} +
+find ~/snap/chromium/common/chromium-headless -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + 2>/dev/null
+```
+
+清理后重新启动任务，并观察目录数量是否回到 0 且不再增长。若清理后目录持续增加，
+检查是否有旧版本脚本、手动启动的 `dlr.py`，或其他服务在调用 Chromium：
+
+```bash
+ps -eo pid,ppid,user,etime,args | grep -E 'dlr.py tiktok|chromium.*headless' | grep -v grep
+systemctl list-units --type=service --all | grep livestream-rec-tiktok
+```
+
 ## WebUI 无法启动
 
 检查服务与日志：
