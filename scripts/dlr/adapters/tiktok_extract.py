@@ -30,6 +30,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from dlr.adapters.base import pick_flv_url, quality_height
 
@@ -223,12 +224,14 @@ def _get_stream_url_with_browser(username: str, timeout: int = 35) -> str | None
     if not browser:
         return None
     try:
-        result = subprocess.run(
-            [browser, "--headless=new", "--no-sandbox", "--disable-gpu",
-             "--disable-dev-shm-usage", "--virtual-time-budget=15000", "--dump-dom",
-             f"https://www.tiktok.com/@{username}/live"],
-            capture_output=True, text=True, timeout=timeout,
-        )
+        with tempfile.TemporaryDirectory(prefix="tiktok-chromium-") as profile:
+            result = subprocess.run(
+                [browser, "--headless=new", "--no-sandbox", "--disable-gpu",
+                 "--disable-dev-shm-usage", f"--user-data-dir={profile}",
+                 "--virtual-time-budget=15000", "--dump-dom",
+                 f"https://www.tiktok.com/@{username}/live"],
+                capture_output=True, text=True, timeout=timeout,
+            )
     except (OSError, subprocess.TimeoutExpired) as exc:
         print(f"[tiktok_extract] 浏览器兜底失败：{exc}", file=sys.stderr)
         return None
