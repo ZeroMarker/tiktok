@@ -19,11 +19,28 @@ from dlr.adapters import load_adapter  # noqa: E402
 from dlr.adapters.base import extract_last_segment  # noqa: E402
 from dlr.adapters.base import normalize_quality, pick_flv_url, quality_height  # noqa: E402
 from dlr.adapters.tiktok_extract import _find_nickname, _find_nickname_from_sigi
+from dlr.adapters.tiktok_extract import _stream_url_from_sigi
 from dlr.engine import Engine, sanitize_path_part  # noqa: E402
 
 from unittest import mock  # noqa: E402
 import dlr.adapters.tiktok as tiktok_mod  # noqa: E402
 from dlr.adapters.tiktok import TikTokAdapter  # noqa: E402
+
+
+class TikTokRenderedStreamTest(unittest.TestCase):
+    def test_extracts_video_flv_from_serialized_stream_data(self):
+        sigi = {"LiveRoom": {"liveRoomUserInfo": {"liveRoom": {
+            "streamData": {"pull_data": {"stream_data": __import__("json").dumps({
+                "data": {"hd": {"main": {
+                    "flv": "https://cdn.example/video.flv",
+                    "hls": "https://cdn.example/video.m3u8",
+                }}, "ao": {"main": {
+                    "flv": "https://cdn.example/audio.flv?only_audio=1",
+                }}}
+            })}}
+        }}}}
+        html = '<script id="SIGI_STATE">' + __import__("json").dumps(sigi) + "</script>"
+        self.assertEqual(_stream_url_from_sigi(html), "https://cdn.example/video.flv")
 
 
 class SanitizeTest(unittest.TestCase):

@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -175,6 +176,66 @@ def check_live_via_webcast_api(
             if isinstance(url, str) and url.startswith("http"):
                 return url
     return None
+
+
+def _stream_url_from_sigi(text: str) -> str | None:
+    """Extract a playable FLV/HLS URL from rendered TikTok SIGI_STATE."""
+    match = re.search(r'<script id="SIGI_STATE"[^>]*>(.*?)</script>', text, re.DOTALL)
+    if not match:
+        return None
+    try:
+        data = json.loads(match.group(1))
+    except (TypeError, ValueError):
+        return None
+
+    urls: list[str] = []
+
+    def walk(value: object, key: str = "") -> None:
+        if isinstance(value, dict):
+            for child_key, child in value.items():
+                walk(child, str(child_key))
+        elif isinstance(value, list):
+            for child in value:
+                walk(child, key)
+        elif isinstance(value, str) and value.lower().startswith(("http://", "https://")):
+            if "only_audio=1" not in value:
+                urls.append(value)
+        elif isinstance(value, str) and key in {"stream_data", "streamData"}:
+            # Recent pages serialize pull_data.stream_data as JSON.
+            try:
+                walk(json.loads(value), key)
+            except (TypeError, ValueError):
+                pass
+
+    live_room = data.get("LiveRoom", {}).get("liveRoomUserInfo", {}).get("liveRoom", {})
+    walk(live_room.get("streamData", {}))
+    walk(live_room.get("hevcStreamData", {}))
+    return next((url for url in urls if ".flv" in url), None) or (urls[0] if urls else None)
+
+
+def _get_stream_url_with_browser(username: str, timeout: int = 35) -> str | None:
+    """Resolve SlardarWAF pages through installed headless Chromium."""
+    browser = next(
+        (shutil.which(name) for name in ("chromium", "chromium-browser", "google-chrome")
+         if shutil.which(name)),
+        None,
+    )
+    if not browser:
+        return None
+    try:
+        result = subprocess.run(
+            [browser, "--headless=new", "--no-sandbox", "--disable-gpu",
+             "--disable-dev-shm-usage", "--virtual-time-budget=15000", "--dump-dom",
+             f"https://www.tiktok.com/@{username}/live"],
+            capture_output=True, text=True, timeout=timeout,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        print(f"[tiktok_extract] 浏览器兜底失败：{exc}", file=sys.stderr)
+        return None
+    stream_url = _stream_url_from_sigi(result.stdout or "")
+    if stream_url:
+        print("[tiktok_extract] 浏览器渲染通过 WAF，已从页面取得 FLV", file=sys.stderr)
+    return stream_url
 
 
 def _try_ytdlp_fallback(username: str, max_height: int | None = None) -> str | None:
@@ -373,6 +434,11 @@ def get_stream_url(username: str, quality: str = "best") -> str | None:
         print("[tiktok_extract] 多次重试仍无法访问直播页，本次放弃", file=sys.stderr)
         return None
 
+    if "slardar" in r.text.lower() or "please wait" in r.text.lower():
+        stream_url = _get_stream_url_with_browser(username)
+        if stream_url:
+            return stream_url
+
     # 方法A：SIGI_STATE 检测
     room_id, status = get_room_id_from_sigi(r.text)
     if status == 2 and room_id:
@@ -400,6 +466,11 @@ def get_stream_url(username: str, quality: str = "best") -> str | None:
             stream_url = check_live_via_webcast_api(session, rid, max_height)
             if stream_url:
                 return stream_url
+
+    # Some accounts expose streamData in the rendered page while room/info is unavailable.
+    stream_url = _get_stream_url_with_browser(username)
+    if stream_url:
+        return stream_url
 
     print("[tiktok_extract] 所有 API 检测均未发现直播", file=sys.stderr)
     return None
