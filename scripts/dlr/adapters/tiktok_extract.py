@@ -260,6 +260,35 @@ def _terminate_process_group(proc: subprocess.Popen, grace: float = 5) -> None:
         raise subprocess.TimeoutExpired(proc.args, grace)
 
 
+def _active_chromium_profiles() -> set[str]:
+    """Return profile paths currently referenced by local Chromium processes."""
+    profiles: set[str] = set()
+    for cmdline in Path("/proc").glob("[0-9]*/cmdline"):
+        try:
+            args = cmdline.read_bytes().split(b"\0")
+        except (OSError, PermissionError):
+            continue
+        for arg in args:
+            if arg.startswith(b"--user-data-dir="):
+                profiles.add(os.fsdecode(arg.partition(b"=")[2]))
+    return profiles
+
+
+def _remove_stale_chromium_profiles(
+    profile_parent: Path, *, max_age: float = 600
+) -> None:
+    """Remove abandoned profiles without touching active or recent probes."""
+    active = _active_chromium_profiles()
+    cutoff = time.time() - max_age
+    for profile in profile_parent.glob("tiktok-chromium-*"):
+        try:
+            if profile.stat().st_mtime > cutoff or str(profile) in active:
+                continue
+        except OSError:
+            continue
+        shutil.rmtree(profile, ignore_errors=True)
+
+
 def _chromium_profile_parent(browser: str) -> str | None:
     """Return a profile parent visible from both host and browser sandbox."""
     browser_path = Path(browser)
@@ -273,6 +302,7 @@ def _chromium_profile_parent(browser: str) -> str | None:
         Path.home() / "snap" / browser_path.name / "common" / "chromium-headless"
     )
     profile_parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    _remove_stale_chromium_profiles(profile_parent)
     return str(profile_parent)
 
 

@@ -21,6 +21,7 @@ from dlr.adapters.base import normalize_quality, pick_flv_url, quality_height  #
 import dlr.adapters.tiktok_extract as tiktok_extract_mod  # noqa: E402
 from dlr.adapters.tiktok_extract import _find_nickname, _find_nickname_from_sigi
 from dlr.adapters.tiktok_extract import _stream_url_from_sigi
+import dlr.engine as engine_mod  # noqa: E402
 from dlr.engine import Engine, sanitize_path_part  # noqa: E402
 
 from unittest import mock  # noqa: E402
@@ -101,11 +102,17 @@ class ChromiumProcessGroupCleanupTest(unittest.TestCase):
                 tiktok_extract_mod.Path, "home", return_value=Path("/home/test")
             ),
             mock.patch.object(tiktok_extract_mod.Path, "mkdir") as mkdir,
+            mock.patch.object(
+                tiktok_extract_mod, "_remove_stale_chromium_profiles"
+            ) as remove_stale,
         ):
             parent = tiktok_extract_mod._chromium_profile_parent("/snap/bin/chromium")
 
         self.assertEqual(parent, "/home/test/snap/chromium/common/chromium-headless")
         mkdir.assert_called_once_with(mode=0o700, parents=True, exist_ok=True)
+        remove_stale.assert_called_once_with(
+            Path("/home/test/snap/chromium/common/chromium-headless")
+        )
 
     def test_non_snap_browser_keeps_system_temp_directory(self):
         self.assertIsNone(
@@ -128,6 +135,36 @@ class ChromiumProcessGroupCleanupTest(unittest.TestCase):
         self.assertIsNone(result)
         terminate.assert_called_once_with(proc)
         temp_dir.assert_called_once_with(prefix="tiktok-chromium-", dir=None)
+
+    def test_stale_profile_cleanup_preserves_recent_and_active(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            stale = parent / "tiktok-chromium-stale"
+            active = parent / "tiktok-chromium-active"
+            recent = parent / "tiktok-chromium-recent"
+            unrelated = parent / "other"
+            for path in (stale, active, recent, unrelated):
+                path.mkdir()
+            os.utime(stale, (100, 100))
+            os.utime(active, (100, 100))
+            os.utime(recent, (950, 950))
+
+            with (
+                mock.patch.object(tiktok_extract_mod.time, "time", return_value=1000),
+                mock.patch.object(
+                    tiktok_extract_mod,
+                    "_active_chromium_profiles",
+                    return_value={str(active)},
+                ),
+            ):
+                tiktok_extract_mod._remove_stale_chromium_profiles(
+                    parent, max_age=100
+                )
+
+            self.assertFalse(stale.exists())
+            self.assertTrue(active.exists())
+            self.assertTrue(recent.exists())
+            self.assertTrue(unrelated.exists())
 
 
 class SanitizeTest(unittest.TestCase):
@@ -502,6 +539,36 @@ class SignalStopTest(unittest.TestCase):
     def setUp(self):
         self.base = Path(tempfile.mkdtemp(prefix="dlr_signal_test_"))
         self.addCleanup(shutil.rmtree, self.base, ignore_errors=True)
+
+    def test_kills_only_detached_child_process_groups(self):
+        with (
+            mock.patch.object(engine_mod.Path, "read_text", return_value="101 102 103"),
+            mock.patch.object(
+                engine_mod.Path,
+                "read_bytes",
+                side_effect=[
+                    b"chrome\0--user-data-dir=/tmp/chromium-headless/tiktok-chromium-x\0",
+                    b"ffmpeg\0",
+                    OSError,
+                ],
+            ),
+            mock.patch.object(engine_mod.os, "getpid", return_value=99),
+            mock.patch.object(engine_mod.os, "getpgrp", return_value=50),
+            mock.patch.object(
+                engine_mod.os,
+                "getpgid",
+                side_effect=[101, 50, ProcessLookupError],
+            ),
+            mock.patch.object(engine_mod.os, "killpg") as killpg,
+            mock.patch.object(engine_mod.shutil, "rmtree") as rmtree,
+            mock.patch.object(engine_mod.Path, "exists", return_value=False),
+        ):
+            engine_mod._kill_isolated_child_process_groups()
+
+        killpg.assert_called_once_with(101, signal.SIGKILL)
+        rmtree.assert_called_once_with(
+            Path("/tmp/chromium-headless/tiktok-chromium-x"), ignore_errors=True
+        )
 
     def _spawn_engine(self, body: str) -> subprocess.Popen:
         """在子进程里启动 Engine 并执行 body，等它打印 ready 后返回该进程。"""

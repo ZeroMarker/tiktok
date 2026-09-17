@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 import re
 import signal
+import shutil
 import subprocess
 import sys
 import threading
@@ -21,6 +22,59 @@ FFMPEG_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
 )
+
+
+def _kill_isolated_child_process_groups() -> None:
+    """Kill direct children that detached into their own process groups.
+
+    Snap launchers can escape a transient unit when the engine uses os._exit()
+    from a signal handler. Chromium probes are started in a new session, so
+    terminating those child groups prevents orphan browsers and profiles.
+    """
+    children_path = Path(f"/proc/{os.getpid()}/task/{os.getpid()}/children")
+    try:
+        child_pids = children_path.read_text().split()
+    except OSError:
+        return
+
+    own_pgid = os.getpgrp()
+    child_pgids: set[int] = set()
+    child_profiles: set[Path] = set()
+    for child_pid in child_pids:
+        try:
+            args = Path(f"/proc/{child_pid}/cmdline").read_bytes().split(b"\0")
+        except OSError:
+            args = []
+        for arg in args:
+            if not arg.startswith(b"--user-data-dir="):
+                continue
+            profile = Path(os.fsdecode(arg.partition(b"=")[2]))
+            if (
+                profile.name.startswith("tiktok-chromium-")
+                and profile.parent.name == "chromium-headless"
+            ):
+                child_profiles.add(profile)
+        try:
+            pgid = os.getpgid(int(child_pid))
+        except (ProcessLookupError, ValueError):
+            continue
+        if pgid != own_pgid:
+            child_pgids.add(pgid)
+
+    for pgid in child_pgids:
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+    # SIGKILL delivery is asynchronous. A short retry removes the exact
+    # disposable profiles after Chromium has stopped writing into them.
+    for _attempt in range(2):
+        for profile in child_profiles:
+            shutil.rmtree(profile, ignore_errors=True)
+        if not any(profile.exists() for profile in child_profiles):
+            break
+        time.sleep(0.1)
 
 
 def sanitize_path_part(value: str) -> str:
@@ -98,7 +152,14 @@ class Engine:
         保证停止立即生效。
         """
         self._stopping = True
-        print(f"收到信号 {signum}，正在停止录制...", flush=True)
+        # Buffered stdout/stderr may already be executing when Python dispatches
+        # the signal from a C callback. Re-entering print()/flush() then raises
+        # RuntimeError before os._exit(), so use an unbuffered file-descriptor
+        # write and keep shutdown independent from Python's IO wrappers.
+        try:
+            os.write(2, f"收到信号 {signum}，正在停止录制...\n".encode())
+        except OSError:
+            pass
         proc = self.ffmpeg_proc
         if proc is not None and proc.poll() is None:
             proc.terminate()
@@ -106,11 +167,7 @@ class Engine:
                 proc.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 proc.kill()
-        for stream in (sys.stdout, sys.stderr):
-            try:
-                stream.flush()
-            except Exception:
-                pass
+        _kill_isolated_child_process_groups()
         os._exit(0)
 
     # ---- 生命周期 ----

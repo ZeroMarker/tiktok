@@ -136,7 +136,9 @@ sudo journalctl -u livestream-rec-tiktok-<频道对应单元>.service -n 100 --n
 浏览器兜底会创建临时 profile。代码使用独立 Chromium 进程组，并在每次探测结束时终止
 整个进程组，然后由 `TemporaryDirectory` 回收 profile。Snap Chromium 的 profile 创建在
 `~/snap/chromium/common/chromium-headless`，确保宿主和 Snap 看到并清理的是同一个目录；
-不能使用宿主 `/tmp`，否则文件会残留在 Snap 私有 `/tmp`。运行中可观察：
+不能使用宿主 `/tmp`，否则文件会残留在 Snap 私有 `/tmp`。后续探测还会自动删除超过
+10 分钟且未被进程引用的旧 profile，覆盖 SIGKILL、掉电等无法执行上下文清理的情况。
+运行中可观察：
 
 ```bash
 find /tmp -maxdepth 1 -type d -name 'tiktok-chromium-*' | wc -l
