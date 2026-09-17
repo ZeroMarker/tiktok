@@ -216,6 +216,48 @@ def _stream_url_from_sigi(text: str) -> str | None:
     return next((url for url in urls if ".flv" in url), None) or (urls[0] if urls else None)
 
 
+def _wait_for_process_group_exit(pgid: int, timeout: float) -> bool:
+    """Wait until a POSIX process group no longer has any live members."""
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            os.killpg(pgid, 0)
+        except ProcessLookupError:
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.05)
+
+
+def _terminate_process_group(proc: subprocess.Popen, grace: float = 5) -> None:
+    """Terminate and reap a subprocess and every member of its process group."""
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+
+    try:
+        proc.communicate(timeout=grace)
+    except subprocess.TimeoutExpired:
+        pass
+
+    if _wait_for_process_group_exit(proc.pid, grace):
+        return
+
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+
+    try:
+        proc.communicate(timeout=grace)
+    except subprocess.TimeoutExpired:
+        pass
+
+    if not _wait_for_process_group_exit(proc.pid, grace):
+        raise subprocess.TimeoutExpired(proc.args, grace)
+
+
 def _get_stream_url_with_browser(username: str, timeout: int = 35) -> str | None:
     """Resolve SlardarWAF pages through installed headless Chromium."""
     browser = next(
@@ -243,18 +285,7 @@ def _get_stream_url_with_browser(username: str, timeout: int = 35) -> str | None
                 # Chromium forks several renderer/crashpad processes. Killing
                 # only the parent leaves those children holding the temporary
                 # profile open, so TemporaryDirectory cannot remove it.
-                try:
-                    os.killpg(proc.pid, signal.SIGTERM)
-                except ProcessLookupError:
-                    pass
-                try:
-                    proc.communicate(timeout=5)
-                except subprocess.TimeoutExpired:
-                    try:
-                        os.killpg(proc.pid, signal.SIGKILL)
-                    except ProcessLookupError:
-                        pass
-                    proc.communicate()
+                _terminate_process_group(proc)
                 raise
     except (OSError, subprocess.TimeoutExpired) as exc:
         print(f"[tiktok_extract] 浏览器兜底失败：{exc}", file=sys.stderr)

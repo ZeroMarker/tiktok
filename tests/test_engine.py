@@ -18,6 +18,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 from dlr.adapters import load_adapter  # noqa: E402
 from dlr.adapters.base import extract_last_segment  # noqa: E402
 from dlr.adapters.base import normalize_quality, pick_flv_url, quality_height  # noqa: E402
+import dlr.adapters.tiktok_extract as tiktok_extract_mod  # noqa: E402
 from dlr.adapters.tiktok_extract import _find_nickname, _find_nickname_from_sigi
 from dlr.adapters.tiktok_extract import _stream_url_from_sigi
 from dlr.engine import Engine, sanitize_path_part  # noqa: E402
@@ -41,6 +42,58 @@ class TikTokRenderedStreamTest(unittest.TestCase):
         }}}}
         html = '<script id="SIGI_STATE">' + __import__("json").dumps(sigi) + "</script>"
         self.assertEqual(_stream_url_from_sigi(html), "https://cdn.example/video.flv")
+
+
+class ChromiumProcessGroupCleanupTest(unittest.TestCase):
+    def _proc(self):
+        proc = mock.Mock()
+        proc.pid = 1234
+        proc.args = ["chromium", "--headless=new"]
+        proc.communicate.return_value = ("", "")
+        return proc
+
+    def test_sigterm_is_enough_when_whole_group_exits(self):
+        proc = self._proc()
+        with (
+            mock.patch.object(tiktok_extract_mod.os, "killpg") as killpg,
+            mock.patch.object(
+                tiktok_extract_mod, "_wait_for_process_group_exit", return_value=True
+            ) as wait_group,
+        ):
+            tiktok_extract_mod._terminate_process_group(proc, grace=2)
+
+        killpg.assert_called_once_with(proc.pid, signal.SIGTERM)
+        proc.communicate.assert_called_once_with(timeout=2)
+        wait_group.assert_called_once_with(proc.pid, 2)
+
+    def test_sigkill_is_sent_when_children_survive_sigterm(self):
+        proc = self._proc()
+        with (
+            mock.patch.object(tiktok_extract_mod.os, "killpg") as killpg,
+            mock.patch.object(
+                tiktok_extract_mod,
+                "_wait_for_process_group_exit",
+                side_effect=[False, True],
+            ),
+        ):
+            tiktok_extract_mod._terminate_process_group(proc, grace=2)
+
+        self.assertEqual(
+            killpg.call_args_list,
+            [mock.call(proc.pid, signal.SIGTERM), mock.call(proc.pid, signal.SIGKILL)],
+        )
+        self.assertEqual(proc.communicate.call_count, 2)
+
+    def test_cleanup_stays_bounded_if_group_does_not_exit(self):
+        proc = self._proc()
+        with (
+            mock.patch.object(tiktok_extract_mod.os, "killpg"),
+            mock.patch.object(
+                tiktok_extract_mod, "_wait_for_process_group_exit", return_value=False
+            ),
+        ):
+            with self.assertRaises(subprocess.TimeoutExpired):
+                tiktok_extract_mod._terminate_process_group(proc, grace=2)
 
 
 class SanitizeTest(unittest.TestCase):
