@@ -95,6 +95,40 @@ class ChromiumProcessGroupCleanupTest(unittest.TestCase):
             with self.assertRaises(subprocess.TimeoutExpired):
                 tiktok_extract_mod._terminate_process_group(proc, grace=2)
 
+    def test_snap_profile_parent_is_shared_with_host(self):
+        with (
+            mock.patch.object(
+                tiktok_extract_mod.Path, "home", return_value=Path("/home/test")
+            ),
+            mock.patch.object(tiktok_extract_mod.Path, "mkdir") as mkdir,
+        ):
+            parent = tiktok_extract_mod._chromium_profile_parent("/snap/bin/chromium")
+
+        self.assertEqual(parent, "/home/test/snap/chromium/common/chromium-headless")
+        mkdir.assert_called_once_with(mode=0o700, parents=True, exist_ok=True)
+
+    def test_non_snap_browser_keeps_system_temp_directory(self):
+        self.assertIsNone(
+            tiktok_extract_mod._chromium_profile_parent("/usr/bin/google-chrome")
+        )
+
+    def test_successful_probe_always_reaps_process_group(self):
+        proc = self._proc()
+        html = '<script id="SIGI_STATE">{}</script>'
+        proc.communicate.return_value = (html, "")
+        with (
+            mock.patch.object(tiktok_extract_mod.shutil, "which", return_value="/usr/bin/chrome"),
+            mock.patch.object(tiktok_extract_mod.tempfile, "TemporaryDirectory") as temp_dir,
+            mock.patch.object(tiktok_extract_mod.subprocess, "Popen", return_value=proc),
+            mock.patch.object(tiktok_extract_mod, "_terminate_process_group") as terminate,
+        ):
+            temp_dir.return_value.__enter__.return_value = "/tmp/profile"
+            result = tiktok_extract_mod._get_stream_url_with_browser("example")
+
+        self.assertIsNone(result)
+        terminate.assert_called_once_with(proc)
+        temp_dir.assert_called_once_with(prefix="tiktok-chromium-", dir=None)
+
 
 class SanitizeTest(unittest.TestCase):
     def test_removes_path_specials(self):

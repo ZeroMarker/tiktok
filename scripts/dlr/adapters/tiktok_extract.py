@@ -34,6 +34,8 @@ import subprocess
 import sys
 import tempfile
 import time
+from pathlib import Path
+
 from dlr.adapters.base import pick_flv_url, quality_height
 
 
@@ -258,6 +260,22 @@ def _terminate_process_group(proc: subprocess.Popen, grace: float = 5) -> None:
         raise subprocess.TimeoutExpired(proc.args, grace)
 
 
+def _chromium_profile_parent(browser: str) -> str | None:
+    """Return a profile parent visible from both host and browser sandbox."""
+    browser_path = Path(browser)
+    if browser_path.parts[:3] != ("/", "snap", "bin"):
+        return None
+
+    # A snap's private /tmp is mounted at /tmp/snap-private-tmp on the host.
+    # Profiles created in the host /tmp therefore cannot be removed by cleaning
+    # the original path. SNAP_USER_COMMON is shared by the host and the snap.
+    profile_parent = (
+        Path.home() / "snap" / browser_path.name / "common" / "chromium-headless"
+    )
+    profile_parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return str(profile_parent)
+
+
 def _get_stream_url_with_browser(username: str, timeout: int = 35) -> str | None:
     """Resolve SlardarWAF pages through installed headless Chromium."""
     browser = next(
@@ -268,7 +286,10 @@ def _get_stream_url_with_browser(username: str, timeout: int = 35) -> str | None
     if not browser:
         return None
     try:
-        with tempfile.TemporaryDirectory(prefix="tiktok-chromium-") as profile:
+        profile_parent = _chromium_profile_parent(browser)
+        with tempfile.TemporaryDirectory(
+            prefix="tiktok-chromium-", dir=profile_parent
+        ) as profile:
             proc = subprocess.Popen(
                 [browser, "--headless=new", "--no-sandbox", "--disable-gpu",
                  "--disable-dev-shm-usage", f"--user-data-dir={profile}",
@@ -281,12 +302,11 @@ def _get_stream_url_with_browser(username: str, timeout: int = 35) -> str | None
             )
             try:
                 stdout, _ = proc.communicate(timeout=timeout)
-            except subprocess.TimeoutExpired:
-                # Chromium forks several renderer/crashpad processes. Killing
-                # only the parent leaves those children holding the temporary
-                # profile open, so TemporaryDirectory cannot remove it.
+            finally:
+                # Chromium forks renderer/crashpad processes. Always reap the
+                # whole group before TemporaryDirectory removes the profile,
+                # including successful, exceptional and interrupted probes.
                 _terminate_process_group(proc)
-                raise
     except (OSError, subprocess.TimeoutExpired) as exc:
         print(f"[tiktok_extract] 浏览器兜底失败：{exc}", file=sys.stderr)
         return None

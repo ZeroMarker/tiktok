@@ -133,8 +133,10 @@ sudo journalctl -u livestream-rec-tiktok-<频道对应单元>.service -n 100 --n
 - `浏览器兜底失败 ... timed out`：TikTok 页面或 WAF 在规定时间内没有返回；如果主播
   确实正在直播，再单独验证 `yt-dlp`、Cookie 和网络出口。
 
-浏览器兜底会创建临时 profile。代码使用独立 Chromium 进程组；超时会终止整个进程组，
-然后由 `TemporaryDirectory` 回收 profile。正常情况下临时目录不会持续增长。运行中可观察：
+浏览器兜底会创建临时 profile。代码使用独立 Chromium 进程组，并在每次探测结束时终止
+整个进程组，然后由 `TemporaryDirectory` 回收 profile。Snap Chromium 的 profile 创建在
+`~/snap/chromium/common/chromium-headless`，确保宿主和 Snap 看到并清理的是同一个目录；
+不能使用宿主 `/tmp`，否则文件会残留在 Snap 私有 `/tmp`。运行中可观察：
 
 ```bash
 find /tmp -maxdepth 1 -type d -name 'tiktok-chromium-*' | wc -l
