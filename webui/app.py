@@ -10,6 +10,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 import threading
 import time
 from http import HTTPStatus
@@ -172,12 +173,6 @@ def _save_catalog(catalog: dict[str, dict[str, object]]) -> None:
         json.dumps(catalog, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8"
     )
     tmp.replace(CATALOG_FILE)
-
-
-def _prune_catalog(catalog: dict[str, dict[str, object]], live: set[str]) -> None:
-    """丢弃既未暂停、systemd 里也不存在的条目（如命令行手动 stop 掉的任务）。"""
-    for unit in [u for u, spec in catalog.items() if not spec.get("paused") and u not in live]:
-        catalog.pop(unit, None)
 
 
 def _spec_from_unit(unit: str) -> dict[str, object] | None:
@@ -433,6 +428,31 @@ def _spawn(spec: dict[str, object]) -> str:
     return unit
 
 
+def restore_jobs() -> tuple[list[str], dict[str, str]]:
+    """Restore missing non-paused transient units from the persistent catalog."""
+    restored: list[str] = []
+    failed: dict[str, str] = {}
+    with _CATALOG_LOCK:
+        catalog = _load_catalog()
+        live = set(_live_units())
+        for unit, spec in catalog.items():
+            if spec.get("paused") or unit in live:
+                continue
+            try:
+                _validate_spec(spec)
+                expected = unit_name(str(spec["platform"]), str(spec["target"]))
+                if expected != unit:
+                    raise ValueError(f"任务名称与启动参数不匹配（应为 {expected}）")
+                started = _spawn(spec)
+                if started != unit:
+                    raise RuntimeError(f"恢复后任务名称不匹配（得到 {started}）")
+                restored.append(unit)
+                live.add(unit)
+            except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as exc:
+                failed[unit] = str(exc)
+    return restored, failed
+
+
 def start_job(data: dict) -> str:
     spec = {
         "platform": str(data.get("platform", "")).lower(),
@@ -446,7 +466,6 @@ def start_job(data: dict) -> str:
     with _CATALOG_LOCK:
         catalog = _load_catalog()
         live = set(_live_units())
-        _prune_catalog(catalog, live)
         for unit, stored in catalog.items():
             if stored.get("paused") and str(stored.get("platform")) == spec["platform"] \
                     and str(stored.get("target", "")).strip().casefold() == normalized:
@@ -476,7 +495,6 @@ def pause_job(unit: str) -> None:
     with _CATALOG_LOCK:
         catalog = _load_catalog()
         live = set(_live_units())
-        _prune_catalog(catalog, live)
         if unit not in live:
             raise ValueError("任务当前未在运行，无需暂停")
         spec = catalog.get(unit) or _spec_from_unit(unit)
@@ -496,7 +514,6 @@ def resume_job(unit: str) -> str:
     with _CATALOG_LOCK:
         catalog = _load_catalog()
         live = set(_live_units())
-        _prune_catalog(catalog, live)
         spec = catalog.get(unit)
         if spec is None or not spec.get("paused"):
             raise ValueError("该任务不在暂停列表中")
@@ -696,6 +713,11 @@ class Handler(BaseHTTPRequestHandler):
 def main() -> None:
     host = os.environ.get("LIVE_WEBUI_HOST", "127.0.0.1")
     port = int(os.environ.get("LIVE_WEBUI_PORT", "8765"))
+    restored, failed = restore_jobs()
+    if restored:
+        print(f"已恢复 {len(restored)} 个录制任务：{', '.join(restored)}", flush=True)
+    for unit, error in failed.items():
+        print(f"恢复录制任务失败 {unit}：{error}", file=sys.stderr, flush=True)
     server = ThreadingHTTPServer((host, port), Handler)
     print(f"Live Stream WebUI: http://{host}:{port}", flush=True)
     try:

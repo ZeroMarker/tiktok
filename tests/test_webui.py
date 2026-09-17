@@ -615,18 +615,39 @@ class TaskPauseResumeDeleteTest(unittest.TestCase):
         self.assertIn("暂停", str(ctx.exception))
         mocked_run.assert_not_called()
 
-    def test_stale_records_are_not_listed_and_get_pruned_on_write(self):
-        """非暂停且 systemd 里不存在的记录只可能是历史残留：不得复活成假任务。"""
-        stale = "livestream-rec-tiktok-gone-ffffffffff.service"
-        self.catalog_file.write_text(json.dumps({stale: self._spec()}), encoding="utf-8")
-        with patch.object(app, "_live_units", return_value=[]):
-            self.assertEqual(app.list_jobs(), [])
+    def test_restore_respawns_missing_nonpaused_task(self):
+        self.catalog_file.write_text(json.dumps({self.UNIT: self._spec()}), encoding="utf-8")
+        with patch.object(app, "_live_units", return_value=[]), \
+                patch.object(app, "run", return_value=CompletedProcess([], 0, stdout="", stderr="")) as mocked_run:
+            restored, failed = app.restore_jobs()
+        self.assertEqual(restored, [self.UNIT])
+        self.assertEqual(failed, {})
+        argv = mocked_run.call_args.args[0]
+        self.assertEqual(argv[0], app.SYSTEMD_RUN)
+        self.assertIn(f"--unit={self.UNIT.removesuffix('.service')}", argv)
+        self.assertEqual(self._catalog()[self.UNIT]["target"], "chan")
+
+    def test_restore_skips_running_and_paused_tasks(self):
+        paused_unit = app.unit_name("tiktok", "paused")
+        catalog = {
+            self.UNIT: self._spec(),
+            paused_unit: {**self._spec(), "target": "paused", "paused": True},
+        }
+        self.catalog_file.write_text(json.dumps(catalog), encoding="utf-8")
         with patch.object(app, "_live_units", return_value=[self.UNIT]), \
-                patch.object(app, "run", side_effect=[
-                    self._unit_show(), CompletedProcess([], 0, stdout="", stderr="")
-                ]):
-            app.pause_job(self.UNIT)  # 目录里没有该单元的记录，走 ExecStart 反推
-        self.assertEqual(sorted(self._catalog()), sorted([self.UNIT]))
+                patch.object(app, "run") as mocked_run:
+            restored, failed = app.restore_jobs()
+        self.assertEqual((restored, failed), ([], {}))
+        mocked_run.assert_not_called()
+
+    def test_restore_failure_does_not_delete_catalog(self):
+        self.catalog_file.write_text(json.dumps({self.UNIT: self._spec()}), encoding="utf-8")
+        failure = CompletedProcess([], 1, stdout="", stderr="systemd unavailable")
+        with patch.object(app, "_live_units", return_value=[]), patch.object(app, "run", return_value=failure):
+            restored, failed = app.restore_jobs()
+        self.assertEqual(restored, [])
+        self.assertIn("systemd unavailable", failed[self.UNIT])
+        self.assertIn(self.UNIT, self._catalog())
 
     def test_corrupt_catalog_does_not_break_listing(self):
         self.catalog_file.write_text("{ not json", encoding="utf-8")
