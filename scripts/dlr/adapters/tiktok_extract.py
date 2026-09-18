@@ -347,7 +347,10 @@ def _get_stream_url_with_browser(username: str, timeout: int = 35) -> str | None
         ) as profile:
             proc = subprocess.Popen(
                 [browser, "--headless=new", "--no-sandbox", "--disable-gpu",
-                 "--disable-vulkan", "--disable-features=Vulkan,VulkanFromANGLE",
+                 "--disable-vulkan",
+                 "--disable-features=Vulkan,VulkanFromANGLE,DefaultANGLEVulkan",
+                 "--use-gl=disabled", "--disable-software-rasterizer",
+                 "--disable-gpu-compositing",
                  "--disable-dev-shm-usage", f"--user-data-dir={profile}",
                  "--virtual-time-budget=15000", "--dump-dom",
                  f"https://www.tiktok.com/@{username}/live"],

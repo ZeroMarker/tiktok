@@ -139,7 +139,13 @@ class ChromiumProcessGroupCleanupTest(unittest.TestCase):
         temp_dir.assert_called_once_with(prefix="tiktok-chromium-", dir=None)
         browser_args = popen.call_args.args[0]
         self.assertIn("--disable-vulkan", browser_args)
-        self.assertIn("--disable-features=Vulkan,VulkanFromANGLE", browser_args)
+        self.assertIn(
+            "--disable-features=Vulkan,VulkanFromANGLE,DefaultANGLEVulkan",
+            browser_args,
+        )
+        self.assertIn("--use-gl=disabled", browser_args)
+        self.assertIn("--disable-software-rasterizer", browser_args)
+        self.assertIn("--disable-gpu-compositing", browser_args)
 
     def test_prefers_non_snap_browser(self):
         paths = {
