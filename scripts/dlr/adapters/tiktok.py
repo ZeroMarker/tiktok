@@ -1,10 +1,9 @@
 """TikTok 适配器：多方法兜底检测。
 
-yt-dlp 对 TikTok 有风控误判风险，因此按优先级依次尝试：
-    1) yt-dlp https 主域（FLV 优先）
-    2) yt-dlp + --impersonate chrome
-    3) yt-dlp mobile 子域
-    4) curl_cffi 直接解析页面 + webcast API（tiktok_extract.get_stream_url）
+yt-dlp 对 TikTok 有风控误判风险，因此先做轻量检测：
+    1) 单次 yt-dlp 主域检测（FLV 优先）
+    2) curl_cffi 直接解析页面 + webcast API
+    3) 连续 3 次轻量检测失败后，才允许 Chromium 兜底一次
 """
 
 from __future__ import annotations
@@ -18,6 +17,11 @@ class TikTokAdapter(BaseAdapter):
     platform = "tiktok"
     referer = "https://www.tiktok.com/"
     bsf_aac = True
+    browser_fallback_every = 3
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._lightweight_misses = 0
 
     def _extract_identifier(self) -> str:
         return extract_last_segment(self.target)
@@ -29,34 +33,42 @@ class TikTokAdapter(BaseAdapter):
         return []
 
     def detect_stream_url(self) -> str | None:
-        # 方法1/2/3：yt-dlp 变体
-        urls = (
-            f"https://www.tiktok.com/@{self.identifier}/live",
-            f"https://m.tiktok.com/@{self.identifier}/live",
-        )
+        # 方法1：单次 yt-dlp 主域探测。避免离线时每轮重复启动多个 yt-dlp。
+        url = f"https://www.tiktok.com/@{self.identifier}/live"
         if self.quality_height:
             h = self.quality_height
             fmt = f"b[height<={h}][ext=flv]/best[height<={h}]/best"
         else:
             fmt = "b[ext=flv]/best"
-        for url in urls:
-            for extra in ([], ["--impersonate", "chrome"]):
-                stream = self.run_capture(
-                    [
-                        "yt-dlp",
-                        "--no-warnings",
-                        "-f", fmt,
-                        *extra,
-                        *self._ytdlp_cookie_args(),
-                        "--get-url",
-                        url,
-                    ]
-                )
-                if stream:
-                    return stream
+        stream = self.run_capture(
+            [
+                "yt-dlp",
+                "--no-warnings",
+                "--impersonate", "chrome",
+                "-f", fmt,
+                *self._ytdlp_cookie_args(),
+                "--get-url",
+                url,
+            ]
+        )
+        if stream:
+            self._lightweight_misses = 0
+            return stream
 
-        # 方法4：Python (curl_cffi) 直接解析页面 + webcast API
-        return get_stream_url(self.identifier, quality=self.quality)
+        # 方法2/3：进程内 HTTP/API 检测；每 3 次连续失败才启用一次浏览器。
+        allow_browser = self._lightweight_misses + 1 >= self.browser_fallback_every
+        stream = get_stream_url(
+            self.identifier,
+            quality=self.quality,
+            try_ytdlp=False,
+            allow_browser=allow_browser,
+        )
+        if stream:
+            self._lightweight_misses = 0
+            return stream
+
+        self._lightweight_misses = 0 if allow_browser else self._lightweight_misses + 1
+        return None
 
     def get_nickname(self) -> str | None:
         # 优先：curl_cffi + 可选 Cookie 解析显示昵称（更稳定）。

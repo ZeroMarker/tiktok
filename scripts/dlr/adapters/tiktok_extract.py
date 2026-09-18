@@ -289,17 +289,46 @@ def _remove_stale_chromium_profiles(
         shutil.rmtree(profile, ignore_errors=True)
 
 
+def _browser_is_snap(browser: str) -> bool:
+    """识别 Snap 可执行文件及 Ubuntu 的 chromium-browser Snap 跳转脚本。"""
+    browser_path = Path(browser)
+    if browser_path.parts[:3] == ("/", "snap", "bin"):
+        return True
+    try:
+        return "/snap/bin/chromium" in browser_path.read_text(
+            encoding="utf-8", errors="ignore"
+        )[:4096]
+    except (OSError, UnicodeError):
+        return False
+
+
+def _find_headless_browser() -> str | None:
+    """优先使用非 Snap 浏览器，避免 Snap/AppArmor 审计噪声。"""
+    candidates = [
+        shutil.which(name)
+        for name in (
+            "google-chrome-stable",
+            "google-chrome",
+            "chromium",
+            "chromium-browser",
+        )
+    ]
+    browsers = list(dict.fromkeys(path for path in candidates if path))
+    return next((path for path in browsers if not _browser_is_snap(path)), None) or (
+        browsers[0] if browsers else None
+    )
+
+
 def _chromium_profile_parent(browser: str) -> str | None:
     """Return a profile parent visible from both host and browser sandbox."""
-    browser_path = Path(browser)
-    if browser_path.parts[:3] != ("/", "snap", "bin"):
+    if not _browser_is_snap(browser):
         return None
 
     # A snap's private /tmp is mounted at /tmp/snap-private-tmp on the host.
     # Profiles created in the host /tmp therefore cannot be removed by cleaning
     # the original path. SNAP_USER_COMMON is shared by the host and the snap.
     profile_parent = (
-        Path.home() / "snap" / browser_path.name / "common" / "chromium-headless"
+        Path.home() / "snap" / "chromium" / "common" / "chromium-headless"
     )
     profile_parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     _remove_stale_chromium_profiles(profile_parent)
@@ -308,11 +337,7 @@ def _chromium_profile_parent(browser: str) -> str | None:
 
 def _get_stream_url_with_browser(username: str, timeout: int = 35) -> str | None:
     """Resolve SlardarWAF pages through installed headless Chromium."""
-    browser = next(
-        (shutil.which(name) for name in ("chromium", "chromium-browser", "google-chrome")
-         if shutil.which(name)),
-        None,
-    )
+    browser = _find_headless_browser()
     if not browser:
         return None
     try:
@@ -322,6 +347,7 @@ def _get_stream_url_with_browser(username: str, timeout: int = 35) -> str | None
         ) as profile:
             proc = subprocess.Popen(
                 [browser, "--headless=new", "--no-sandbox", "--disable-gpu",
+                 "--disable-vulkan", "--disable-features=Vulkan,VulkanFromANGLE",
                  "--disable-dev-shm-usage", f"--user-data-dir={profile}",
                  "--virtual-time-budget=15000", "--dump-dom",
                  f"https://www.tiktok.com/@{username}/live"],
@@ -510,7 +536,13 @@ def get_nickname(
     return None
 
 
-def get_stream_url(username: str, quality: str = "best") -> str | None:
+def get_stream_url(
+    username: str,
+    quality: str = "best",
+    *,
+    try_ytdlp: bool = True,
+    allow_browser: bool = True,
+) -> str | None:
     """兜底取流主入口：成功返回一行流 URL，失败返回 None。
 
     quality 为原画/1080p/720p/480p，用于限制返回清晰度；默认 best 原画档。
@@ -529,10 +561,11 @@ def get_stream_url(username: str, quality: str = "best") -> str | None:
 
     print(f"[tiktok_extract] 检查 @{username} ...", file=sys.stderr)
 
-    # ---- 步骤1：直接 yt-dlp 再试 ----
-    stream_url = _try_ytdlp_fallback(username, max_height)
-    if stream_url:
-        return stream_url
+    # 独立诊断入口保留 yt-dlp 兜底；适配器已经探测过时可跳过，避免重复子进程。
+    if try_ytdlp:
+        stream_url = _try_ytdlp_fallback(username, max_height)
+        if stream_url:
+            return stream_url
 
     # ---- 步骤2：用 curl_cffi 解析页面 ----
     print("[tiktok_extract] yt-dlp 未返回源，尝试 curl_cffi 检测 ...", file=sys.stderr)
@@ -542,7 +575,9 @@ def get_stream_url(username: str, quality: str = "best") -> str | None:
         print("[tiktok_extract] 多次重试仍无法访问直播页，本次放弃", file=sys.stderr)
         return None
 
-    if "slardar" in r.text.lower() or "please wait" in r.text.lower():
+    if allow_browser and (
+        "slardar" in r.text.lower() or "please wait" in r.text.lower()
+    ):
         stream_url = _get_stream_url_with_browser(username)
         if stream_url:
             return stream_url
@@ -576,9 +611,15 @@ def get_stream_url(username: str, quality: str = "best") -> str | None:
                 return stream_url
 
     # Some accounts expose streamData in the rendered page while room/info is unavailable.
-    stream_url = _get_stream_url_with_browser(username)
-    if stream_url:
-        return stream_url
+    if allow_browser:
+        stream_url = _get_stream_url_with_browser(username)
+        if stream_url:
+            return stream_url
+    else:
+        print(
+            "[tiktok_extract] 轻量检测无流，本轮跳过 Chromium 兜底",
+            file=sys.stderr,
+        )
 
     print("[tiktok_extract] 所有 API 检测均未发现直播", file=sys.stderr)
     return None

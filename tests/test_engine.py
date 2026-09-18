@@ -126,7 +126,9 @@ class ChromiumProcessGroupCleanupTest(unittest.TestCase):
         with (
             mock.patch.object(tiktok_extract_mod.shutil, "which", return_value="/usr/bin/chrome"),
             mock.patch.object(tiktok_extract_mod.tempfile, "TemporaryDirectory") as temp_dir,
-            mock.patch.object(tiktok_extract_mod.subprocess, "Popen", return_value=proc),
+            mock.patch.object(
+                tiktok_extract_mod.subprocess, "Popen", return_value=proc
+            ) as popen,
             mock.patch.object(tiktok_extract_mod, "_terminate_process_group") as terminate,
         ):
             temp_dir.return_value.__enter__.return_value = "/tmp/profile"
@@ -135,6 +137,31 @@ class ChromiumProcessGroupCleanupTest(unittest.TestCase):
         self.assertIsNone(result)
         terminate.assert_called_once_with(proc)
         temp_dir.assert_called_once_with(prefix="tiktok-chromium-", dir=None)
+        browser_args = popen.call_args.args[0]
+        self.assertIn("--disable-vulkan", browser_args)
+        self.assertIn("--disable-features=Vulkan,VulkanFromANGLE", browser_args)
+
+    def test_prefers_non_snap_browser(self):
+        paths = {
+            "google-chrome-stable": None,
+            "google-chrome": "/usr/bin/google-chrome",
+            "chromium": "/snap/bin/chromium",
+            "chromium-browser": "/usr/bin/chromium-browser",
+        }
+        with (
+            mock.patch.object(
+                tiktok_extract_mod.shutil, "which", side_effect=paths.get
+            ),
+            mock.patch.object(
+                tiktok_extract_mod,
+                "_browser_is_snap",
+                side_effect=lambda path: path != "/usr/bin/google-chrome",
+            ),
+        ):
+            self.assertEqual(
+                tiktok_extract_mod._find_headless_browser(),
+                "/usr/bin/google-chrome",
+            )
 
     def test_stale_profile_cleanup_preserves_recent_and_active(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -302,8 +329,7 @@ class OutputDirCreationTest(unittest.TestCase):
 
         def fake_nickname():
             nickname_calls["n"] += 1
-            # 首轮拿不到昵称（未开播），开播后能拿到
-            return None if nickname_calls["n"] == 1 else "エミリ"
+            return "エミリ"
 
         engine.adapter.get_nickname = fake_nickname
 
@@ -326,6 +352,7 @@ class OutputDirCreationTest(unittest.TestCase):
 
         # 只在开播确认后用昵称目录；无昵称前缀目录从未被创建
         self.assertEqual(engine.nickname, "エミリ")
+        self.assertEqual(nickname_calls["n"], 1)
         self.assertEqual(engine.out_dir, engine.output_dir("エミリ"))
         self.assertTrue(engine.output_dir("エミリ").is_dir())
         self.assertFalse(engine.output_dir(None).exists())
@@ -431,6 +458,53 @@ class TikTokNicknameSourceTest(unittest.TestCase):
         """昵称=slug（如 emma_kusunoki）时输出目录不重复拼后缀。"""
         engine = Engine("tiktok", "emma_kusunoki", "/tmp/rec", detect_interval=1, break_seconds=1)
         self.assertEqual(engine.output_dir("emma_kusunoki"), Path("/tmp/rec/tiktok/emma_kusunoki"))
+
+
+class TikTokDetectionStrategyTest(unittest.TestCase):
+    def test_browser_fallback_runs_only_every_third_miss(self):
+        adapter = TikTokAdapter("example")
+        adapter.run_capture = mock.Mock(return_value=None)
+        with mock.patch.object(tiktok_mod, "get_stream_url", return_value=None) as get_url:
+            for _ in range(3):
+                self.assertIsNone(adapter.detect_stream_url())
+
+        self.assertEqual(
+            [call.kwargs["allow_browser"] for call in get_url.call_args_list],
+            [False, False, True],
+        )
+        self.assertTrue(all(call.kwargs["try_ytdlp"] is False for call in get_url.call_args_list))
+        self.assertEqual(adapter.run_capture.call_count, 3)
+
+    def test_success_resets_browser_fallback_counter(self):
+        adapter = TikTokAdapter("example")
+        adapter._lightweight_misses = 2
+        adapter.run_capture = mock.Mock(return_value="https://cdn.example/live.flv")
+        with mock.patch.object(tiktok_mod, "get_stream_url") as get_url:
+            self.assertEqual(
+                adapter.detect_stream_url(), "https://cdn.example/live.flv"
+            )
+        self.assertEqual(adapter._lightweight_misses, 0)
+        get_url.assert_not_called()
+
+
+class DetectDelayTest(unittest.TestCase):
+    def test_jitter_range_is_120_to_300_seconds(self):
+        engine = Engine(
+            "tiktok",
+            "example",
+            "/tmp/rec",
+            detect_interval=210,
+            detect_jitter=90,
+        )
+        with mock.patch.object(engine_mod.random, "randint", return_value=177) as randint:
+            self.assertEqual(engine._next_detect_delay(), 177)
+        randint.assert_called_once_with(120, 300)
+
+    def test_zero_jitter_keeps_fixed_interval(self):
+        engine = Engine(
+            "tiktok", "example", "/tmp/rec", detect_interval=30, detect_jitter=0
+        )
+        self.assertEqual(engine._next_detect_delay(), 30)
 
 
 class NicknameGuardTest(unittest.TestCase):
@@ -611,7 +685,8 @@ class SignalStopTest(unittest.TestCase):
         """检测轮询里信号处理器落在 C 回调栈内时，进程也必须立刻退出。
 
         真实场景：`adapter.detect_stream_url()` 走 curl_cffi，信号在 cffi 回调中被处理；
-        `sys.exit()` 无效时会继续跑完 `detect_interval`（默认 60s）等待，表现为"停止不了"。
+        `sys.exit()` 无效时会继续跑完 `detect_interval`（生产默认 120–300s）等待，
+        表现为"停止不了"。
         """
         proc = self._spawn_engine(
             """

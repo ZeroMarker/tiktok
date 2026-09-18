@@ -133,6 +133,10 @@ sudo journalctl -u livestream-rec-tiktok-<频道对应单元>.service -n 100 --n
 - `浏览器兜底失败 ... timed out`：TikTok 页面或 WAF 在规定时间内没有返回；如果主播
   确实正在直播，再单独验证 `yt-dlp`、Cookie 和网络出口。
 
+离线轮询先执行单次 yt-dlp 和进程内 HTTP/API 检测，连续 3 次轻量检测均失败后才启动
+一次浏览器兜底。浏览器启动参数会禁用 Vulkan；如果系统同时安装了非 Snap 浏览器，代码
+会优先使用它，以减少 AppArmor 审计噪声。
+
 浏览器兜底会创建临时 profile。代码使用独立 Chromium 进程组，并在每次探测结束时终止
 整个进程组，然后由 `TemporaryDirectory` 回收 profile。Snap Chromium 的 profile 创建在
 `~/snap/chromium/common/chromium-headless`，确保宿主和 Snap 看到并清理的是同一个目录；

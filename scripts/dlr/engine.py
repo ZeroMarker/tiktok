@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import os
+import random
 import re
 import signal
 import shutil
@@ -98,7 +99,8 @@ class Engine:
         cookies: str | None = None,
         cookie_header: str | None = None,
         segment_seconds: int = 600,
-        detect_interval: int = 60,
+        detect_interval: int = 210,
+        detect_jitter: int = 0,
         break_seconds: int = 10,
         dir_watch_interval: int = 3,
         quality: str = "best",
@@ -106,7 +108,12 @@ class Engine:
         self.platform = platform
         self.recordings_root = Path(recordings_dir).expanduser().resolve()
         self.segment_seconds = segment_seconds
+        if detect_interval < 1:
+            raise ValueError("detect_interval 必须大于 0")
+        if detect_jitter < 0 or detect_jitter >= detect_interval:
+            raise ValueError("detect_jitter 必须大于等于 0 且小于 detect_interval")
         self.detect_interval = detect_interval
+        self.detect_jitter = detect_jitter
         self.break_seconds = break_seconds
         self.dir_watch_interval = dir_watch_interval
 
@@ -136,6 +143,7 @@ class Engine:
             cookie_header=args.cookie,
             segment_seconds=args.segment_seconds,
             detect_interval=args.detect_interval,
+            detect_jitter=args.detect_jitter,
             break_seconds=args.break_seconds,
             quality=args.quality,
         )
@@ -181,30 +189,34 @@ class Engine:
         log_dir.mkdir(parents=True, exist_ok=True)
 
         print(f"每 {self.segment_seconds} 秒生成一个分段", flush=True)
+        print(
+            "未开播检测间隔："
+            f"{self.detect_interval - self.detect_jitter}–"
+            f"{self.detect_interval + self.detect_jitter} 秒（随机抖动）",
+            flush=True,
+        )
 
         while not self._stopping:
             try:
-                # 轮询期间可先补取昵称（仅更新状态，不建目录）
-                self._refresh_nickname()
-
                 print(
                     f"[{datetime.now():%Y-%m-%d %H:%M:%S}] 尝试抓取直播源 @{self.identifier} ...",
                     flush=True,
                 )
                 stream_url = self.adapter.detect_stream_url()
                 if not stream_url:
+                    delay = self._next_detect_delay()
                     reason = getattr(self.adapter, "last_detect_error", None)
                     if reason:
                         print(
-                            f"  → 未获取到直播源：{reason}（等待 {self.detect_interval} 秒后重试）",
+                            f"  → 未获取到直播源：{reason}（等待 {delay} 秒后重试）",
                             flush=True,
                         )
                     else:
                         print(
-                            f"  → 直播未开启 / 抓取失败，等待 {self.detect_interval} 秒后重试...",
+                            f"  → 直播未开启 / 抓取失败，等待 {delay} 秒后重试...",
                             flush=True,
                         )
-                    time.sleep(self.detect_interval)
+                    time.sleep(delay)
                     continue
 
                 # 只打印去掉签名参数的开头，避免整串 token 进日志
@@ -244,11 +256,20 @@ class Engine:
                     flush=True,
                 )
                 if not self._stopping:
-                    time.sleep(self.detect_interval)
+                    time.sleep(self._next_detect_delay())
 
         return 0
 
     # ---- 内部 ----
+
+    def _next_detect_delay(self) -> int:
+        """返回带随机抖动的下一次离线检测等待时间。"""
+        if not self.detect_jitter:
+            return self.detect_interval
+        return random.randint(
+            self.detect_interval - self.detect_jitter,
+            self.detect_interval + self.detect_jitter,
+        )
 
     def _safe_nickname(self) -> str | None:
         try:

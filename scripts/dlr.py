@@ -14,7 +14,8 @@
     --cookie HEADER      原始 Cookie 请求头
     --recordings-dir DIR 录制输出根目录（默认 $RECORDINGS_DIR 或 ./recordings）
     --segment-seconds N  每段 MP4 时长（默认 600）
-    --detect-interval N  未开播时的重试间隔（默认 60）
+    --detect-interval N  未开播重试基础间隔（默认 210）
+    --detect-jitter N    未开播重试随机抖动（默认 ±90，即 120–300 秒）
     --break-seconds N    断流后重新抓取间隔（默认 10）
     --quality 原画/1080p/720p/480p（默认 best 原画）
 """
@@ -40,7 +41,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cookie", metavar="HEADER", help="原始 Cookie 请求头")
     parser.add_argument("--recordings-dir", default=None, help="录制输出根目录")
     parser.add_argument("--segment-seconds", type=int, default=600, help="每段 MP4 时长（秒）")
-    parser.add_argument("--detect-interval", type=int, default=60, help="未开播重试间隔（秒）")
+    parser.add_argument(
+        "--detect-interval",
+        type=int,
+        default=210,
+        help="未开播重试基础间隔（秒，默认 210）",
+    )
+    parser.add_argument(
+        "--detect-jitter",
+        type=int,
+        default=90,
+        help="未开播重试随机抖动（秒，默认 ±90）",
+    )
     parser.add_argument("--break-seconds", type=int, default=10, help="断流后重试间隔（秒）")
     parser.add_argument(
         "--quality",
