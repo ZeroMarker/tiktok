@@ -7,8 +7,8 @@
     <div class="head-right">
       <div class="status-pill" :title="statusText"><div class="online"><i class="dot" aria-hidden="true"></i><span>{{ connectionText }}</span></div></div>
       <div class="clock-pill" :title="`本地时间 ${clock}`"><span>{{ clock }}</span></div>
-      <button v-if="appState.installPrompt" class="secondary install" type="button" @click="install">安装应用</button>
-      <button class="secondary refresh" type="button" :disabled="appState.busy" :aria-busy="appState.busy" @click="refreshAll">{{ appState.busy ? "同步中…" : "刷新" }}</button>
+      <button v-if="appState.installPrompt" class="secondary header-action install" type="button" @click="install"><AppIcon name="download" /><span>安装应用</span></button>
+      <button class="secondary header-action refresh" type="button" :disabled="appState.busy" :aria-busy="appState.busy" @click="refreshAll"><AppIcon name="refresh" :class="{ spinning: appState.busy }" /><span>{{ appState.busy ? "同步中…" : "刷新" }}</span></button>
     </div>
   </header>
 </template>
@@ -16,6 +16,7 @@
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { appState } from "../../stores/appStore.js";
 import { refreshAll } from "../../stores/syncStore.js";
+import AppIcon from "./AppIcon.vue";
 
 const clock = ref("");
 let clockTimer = null;

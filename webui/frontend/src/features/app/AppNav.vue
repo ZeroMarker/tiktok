@@ -1,6 +1,6 @@
 <template>
   <nav class="nav" aria-label="主导航">
-    <button v-for="item in items" :key="item.path" class="nav-item" :class="{ active: isActive(item) }" type="button" :aria-current="isActive(item) ? 'page' : undefined" @click="navigate(item.path)"><AppIcon :name="item.icon" />{{ item.label }}</button>
+    <button v-for="item in items" :key="item.path" class="nav-item" :class="{ active: isActive(item), primary: item.name === 'new' }" type="button" :aria-current="isActive(item) ? 'page' : undefined" @click="navigate(item.path)"><AppIcon :name="item.icon" /><span>{{ item.label }}</span></button>
   </nav>
 </template>
 <script setup>
