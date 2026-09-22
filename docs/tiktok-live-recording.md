@@ -61,6 +61,9 @@ bash /root/tiktok/tk/record.sh hana_kuraki87
 
 - 主播没开播时：每 120–300 秒随机探测一次，避免多频道同时唤醒
 - 离线阶段不抓取昵称；确认开播后才获取昵称并创建输出目录
+- 昵称抓取失败会重试 3 次（每次间隔 3 秒），全部失败才回退为纯频道标识目录，
+  避免同一频道分裂出 `<slug>` 与 `<slug>_<昵称>` 两个目录
+- 输出目录名在本场录制首轮确定后即固定，后续回合即使才取到昵称也不改目录名
 - 浏览器仅作为低频兜底，并禁用 Vulkan；存在非 Snap Chrome/Chromium 时优先使用
 - 录制中断流：每 10 秒重试抓源，直播恢复后自动续录
 - 全程无需人工干预，适合整夜无人值守
@@ -77,7 +80,8 @@ bash /root/tiktok/tk/record.sh hana_kuraki87
     ffmpeg_record_hana_kuraki87_華夏_20260811.log  ← 当日 ffmpeg 日志
 ```
 
-- 目录命名失败（没抓到昵称）时退化为 `./recordings/tiktok/<username>/`
+- 昵称抓取失败（重试 3 次后仍失败）时退化为 `./recordings/tiktok/<username>/`，
+  且同一频道不会同时存在 `<username>/` 与 `<username>_<昵称>/` 两种目录
 - 分段文件名：`<频道标识>[_昵称]_<日期>_<起始时间>.mp4`，时间戳从 0 开始
 
 ## 5. 关键参数说明

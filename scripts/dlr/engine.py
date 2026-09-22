@@ -104,6 +104,8 @@ class Engine:
         break_seconds: int = 10,
         dir_watch_interval: int = 3,
         quality: str = "best",
+        nickname_attempts: int = 3,
+        nickname_retry_delay: float = 3.0,
     ) -> None:
         self.platform = platform
         self.recordings_root = Path(recordings_dir).expanduser().resolve()
@@ -116,6 +118,13 @@ class Engine:
         self.detect_jitter = detect_jitter
         self.break_seconds = break_seconds
         self.dir_watch_interval = dir_watch_interval
+        if nickname_attempts < 1:
+            raise ValueError("nickname_attempts 必须大于 0")
+        if nickname_retry_delay < 0:
+            raise ValueError("nickname_retry_delay 不能为负数")
+        # 昵称决定输出目录名：多试几次再回退，避免"这场取到、下场没取到"的目录分裂。
+        self.nickname_attempts = nickname_attempts
+        self.nickname_retry_delay = nickname_retry_delay
 
         self.adapter = load_adapter(
             platform, target, cookies=cookies, cookie_header=cookie_header, quality=quality
@@ -223,7 +232,10 @@ class Engine:
                 print(f"  → 成功抓到直播源：{stream_url.split('?')[0]}", flush=True)
                 # 开播确认后再补一次昵称：此时直播页 live 数据齐全，最可靠。
                 # 成功则本场录制直接用昵称目录；失败则回退为仅频道标识目录。
-                self._refresh_nickname()
+                # 目录一旦定下就不再改名：本场后续回合若才取到昵称，也不能
+                # 换目录名，否则同一场录制会分裂出 <slug> 和 <slug>_<昵称> 两处。
+                if self.out_dir is None:
+                    self._refresh_nickname()
 
                 # 开播确认后才创建输出目录，避免"先无昵称、后有昵称"的双目录残留。
                 out_dir = self.output_dir(self.nickname)
@@ -283,14 +295,31 @@ class Engine:
 
         目录统一在 run() 开播确认后创建（此时昵称已定），避免轮询期间先建
         无昵称目录、补取后再建昵称目录的双目录残留。
+
+        昵称直接决定目录名，一次抓取失败就会让同一频道分裂成
+        `<slug>` 和 `<slug>_<昵称>` 两个目录，所以这里按 nickname_attempts
+        重试（间隔 nickname_retry_delay 秒）；全部失败才回退为纯 slug 目录。
         """
         if self.nickname:
             return
-        nickname = self._safe_nickname()
-        if not nickname:
-            return
-        self.nickname = nickname
-        print(f"获取到主播昵称：{nickname}", flush=True)
+        for attempt in range(1, self.nickname_attempts + 1):
+            nickname = self._safe_nickname()
+            if nickname:
+                self.nickname = nickname
+                print(f"获取到主播昵称：{nickname}", flush=True)
+                return
+            if attempt < self.nickname_attempts:
+                print(
+                    f"  → 昵称未取到（{attempt}/{self.nickname_attempts}），"
+                    f"{self.nickname_retry_delay:g} 秒后重试...",
+                    flush=True,
+                )
+                time.sleep(self.nickname_retry_delay)
+        print(
+            f"  → 昵称获取失败（已重试 {self.nickname_attempts} 次），"
+            "输出目录回退为纯频道标识",
+            flush=True,
+        )
 
     # ---- 目录健壮性：输出目录被删除时自动重建 ----
 

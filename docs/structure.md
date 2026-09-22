@@ -50,12 +50,14 @@ exec python3 "${SCRIPT_DIR}/../scripts/dlr.py" <platform> "$@"
 
 录制输出统一到 `RECORDINGS_DIR`（systemd 环境默认 `/home/ubuntu/tiktok/recordings`，
 手动运行默认 `./recordings`），按平台分目录，平台下按 `{channel}[_{nickname}]/` 建频道目录：
+每个频道只会出现一个目录——昵称抓取失败重试 3 次后才回退为纯 `{channel}/`，
+且目录名在本场录制首轮确定后固定，不会中途改名分裂。
 
 ```text
 recordings/
 ├── tiktok/
-│   ├── emiri.okazaki/
-│   └── emiri.okazaki_エミリ/
+│   ├── emiri.okazaki/          # 昵称抓取失败时的退化命名
+│   └── emiri.okazaki_エミリ/    # 正常命名（每个频道二选一，不会同时存在）
 ├── soop/
 │   └── playerid_Nickname/
 ├── youtube/

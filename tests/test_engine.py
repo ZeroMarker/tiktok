@@ -311,13 +311,52 @@ class OutputDirTest(unittest.TestCase):
         self.assertEqual(engine.nickname, "Nice")
 
     def test_refresh_nickname_noop_when_still_missing(self):
-        engine = Engine("soop", "player", "/tmp/rec", detect_interval=1, break_seconds=1)
+        engine = Engine(
+            "soop",
+            "player",
+            "/tmp/rec",
+            detect_interval=1,
+            break_seconds=1,
+            nickname_attempts=2,
+            nickname_retry_delay=0,
+        )
         engine.nickname = None
         engine.out_dir = engine.output_dir(None)
-        engine.adapter.get_nickname = lambda: None
+        calls = {"n": 0}
+
+        def fake_nickname():
+            calls["n"] += 1
+            return None
+
+        engine.adapter.get_nickname = fake_nickname
         engine._refresh_nickname()
         self.assertIsNone(engine.nickname)
         self.assertEqual(engine.out_dir, engine.output_dir(None))
+        # 失败时按 nickname_attempts 重试，而不是一次就放弃
+        self.assertEqual(calls["n"], 2)
+
+    def test_refresh_nickname_retries_then_succeeds(self):
+        """偶发失败（网络抖动）应在重试后拿到昵称，避免退化成纯 slug 目录。"""
+        engine = Engine(
+            "soop",
+            "player",
+            "/tmp/rec",
+            detect_interval=1,
+            break_seconds=1,
+            nickname_attempts=3,
+            nickname_retry_delay=0,
+        )
+        engine.nickname = None
+        calls = {"n": 0}
+
+        def fake_nickname():
+            calls["n"] += 1
+            return None if calls["n"] < 3 else "Nic Name"
+
+        engine.adapter.get_nickname = fake_nickname
+        engine._refresh_nickname()
+        self.assertEqual(engine.nickname, "Nic Name")
+        self.assertEqual(calls["n"], 3)
 
 
 class OutputDirCreationTest(unittest.TestCase):
@@ -362,6 +401,83 @@ class OutputDirCreationTest(unittest.TestCase):
         self.assertEqual(engine.out_dir, engine.output_dir("エミリ"))
         self.assertTrue(engine.output_dir("エミリ").is_dir())
         self.assertFalse(engine.output_dir(None).exists())
+
+    def test_dir_name_locked_after_first_round(self):
+        """首回合昵称失败退化成 slug 目录后，后续回合取到昵称也不换目录名。
+
+        换名会让同一场录制的分段分裂到 <slug> 和 <slug>_<昵称> 两个目录。
+        """
+        base = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, base, ignore_errors=True)
+        root = Path(base) / "rec"
+        engine = Engine(
+            "tiktok",
+            "emiri",
+            str(root),
+            detect_interval=1,
+            break_seconds=1,
+            nickname_attempts=1,
+            nickname_retry_delay=0,
+        )
+        engine.nickname = None
+        engine.out_dir = None
+
+        calls = {"n": 0}
+
+        def fake_nickname():
+            calls["n"] += 1
+            return None if calls["n"] == 1 else "エミリ"
+
+        engine.adapter.get_nickname = fake_nickname
+        engine.adapter.detect_stream_url = lambda: "http://stream"
+
+        records = []
+
+        def fake_record(out_dir, log_dir, stream_url, nickname):
+            records.append((out_dir, nickname))
+            if len(records) == 2:
+                engine._stopping = True
+
+        engine._record = fake_record
+        engine.run()
+
+        # 两回合都用首回合定下的纯 slug 目录，第二回合不再补取昵称
+        self.assertEqual(len(records), 2)
+        self.assertEqual(calls["n"], 1)
+        self.assertEqual(records[0][0], engine.output_dir(None))
+        self.assertEqual(records[1][0], engine.output_dir(None))
+        self.assertTrue(engine.output_dir(None).is_dir())
+        self.assertFalse(engine.output_dir("エミリ").exists())
+
+    def test_falls_back_to_slug_dir_when_nickname_always_fails(self):
+        """昵称重试全部失败时仍要录制：目录退化为纯频道标识。"""
+        base = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, base, ignore_errors=True)
+        root = Path(base) / "rec"
+        engine = Engine(
+            "tiktok",
+            "emiri",
+            str(root),
+            detect_interval=1,
+            break_seconds=1,
+            nickname_attempts=2,
+            nickname_retry_delay=0,
+        )
+        engine.nickname = None
+        engine.out_dir = None
+        engine.adapter.get_nickname = lambda: None
+        engine.adapter.detect_stream_url = lambda: "http://stream"
+
+        def fake_record(out_dir, log_dir, stream_url, nickname):
+            engine.out_dir = out_dir
+            engine._stopping = True
+
+        engine._record = fake_record
+        engine.run()
+
+        self.assertIsNone(engine.nickname)
+        self.assertEqual(engine.out_dir, engine.output_dir(None))
+        self.assertTrue(engine.output_dir(None).is_dir())
 
 
 class DirWatchTest(unittest.TestCase):
