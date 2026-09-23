@@ -192,8 +192,9 @@ class Engine:
     def run(self) -> int:
         print(f"开始无人值守录制 {self.platform}：{self.identifier}", flush=True)
 
-        # 不在启动时解析昵称/创建输出目录：此时可能尚未开播，昵称常解析失败，
-        # 先建只会留下"无昵称"空目录。输出目录推迟到开播确认后创建（见下方）。
+        # 昵称抓取不依赖开播状态，但输出目录要等开播确认才创建：避免轮询期间
+        # 先建无昵称目录、补取后再建昵称目录的双目录残留。昵称在每轮检测前补抓
+        # （见循环内），重启后从第一轮就开始，不再只有开播首轮那一个窗口。
         log_dir = self.recordings_root / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
 
@@ -211,6 +212,10 @@ class Engine:
                     f"[{datetime.now():%Y-%m-%d %H:%M:%S}] 尝试抓取直播源 @{self.identifier} ...",
                     flush=True,
                 )
+                # 目录未定（进程刚重启/尚未开播）就每轮补抓昵称：单轮失败下一轮
+                # 继续，直到开播首轮定下目录为止，不再把重启后的昵称押在一个窗口。
+                if self.out_dir is None:
+                    self._refresh_nickname()
                 stream_url = self.adapter.detect_stream_url()
                 if not stream_url:
                     delay = self._next_detect_delay()
@@ -230,13 +235,8 @@ class Engine:
 
                 # 只打印去掉签名参数的开头，避免整串 token 进日志
                 print(f"  → 成功抓到直播源：{stream_url.split('?')[0]}", flush=True)
-                # 开播确认后再补一次昵称：此时直播页 live 数据齐全，最可靠。
-                # 成功则本场录制直接用昵称目录；失败则回退为仅频道标识目录。
-                # 目录一旦定下就不再改名：本场后续回合若才取到昵称，也不能
-                # 换目录名，否则同一场录制会分裂出 <slug> 和 <slug>_<昵称> 两处。
-                if self.out_dir is None:
-                    self._refresh_nickname()
-
+                # 目录一旦定下就不再改名：本场后续回合若才取到昵称，也不能换目录名，
+                # 否则同一场录制会分裂出 <slug> 和 <slug>_<昵称> 两处。
                 # 开播确认后才创建输出目录，避免"先无昵称、后有昵称"的双目录残留。
                 out_dir = self.output_dir(self.nickname)
                 try:
@@ -298,7 +298,8 @@ class Engine:
 
         昵称直接决定目录名，一次抓取失败就会让同一频道分裂成
         `<slug>` 和 `<slug>_<昵称>` 两个目录，所以这里按 nickname_attempts
-        重试（间隔 nickname_retry_delay 秒）；全部失败才回退为纯 slug 目录。
+        重试（间隔 nickname_retry_delay 秒）；单轮全部失败也不放弃——目录未定
+        前每轮检测前都会再补抓（重启后首轮即生效），直到开播首轮定下目录。
         """
         if self.nickname:
             return
@@ -316,8 +317,7 @@ class Engine:
                 )
                 time.sleep(self.nickname_retry_delay)
         print(
-            f"  → 昵称获取失败（已重试 {self.nickname_attempts} 次），"
-            "输出目录回退为纯频道标识",
+            f"  → 昵称获取失败（已重试 {self.nickname_attempts} 次）",
             flush=True,
         )
 

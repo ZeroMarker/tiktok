@@ -449,6 +449,57 @@ class OutputDirCreationTest(unittest.TestCase):
         self.assertTrue(engine.output_dir(None).is_dir())
         self.assertFalse(engine.output_dir("エミリ").exists())
 
+    def test_restart_regains_nickname_across_offline_rounds(self):
+        """重启后内存昵称清零：开播前的每轮轮询都应补抓昵称。
+
+        首个窗口抓取失败（如 WAF 限流）、下一轮成功时，开播首轮仍能用
+        昵称目录，不退化成纯 slug 目录（否则与既有昵称目录分裂并存）。
+        """
+        base = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, base, ignore_errors=True)
+        root = Path(base) / "rec"
+        engine = Engine(
+            "tiktok",
+            "emiri",
+            str(root),
+            detect_interval=1,
+            break_seconds=1,
+            nickname_attempts=1,
+            nickname_retry_delay=0,
+        )
+
+        calls = {"n": 0}
+
+        def fake_nickname():
+            calls["n"] += 1
+            return None if calls["n"] == 1 else "エミリ"
+
+        engine.adapter.get_nickname = fake_nickname
+
+        detect_calls = {"n": 0}
+
+        def fake_detect():
+            detect_calls["n"] += 1
+            return None if detect_calls["n"] == 1 else "http://stream"
+
+        engine.adapter.detect_stream_url = fake_detect
+
+        records = []
+
+        def fake_record(out_dir, log_dir, stream_url, nickname):
+            records.append(out_dir)
+            engine._stopping = True
+
+        engine._record = fake_record
+        engine.run()
+
+        # 第 1 轮（未开播）补抓失败，第 2 轮开播前补抓成功 → 用昵称目录
+        self.assertEqual(engine.nickname, "エミリ")
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0], engine.output_dir("エミリ"))
+        self.assertTrue(engine.output_dir("エミリ").is_dir())
+        self.assertFalse(engine.output_dir(None).exists())
+
     def test_falls_back_to_slug_dir_when_nickname_always_fails(self):
         """昵称重试全部失败时仍要录制：目录退化为纯频道标识。"""
         base = tempfile.mkdtemp()
