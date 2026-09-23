@@ -1,5 +1,6 @@
 """dlr 引擎与适配器单元测试。"""
 
+import json
 import os
 import shutil
 import signal
@@ -23,6 +24,8 @@ from dlr.adapters.tiktok_extract import _find_nickname, _find_nickname_from_sigi
 from dlr.adapters.tiktok_extract import _stream_url_from_sigi
 import dlr.engine as engine_mod  # noqa: E402
 from dlr.engine import Engine, sanitize_path_part  # noqa: E402
+import dlr.browserd as browserd_mod  # noqa: E402
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer  # noqa: E402
 
 from unittest import mock  # noqa: E402
 import dlr.adapters.tiktok as tiktok_mod  # noqa: E402
@@ -45,159 +48,7 @@ class TikTokRenderedStreamTest(unittest.TestCase):
         self.assertEqual(_stream_url_from_sigi(html), "https://cdn.example/video.flv")
 
 
-class ChromiumProcessGroupCleanupTest(unittest.TestCase):
-    def _proc(self):
-        proc = mock.Mock()
-        proc.pid = 1234
-        proc.args = ["chromium", "--headless=new"]
-        proc.communicate.return_value = ("", "")
-        return proc
 
-    def test_sigterm_is_enough_when_whole_group_exits(self):
-        proc = self._proc()
-        with (
-            mock.patch.object(tiktok_extract_mod.os, "killpg") as killpg,
-            mock.patch.object(
-                tiktok_extract_mod, "_wait_for_process_group_exit", return_value=True
-            ) as wait_group,
-        ):
-            tiktok_extract_mod._terminate_process_group(proc, grace=2)
-
-        killpg.assert_called_once_with(proc.pid, signal.SIGTERM)
-        proc.communicate.assert_called_once_with(timeout=2)
-        wait_group.assert_called_once_with(proc.pid, 2)
-
-    def test_sigkill_is_sent_when_children_survive_sigterm(self):
-        proc = self._proc()
-        with (
-            mock.patch.object(tiktok_extract_mod.os, "killpg") as killpg,
-            mock.patch.object(
-                tiktok_extract_mod,
-                "_wait_for_process_group_exit",
-                side_effect=[False, True],
-            ),
-        ):
-            tiktok_extract_mod._terminate_process_group(proc, grace=2)
-
-        self.assertEqual(
-            killpg.call_args_list,
-            [mock.call(proc.pid, signal.SIGTERM), mock.call(proc.pid, signal.SIGKILL)],
-        )
-        self.assertEqual(proc.communicate.call_count, 2)
-
-    def test_cleanup_stays_bounded_if_group_does_not_exit(self):
-        proc = self._proc()
-        with (
-            mock.patch.object(tiktok_extract_mod.os, "killpg"),
-            mock.patch.object(
-                tiktok_extract_mod, "_wait_for_process_group_exit", return_value=False
-            ),
-        ):
-            with self.assertRaises(subprocess.TimeoutExpired):
-                tiktok_extract_mod._terminate_process_group(proc, grace=2)
-
-    def test_snap_profile_parent_is_shared_with_host(self):
-        with (
-            mock.patch.object(
-                tiktok_extract_mod.Path, "home", return_value=Path("/home/test")
-            ),
-            mock.patch.object(tiktok_extract_mod.Path, "mkdir") as mkdir,
-            mock.patch.object(
-                tiktok_extract_mod, "_remove_stale_chromium_profiles"
-            ) as remove_stale,
-        ):
-            parent = tiktok_extract_mod._chromium_profile_parent("/snap/bin/chromium")
-
-        self.assertEqual(parent, "/home/test/snap/chromium/common/chromium-headless")
-        mkdir.assert_called_once_with(mode=0o700, parents=True, exist_ok=True)
-        remove_stale.assert_called_once_with(
-            Path("/home/test/snap/chromium/common/chromium-headless")
-        )
-
-    def test_non_snap_browser_keeps_system_temp_directory(self):
-        self.assertIsNone(
-            tiktok_extract_mod._chromium_profile_parent("/usr/bin/google-chrome")
-        )
-
-    def test_successful_probe_always_reaps_process_group(self):
-        proc = self._proc()
-        html = '<script id="SIGI_STATE">{}</script>'
-        proc.communicate.return_value = (html, "")
-        with (
-            mock.patch.object(tiktok_extract_mod.shutil, "which", return_value="/usr/bin/chrome"),
-            mock.patch.object(tiktok_extract_mod.tempfile, "TemporaryDirectory") as temp_dir,
-            mock.patch.object(
-                tiktok_extract_mod.subprocess, "Popen", return_value=proc
-            ) as popen,
-            mock.patch.object(tiktok_extract_mod, "_terminate_process_group") as terminate,
-        ):
-            temp_dir.return_value.__enter__.return_value = "/tmp/profile"
-            result = tiktok_extract_mod._get_stream_url_with_browser("example")
-
-        self.assertIsNone(result)
-        terminate.assert_called_once_with(proc)
-        temp_dir.assert_called_once_with(prefix="tiktok-chromium-", dir=None)
-        browser_args = popen.call_args.args[0]
-        self.assertIn("--disable-vulkan", browser_args)
-        self.assertIn(
-            "--disable-features=Vulkan,VulkanFromANGLE,DefaultANGLEVulkan",
-            browser_args,
-        )
-        self.assertIn("--use-gl=disabled", browser_args)
-        self.assertIn("--disable-software-rasterizer", browser_args)
-        self.assertIn("--disable-gpu-compositing", browser_args)
-
-    def test_prefers_non_snap_browser(self):
-        paths = {
-            "google-chrome-stable": None,
-            "google-chrome": "/usr/bin/google-chrome",
-            "chromium": "/snap/bin/chromium",
-            "chromium-browser": "/usr/bin/chromium-browser",
-        }
-        with (
-            mock.patch.object(
-                tiktok_extract_mod.shutil, "which", side_effect=paths.get
-            ),
-            mock.patch.object(
-                tiktok_extract_mod,
-                "_browser_is_snap",
-                side_effect=lambda path: path != "/usr/bin/google-chrome",
-            ),
-        ):
-            self.assertEqual(
-                tiktok_extract_mod._find_headless_browser(),
-                "/usr/bin/google-chrome",
-            )
-
-    def test_stale_profile_cleanup_preserves_recent_and_active(self):
-        with tempfile.TemporaryDirectory() as directory:
-            parent = Path(directory)
-            stale = parent / "tiktok-chromium-stale"
-            active = parent / "tiktok-chromium-active"
-            recent = parent / "tiktok-chromium-recent"
-            unrelated = parent / "other"
-            for path in (stale, active, recent, unrelated):
-                path.mkdir()
-            os.utime(stale, (100, 100))
-            os.utime(active, (100, 100))
-            os.utime(recent, (950, 950))
-
-            with (
-                mock.patch.object(tiktok_extract_mod.time, "time", return_value=1000),
-                mock.patch.object(
-                    tiktok_extract_mod,
-                    "_active_chromium_profiles",
-                    return_value={str(active)},
-                ),
-            ):
-                tiktok_extract_mod._remove_stale_chromium_profiles(
-                    parent, max_age=100
-                )
-
-            self.assertFalse(stale.exists())
-            self.assertTrue(active.exists())
-            self.assertTrue(recent.exists())
-            self.assertTrue(unrelated.exists())
 
 
 class SanitizeTest(unittest.TestCase):
@@ -646,18 +497,149 @@ class TikTokDetectionStrategyTest(unittest.TestCase):
             [False, False, True],
         )
         self.assertTrue(all(call.kwargs["try_ytdlp"] is False for call in get_url.call_args_list))
-        self.assertEqual(adapter.run_capture.call_count, 3)
+        # 轻量检测（含 Cookie 透传）每轮都跑；yt-dlp 只在升级轮冷启动一次
+        self.assertEqual(len(get_url.call_args_list), 3)
+        self.assertTrue(all("cookies" in call.kwargs for call in get_url.call_args_list))
+        self.assertEqual(adapter.run_capture.call_count, 1)
 
     def test_success_resets_browser_fallback_counter(self):
         adapter = TikTokAdapter("example")
-        adapter._lightweight_misses = 2
+        adapter._lightweight_misses = 2  # 下一轮即升级轮
         adapter.run_capture = mock.Mock(return_value="https://cdn.example/live.flv")
-        with mock.patch.object(tiktok_mod, "get_stream_url") as get_url:
+        with mock.patch.object(tiktok_mod, "get_stream_url", return_value=None) as get_url:
             self.assertEqual(
                 adapter.detect_stream_url(), "https://cdn.example/live.flv"
             )
         self.assertEqual(adapter._lightweight_misses, 0)
-        get_url.assert_not_called()
+        # 顺序契约：轻量检测每轮先行，yt-dlp 仅在升级轮兜底
+        get_url.assert_called_once()
+
+
+class BrowserdClientTest(unittest.TestCase):
+    """共享渲染客户端：服务不可用必须降级为 None，绝不抛异常打断检测轮询。"""
+
+    class _Stub(BaseHTTPRequestHandler):
+        captured: dict = {}
+
+        def log_message(self, *_args) -> None:
+            pass
+
+        def do_POST(self) -> None:
+            length = int(self.headers.get("Content-Length") or 0)
+            type(self).captured = json.loads(self.rfile.read(length))
+            body = b"<html><body>dom</body></html>"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    def _serve(self) -> ThreadingHTTPServer:
+        server = ThreadingHTTPServer(("127.0.0.1", 0), self._Stub)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return server
+
+    def test_render_document_passes_url_and_wait_js(self):
+        server = self._serve()
+        url = f"http://127.0.0.1:{server.server_address[1]}"
+        with mock.patch.dict(os.environ, {"TIKTOK_BROWSERD_URL": url}):
+            html = browserd_mod.render_document(
+                "https://www.tiktok.com/@x/live", timeout=5, wait_js="ready?"
+            )
+        self.assertEqual(html, "<html><body>dom</body></html>")
+        self.assertEqual(self._Stub.captured["url"], "https://www.tiktok.com/@x/live")
+        self.assertEqual(self._Stub.captured["wait_js"], "ready?")
+        self.assertEqual(self._Stub.captured["timeout"], 5)
+
+    def test_render_document_returns_none_when_service_down(self):
+        # 端口 1 无监听：连接被拒绝必须变成 None，而不是异常冒泡
+        with mock.patch.dict(
+            os.environ, {"TIKTOK_BROWSERD_URL": "http://127.0.0.1:1"}
+        ):
+            self.assertIsNone(
+                browserd_mod.render_document("https://example/live", timeout=2)
+            )
+
+    def test_browser_probe_extracts_flv_from_rendered_dom(self):
+        stream_data = json.dumps(
+            {"data": {"hd": {"main": {"flv": "https://cdn.example/live.flv"}}}}
+        )
+        sigi = {
+            "LiveRoom": {
+                "liveRoomUserInfo": {
+                    "liveRoom": {"streamData": {"pull_data": {"stream_data": stream_data}}}
+                }
+            }
+        }
+        html = '<script id="SIGI_STATE">' + json.dumps(sigi) + "</script>"
+        with mock.patch.object(browserd_mod, "render_document", return_value=html) as render:
+            self.assertEqual(
+                tiktok_extract_mod._get_stream_url_with_browser("someone"),
+                "https://cdn.example/live.flv",
+            )
+        # 等待条件必须锚定 streamData（水合完成），而不是页面加载即返回
+        self.assertIn("streamData", render.call_args.kwargs["wait_js"])
+
+    def test_browser_probe_returns_none_when_render_fails(self):
+        with mock.patch.object(browserd_mod, "render_document", return_value=None):
+            self.assertIsNone(
+                tiktok_extract_mod._get_stream_url_with_browser("someone")
+            )
+
+
+class BrowserdRenderPageTest(unittest.TestCase):
+    """共享渲染服务端：按 wait_js 等待取 DOM，任何路径都关闭标签页。"""
+
+    class _FakeChrome:
+        def __init__(self, ready: list, html: str) -> None:
+            self.ready = list(ready)
+            self.html = html
+            self.calls: list = []
+
+        def ensure(self) -> None:
+            self.calls.append(("ensure", None, None))
+
+        def call(self, method, params=None, *, session_id=None, timeout=15):
+            self.calls.append((method, params, session_id))
+            if method == "Target.createTarget":
+                return {"targetId": "T1"}
+            if method == "Target.attachToTarget":
+                return {"sessionId": "S1"}
+            if method == "Runtime.evaluate":
+                if params["expression"] == "document.documentElement.outerHTML":
+                    return {"result": {"value": self.html}}
+                value = self.ready.pop(0) if self.ready else False
+                return {"result": {"value": value}}
+            return {}
+
+    def test_waits_for_js_then_returns_dom_and_closes_target(self):
+        chrome = self._FakeChrome([False, True], "<html>ok</html>")
+        html = browserd_mod.render_page(
+            chrome, "https://example/live", timeout=5, wait_js="ready?"
+        )
+        self.assertEqual(html, "<html>ok</html>")
+        methods = [call[0] for call in chrome.calls]
+        self.assertIn("Page.navigate", methods)
+        self.assertIn("Target.closeTarget", methods)
+        navigate = next(c for c in chrome.calls if c[0] == "Page.navigate")
+        self.assertEqual(navigate[1], {"url": "https://example/live"})
+        self.assertEqual(navigate[2], "S1")  # 导航必须落在标签页会话上
+        # 先关标签页再取 DOM 之外的顺序无所谓，但 closeTarget 必须在最后兜底执行
+        self.assertEqual(methods[-1], "Target.closeTarget")
+
+    def test_deadline_path_still_returns_dom_and_closes_target(self):
+        chrome = self._FakeChrome([], "<html>challenge</html>")
+        html = browserd_mod.render_page(
+            chrome, "https://example/live", timeout=0, wait_js="never"
+        )
+        self.assertEqual(html, "<html>challenge</html>")
+        methods = [call[0] for call in chrome.calls]
+        self.assertIn("Runtime.evaluate", methods)  # 至少抓了一次 DOM
+        self.assertEqual(methods[-1], "Target.closeTarget")
+        close = next(c for c in chrome.calls if c[0] == "Target.closeTarget")
+        self.assertEqual(close[1], {"targetId": "T1"})
 
 
 class DetectDelayTest(unittest.TestCase):
@@ -786,36 +768,6 @@ class SignalStopTest(unittest.TestCase):
     def setUp(self):
         self.base = Path(tempfile.mkdtemp(prefix="dlr_signal_test_"))
         self.addCleanup(shutil.rmtree, self.base, ignore_errors=True)
-
-    def test_kills_only_detached_child_process_groups(self):
-        with (
-            mock.patch.object(engine_mod.Path, "read_text", return_value="101 102 103"),
-            mock.patch.object(
-                engine_mod.Path,
-                "read_bytes",
-                side_effect=[
-                    b"chrome\0--user-data-dir=/tmp/chromium-headless/tiktok-chromium-x\0",
-                    b"ffmpeg\0",
-                    OSError,
-                ],
-            ),
-            mock.patch.object(engine_mod.os, "getpid", return_value=99),
-            mock.patch.object(engine_mod.os, "getpgrp", return_value=50),
-            mock.patch.object(
-                engine_mod.os,
-                "getpgid",
-                side_effect=[101, 50, ProcessLookupError],
-            ),
-            mock.patch.object(engine_mod.os, "killpg") as killpg,
-            mock.patch.object(engine_mod.shutil, "rmtree") as rmtree,
-            mock.patch.object(engine_mod.Path, "exists", return_value=False),
-        ):
-            engine_mod._kill_isolated_child_process_groups()
-
-        killpg.assert_called_once_with(101, signal.SIGKILL)
-        rmtree.assert_called_once_with(
-            Path("/tmp/chromium-headless/tiktok-chromium-x"), ignore_errors=True
-        )
 
     def _spawn_engine(self, body: str) -> subprocess.Popen:
         """在子进程里启动 Engine 并执行 body，等它打印 ready 后返回该进程。"""

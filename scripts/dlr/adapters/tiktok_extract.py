@@ -26,15 +26,10 @@
 from __future__ import annotations
 
 import json
-import os
 import re
-import signal
-import shutil
 import subprocess
 import sys
-import tempfile
 import time
-from pathlib import Path
 
 from dlr.adapters.base import pick_flv_url, quality_height
 
@@ -218,158 +213,54 @@ def _stream_url_from_sigi(text: str) -> str | None:
     return next((url for url in urls if ".flv" in url), None) or (urls[0] if urls else None)
 
 
-def _wait_for_process_group_exit(pgid: int, timeout: float) -> bool:
-    """Wait until a POSIX process group no longer has any live members."""
-    deadline = time.monotonic() + timeout
-    while True:
-        try:
-            os.killpg(pgid, 0)
-        except ProcessLookupError:
-            return True
-        if time.monotonic() >= deadline:
-            return False
-        time.sleep(0.05)
 
 
-def _terminate_process_group(proc: subprocess.Popen, grace: float = 5) -> None:
-    """Terminate and reap a subprocess and every member of its process group."""
-    try:
-        os.killpg(proc.pid, signal.SIGTERM)
-    except ProcessLookupError:
-        pass
-
-    try:
-        proc.communicate(timeout=grace)
-    except subprocess.TimeoutExpired:
-        pass
-
-    if _wait_for_process_group_exit(proc.pid, grace):
-        return
-
-    try:
-        os.killpg(proc.pid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
-
-    try:
-        proc.communicate(timeout=grace)
-    except subprocess.TimeoutExpired:
-        pass
-
-    if not _wait_for_process_group_exit(proc.pid, grace):
-        raise subprocess.TimeoutExpired(proc.args, grace)
 
 
-def _active_chromium_profiles() -> set[str]:
-    """Return profile paths currently referenced by local Chromium processes."""
-    profiles: set[str] = set()
-    for cmdline in Path("/proc").glob("[0-9]*/cmdline"):
-        try:
-            args = cmdline.read_bytes().split(b"\0")
-        except (OSError, PermissionError):
-            continue
-        for arg in args:
-            if arg.startswith(b"--user-data-dir="):
-                profiles.add(os.fsdecode(arg.partition(b"=")[2]))
-    return profiles
 
 
-def _remove_stale_chromium_profiles(
-    profile_parent: Path, *, max_age: float = 600
-) -> None:
-    """Remove abandoned profiles without touching active or recent probes."""
-    active = _active_chromium_profiles()
-    cutoff = time.time() - max_age
-    for profile in profile_parent.glob("tiktok-chromium-*"):
-        try:
-            if profile.stat().st_mtime > cutoff or str(profile) in active:
-                continue
-        except OSError:
-            continue
-        shutil.rmtree(profile, ignore_errors=True)
 
 
-def _browser_is_snap(browser: str) -> bool:
-    """识别 Snap 可执行文件及 Ubuntu 的 chromium-browser Snap 跳转脚本。"""
-    browser_path = Path(browser)
-    if browser_path.parts[:3] == ("/", "snap", "bin"):
-        return True
-    try:
-        return "/snap/bin/chromium" in browser_path.read_text(
-            encoding="utf-8", errors="ignore"
-        )[:4096]
-    except (OSError, UnicodeError):
-        return False
 
 
-def _find_headless_browser() -> str | None:
-    """优先使用非 Snap 浏览器，避免 Snap/AppArmor 审计噪声。"""
-    candidates = [
-        shutil.which(name)
-        for name in (
-            "google-chrome-stable",
-            "google-chrome",
-            "chromium",
-            "chromium-browser",
-        )
-    ]
-    browsers = list(dict.fromkeys(path for path in candidates if path))
-    return next((path for path in browsers if not _browser_is_snap(path)), None) or (
-        browsers[0] if browsers else None
+
+
+
+
+
+
+
+
+
+
+
+def _get_stream_url_with_browser(username: str, timeout: int = 25) -> str | None:
+    """经共享渲染服务（scripts/dlr/browserd.py）渲染直播页并抽取 FLV。
+
+    服务不可用/超时返回 None：本轮放弃浏览器兜底，不影响轻量检测路径。
+    """
+    from dlr.browserd import render_document
+
+    # 等待条件锚定 SIGI_STATE：
+    #   - streamData 出现（直播且流数据就绪）→ 立即取 DOM；
+    #   - status 明确非 0/2（如离线 4）→ 无需水合，直接收工，避免空等满 timeout；
+    #   - 挑战页没有 SIGI → 一直等到 deadline（给 WAF 挑战留出解决时间）。
+    wait_js = """(() => {
+  const s = document.querySelector('script#SIGI_STATE');
+  if (!s) return false;
+  try {
+    const room = ((JSON.parse(s.textContent).LiveRoom || {}).liveRoomUserInfo || {}).liveRoom || {};
+    if (room.streamData || room.hevcStreamData) return true;
+    const st = room.status;
+    return typeof st === 'number' && st !== 0 && st !== 2;
+  } catch (e) { return false; }
+})()"""
+    html = render_document(
+        f"https://www.tiktok.com/@{username}/live", timeout=timeout, wait_js=wait_js
     )
-
-
-def _chromium_profile_parent(browser: str) -> str | None:
-    """Return a profile parent visible from both host and browser sandbox."""
-    if not _browser_is_snap(browser):
+    if not html:
         return None
-
-    # A snap's private /tmp is mounted at /tmp/snap-private-tmp on the host.
-    # Profiles created in the host /tmp therefore cannot be removed by cleaning
-    # the original path. SNAP_USER_COMMON is shared by the host and the snap.
-    profile_parent = (
-        Path.home() / "snap" / "chromium" / "common" / "chromium-headless"
-    )
-    profile_parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    _remove_stale_chromium_profiles(profile_parent)
-    return str(profile_parent)
-
-
-def _get_stream_url_with_browser(username: str, timeout: int = 35) -> str | None:
-    """Resolve SlardarWAF pages through installed headless Chromium."""
-    browser = _find_headless_browser()
-    if not browser:
-        return None
-    try:
-        profile_parent = _chromium_profile_parent(browser)
-        with tempfile.TemporaryDirectory(
-            prefix="tiktok-chromium-", dir=profile_parent
-        ) as profile:
-            proc = subprocess.Popen(
-                [browser, "--headless=new", "--no-sandbox", "--disable-gpu",
-                 "--disable-vulkan",
-                 "--disable-features=Vulkan,VulkanFromANGLE,DefaultANGLEVulkan",
-                 "--use-gl=disabled", "--disable-software-rasterizer",
-                 "--disable-gpu-compositing",
-                 "--disable-dev-shm-usage", f"--user-data-dir={profile}",
-                 "--virtual-time-budget=15000", "--dump-dom",
-                 f"https://www.tiktok.com/@{username}/live"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                start_new_session=True,
-            )
-            try:
-                stdout, _ = proc.communicate(timeout=timeout)
-            finally:
-                # Chromium forks renderer/crashpad processes. Always reap the
-                # whole group before TemporaryDirectory removes the profile,
-                # including successful, exceptional and interrupted probes.
-                _terminate_process_group(proc)
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        print(f"[tiktok_extract] 浏览器兜底失败：{exc}", file=sys.stderr)
-        return None
-    stream_url = _stream_url_from_sigi(stdout or "")
+    stream_url = _stream_url_from_sigi(html)
     if stream_url:
         print("[tiktok_extract] 浏览器渲染通过 WAF，已从页面取得 FLV", file=sys.stderr)
     return stream_url
@@ -454,6 +345,25 @@ def _find_nickname_from_sigi(sigi: dict, username: str) -> str | None:
     return None
 
 
+def _load_netscape_cookies(session, cookies_path: str | None) -> None:
+    """把 Netscape 格式 Cookie 文件装进 curl_cffi session；缺失/损坏静默跳过。"""
+    if not cookies_path:
+        return
+    try:
+        with open(cookies_path, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                parts = line.split("\t")
+                if len(parts) >= 7:
+                    session.cookies.set(
+                        parts[5], parts[6], domain=parts[0].lstrip("."), path=parts[2]
+                    )
+    except OSError:
+        pass
+
+
 def get_nickname(
     username: str, cookies: str | None = None, attempts: int = 3
 ) -> str | None:
@@ -474,20 +384,7 @@ def get_nickname(
 
     session = requests.Session()
     _request_with_retry(session, "https://www.tiktok.com", attempts=1)
-    if cookies:
-        try:
-            with open(cookies, encoding="utf-8") as fh:
-                for line in fh:
-                    line = line.strip()
-                    if not line or line.startswith("#"):
-                        continue
-                    parts = line.split("\t")
-                    if len(parts) >= 7:
-                        session.cookies.set(
-                            parts[5], parts[6], domain=parts[0].lstrip("."), path=parts[2]
-                        )
-        except OSError:
-            pass
+    _load_netscape_cookies(session, cookies)
 
     for attempt in range(attempts):
         r = _request_with_retry(
@@ -545,10 +442,13 @@ def get_stream_url(
     *,
     try_ytdlp: bool = True,
     allow_browser: bool = True,
+    cookies: str | None = None,
 ) -> str | None:
     """兜底取流主入口：成功返回一行流 URL，失败返回 None。
 
     quality 为原画/1080p/720p/480p，用于限制返回清晰度；默认 best 原画档。
+    cookies 为 Netscape 格式文件路径：登录态频道的页面与 webcast API 检测
+    需要 Cookie 才能看到直播（此前只有 yt-dlp 路径带 Cookie）。
     """
     max_height = quality_height(quality)
     try:
@@ -561,6 +461,7 @@ def get_stream_url(
 
     session = requests.Session()
     _request_with_retry(session, "https://www.tiktok.com", attempts=1)
+    _load_netscape_cookies(session, cookies)
 
     print(f"[tiktok_extract] 检查 @{username} ...", file=sys.stderr)
 

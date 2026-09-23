@@ -9,13 +9,14 @@
 ```text
 scripts/
 ├── dlr.py                 # 引擎入口：python3 scripts/dlr.py <platform> <target> [选项]
+├── browserd.py            # 共享常驻 Chromium 渲染服务（所有引擎复用，CDP over pipe）
 └── dlr/
     ├── engine.py          # 统一录制循环：输出布局、检测、ffmpeg 分段、优雅停止、断流重试
     └── adapters/
         ├── base.py        # 适配器接口 + 频道标识提取
         ├── ytdlp.py       # youtube / kick / chzzk / soop（yt-dlp 通用，含 impersonate 兜底）
-        ├── tiktok.py      # TikTok：yt-dlp → impersonate → mobile → curl_cffi 四方法兜底
-        ├── tiktok_extract.py  # TikTok 兜底取流（curl_cffi 解析页面 + webcast API）
+        ├── tiktok.py      # TikTok：轻量检测每轮先行（带 Cookie），升级轮才跑 yt-dlp 与浏览器
+        ├── tiktok_extract.py  # TikTok 取流（curl_cffi 页面 + webcast API；渲染走 browserd）
         └── douyin.py      # 抖音：复用 douyin/get_stream.py（DouyinLiveRecorder 子模块）
 ```
 
@@ -38,7 +39,7 @@ exec python3 "${SCRIPT_DIR}/../scripts/dlr.py" <platform> "$@"
 ├── chzzk/                 # CHZZK（record.sh 入口）
 ├── twitch/                # Twitch -> Bilibili 脚本（推流目标侧见独立仓库 ZeroMarker/bili）
 ├── scripts/               # 统一录制引擎（见上）
-├── systemd/               # WebUI systemd unit 与安装脚本
+├── systemd/               # WebUI/browserd systemd unit 与安装脚本
 ├── tests/                 # WebUI 与引擎单元测试
 ├── webui/                 # 本地录制任务管理页面与 API
 ├── docs/                  # 使用、配置、排障和维护文档
@@ -103,6 +104,12 @@ WebUI 的最近文件列表扫描 `RECORDINGS_DIR`，不会遍历整个仓库。
 `ubuntu`，依赖其 `~/.local` 站点目录），否则子进程 yt-dlp 会因找不到 `yt_dlp`
 模块而静默失败，导致所有 yt-dlp 抓流方法失效。本仓库 `tk/record.sh` 会为子进程
 自动补充该用户的 `PYTHONPATH`/`PATH` 作为兜底。
+
+**共享浏览器（`tiktok-browserd.service`）**：TikTok 检测的浏览器兜底统一走
+`scripts/dlr/browserd.py`（`127.0.0.1:9555`，`TIKTOK_BROWSERD_URL` 可覆盖）：
+一个常驻 Chromium 通过 CDP（`--remote-debugging-pipe`）为所有引擎开标签页渲染，
+替代每轮冷启动浏览器（曾 ~247 次/小时、≈0.5 核 CPU）。由 `systemd/install.sh`
+安装并启用；服务不可用时引擎自动跳过浏览器兜底，轻量检测与 yt-dlp 路径不受影响。
 
 **登录 Cookie**：TikTok 部分主播要求登录态才能拿到直播流（无 Cookie 时
 yt-dlp / Web API 均判“未开播”）。`tk/record.sh` 会检测项目根 `cookies.txt`

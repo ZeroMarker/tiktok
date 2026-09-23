@@ -1,0 +1,21 @@
+[Unit]
+Description=Shared Chromium renderer for live recorders (CDP)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=__PROJECT_ROOT__
+Environment=HOME=/home/ubuntu
+ExecStart=/usr/bin/python3 __PROJECT_ROOT__/scripts/dlr/browserd.py --serve
+Restart=always
+RestartSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=__PROJECT_ROOT__
+
+[Install]
+WantedBy=multi-user.target

@@ -13,7 +13,7 @@ bash /root/tiktok/tk/record.sh <username>
 > 适用环境：Linux，ffmpeg ≥ 6.1，yt-dlp 已安装
 > 录制服务应以装有 yt-dlp/curl_cffi 的用户（本部署 `ubuntu`）运行；
 > 需登录态主播可放 `cookies.txt` 自动携带，见 [usage.md](usage.md)。
-> 最后更新：2026-08-19
+> 最后更新：2026-09-23
 
 ## 1. 概述
 
@@ -22,8 +22,9 @@ bash /root/tiktok/tk/record.sh <username>
 | 架构 | 说明 |
 |------|------|
 | `scripts/dlr.py` | 统一录制引擎（所有平台共用） |
-| `scripts/dlr/adapters/tiktok.py` | TikTok 适配器：yt-dlp → impersonate → mobile → curl_cffi 四方法兜底 |
-| `scripts/dlr/adapters/tiktok_extract.py` | curl_cffi 解析页面 + webcast API 兜底取流（适配器直接调用） |
+| `scripts/dlr/adapters/tiktok.py` | TikTok 适配器：轻量检测每轮先行（curl_cffi 页面 + webcast API，带 Cookie），第 3 次连败的升级轮才跑 yt-dlp 与浏览器渲染 |
+| `scripts/dlr/adapters/tiktok_extract.py` | curl_cffi 解析页面 + webcast API 取流；浏览器渲染经共享 browserd 服务完成 |
+| `scripts/dlr/browserd.py` | 共享常驻 Chromium 渲染服务（CDP over pipe，`tiktok-browserd.service`，`127.0.0.1:9555`） |
 | `tk/record.sh` | TikTok 转发入口（调用引擎） |
 
 两个脚本均实现**无人值守自动录制**：检测到直播开播即录，断流自动重连，每 10 分钟切一个 MP4 分段。
@@ -49,14 +50,15 @@ bash /root/tiktok/tk/record.sh hana_kuraki87
 主循环流程：
 
 ```
-┌─────────────────────────────┐
-│ 轻量 yt-dlp / HTTP API 检测    │
-│  └─ 连续 3 次失败才启用浏览器  │
-│  └─ 失败 → 等 120–300s → 重试 │
-│  └─ 成功 → ffmpeg 分段录制    │
-│        └─ 断流/异常退出        │
-│              → 等 10s → 重试   │
-└─────────────────────────────┘
+┌────────────────────────────────────┐
+│ 轻量检测（curl_cffi+webcast，带 Cookie）│ 每轮必跑（进程内，无子进程）
+│  └─ 第 3 次连败进入升级轮：          │
+│      yt-dlp（带 Cookie）+ 浏览器渲染   │ 浏览器走共享 browserd
+│  └─ 失败 → 等 120–300s → 重试       │
+│  └─ 成功 → ffmpeg 分段录制           │
+│        └─ 断流/异常退出               │
+│              → 等 10s → 重试         │
+└────────────────────────────────────┘
 ```
 
 - 主播没开播时：每 120–300 秒随机探测一次，避免多频道同时唤醒
@@ -67,6 +69,9 @@ bash /root/tiktok/tk/record.sh hana_kuraki87
   `<slug>` 与 `<slug>_<昵称>` 两个目录
 - 输出目录名在本场录制首轮确定后即固定，后续回合即使才取到昵称也不改目录名
 - 浏览器仅作为低频兜底，并禁用 Vulkan；存在非 Snap Chrome/Chromium 时优先使用
+- 浏览器渲染由共享服务 `tiktok-browserd.service`（`scripts/dlr/browserd.py`，`127.0.0.1:9555`）
+  提供：全部频道复用同一个常驻 Chromium（CDP over `--remote-debugging-pipe`，每次只开标签页），
+  不再每轮冷启动浏览器；服务不可用时该轮自动跳过浏览器兜底，轻量检测与 yt-dlp 不受影响
 - 录制中断流：每 10 秒重试抓源，直播恢复后自动续录
 - 全程无需人工干预，适合整夜无人值守
 
@@ -160,7 +165,8 @@ bash /root/tiktok/tk/record.sh hana_kuraki87
 不返回直播流。`yt-dlp` 旧接口直接误报“未开播”。
 
 **解决**：提供登录 Cookie（Netscape 格式），`tk/record.sh` 会检测项目根 `cookies.txt`
-并自动透传给 yt-dlp；见 [使用说明](usage.md) 的“TikTok 登录 Cookie”章节。
+并自动透传给引擎；引擎同时把它用于每轮轻量检测（页面 + webcast API）、昵称抓取与升级轮
+yt-dlp，登录态频道首轮即可命中；见 [使用说明](usage.md) 的“TikTok 登录 Cookie”章节。
 验证命令：
 
 ```bash
