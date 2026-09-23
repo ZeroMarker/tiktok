@@ -47,6 +47,22 @@ class TikTokRenderedStreamTest(unittest.TestCase):
         html = '<script id="SIGI_STATE">' + __import__("json").dumps(sigi) + "</script>"
         self.assertEqual(_stream_url_from_sigi(html), "https://cdn.example/video.flv")
 
+    def test_stale_stream_data_rejected_unless_live(self):
+        """离线页（status=4）残留的陈旧 streamData 必须拒绝；直播（status=2）放行。
+
+        陈旧 FLV 永远 404：放行会造成"检测成功 → ffmpeg 秒退"的 rc=8 空转。
+        """
+        def html_for(live_room: dict) -> str:
+            sigi = {"LiveRoom": {"liveRoomUserInfo": {"liveRoom": live_room}}}
+            return '<script id="SIGI_STATE">' + __import__("json").dumps(sigi) + "</script>"
+
+        stale = {"status": 4, "streamData": {"flv": "https://cdn.example/stale.flv"}}
+        self.assertIsNone(_stream_url_from_sigi(html_for(stale)))
+        live = {"status": 2, "streamData": {"flv": "https://cdn.example/live.flv"}}
+        self.assertEqual(
+            _stream_url_from_sigi(html_for(live)), "https://cdn.example/live.flv"
+        )
+
 
 
 
@@ -208,6 +224,76 @@ class OutputDirTest(unittest.TestCase):
         engine._refresh_nickname()
         self.assertEqual(engine.nickname, "Nic Name")
         self.assertEqual(calls["n"], 3)
+
+
+class StreamValidationTest(unittest.TestCase):
+    """录制前流地址校验：陈旧/过期地址拦下，其余放行，且被拦轮次不建目录。"""
+
+    @staticmethod
+    def _engine(root: str) -> Engine:
+        return Engine("tiktok", "emiri", root, detect_interval=1, break_seconds=1)
+
+    def test_rejects_hard_4xx_and_accepts_partial_content(self):
+        engine = self._engine("/tmp/rec-validate")
+        import urllib.error
+
+        with mock.patch.object(
+            engine_mod.urllib.request, "urlopen",
+            side_effect=urllib.error.HTTPError(
+                "https://cdn.example/stale.flv", 404, "Not Found", None, None
+            ),
+        ):
+            self.assertEqual(
+                engine._stream_reject_reason("https://cdn.example/stale.flv"),
+                "HTTP 404",
+            )
+
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.return_value = b"\x00"
+        with mock.patch.object(
+            engine_mod.urllib.request, "urlopen", return_value=response
+        ):
+            self.assertIsNone(
+                engine._stream_reject_reason("https://cdn.example/live.flv")
+            )
+
+    def test_network_errors_and_non_http_protocols_pass(self):
+        engine = self._engine("/tmp/rec-validate")
+        import urllib.error
+
+        with mock.patch.object(
+            engine_mod.urllib.request, "urlopen",
+            side_effect=urllib.error.URLError("timed out"),
+        ):
+            self.assertIsNone(engine._stream_reject_reason("https://cdn.example/x.flv"))
+        # rtmp 等非 HTTP 协议 urllib 打不开 → 放行给 ffmpeg
+        self.assertIsNone(engine._stream_reject_reason("rtmp://live.example/app"))
+
+    def test_rejected_rounds_never_create_output_dir(self):
+        """校验不通过的轮次必须回到检测循环：不建目录、不启动 ffmpeg。"""
+        base = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, base, ignore_errors=True)
+        root = Path(base) / "rec"
+        engine = self._engine(str(root))
+        engine.adapter.get_nickname = lambda: "エミリ"
+        engine.adapter.detect_stream_url = lambda: "https://cdn.example/stale.flv"
+
+        validated = {"n": 0}
+
+        def always_reject(url: str) -> str:
+            validated["n"] += 1
+            if validated["n"] >= 3:
+                engine._stopping = True  # 三轮全被拦后结束
+            return "HTTP 404"
+
+        engine._stream_reject_reason = always_reject
+        records: list = []
+        engine._record = lambda *args: records.append(args)
+        engine.run()
+
+        self.assertEqual(validated["n"], 3)
+        self.assertEqual(records, [])
+        self.assertFalse((root / "tiktok").exists())
 
 
 class OutputDirCreationTest(unittest.TestCase):

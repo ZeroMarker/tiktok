@@ -13,6 +13,8 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 
@@ -180,6 +182,18 @@ class Engine:
 
                 # 只打印去掉签名参数的开头，避免整串 token 进日志
                 print(f"  → 成功抓到直播源：{stream_url.split('?')[0]}", flush=True)
+                # 录制前轻量校验：离线页残留的陈旧 FLV 等地址会 404/403，
+                # 判为未开播回到检测循环，避免 ffmpeg 秒退空转（rc=8 循环）。
+                delay = self._next_detect_delay()
+                reject_reason = self._stream_reject_reason(stream_url)
+                if reject_reason:
+                    print(
+                        f"  → 流地址校验未通过：{reject_reason}，视为未开播，"
+                        f"等待 {delay} 秒后重试...",
+                        flush=True,
+                    )
+                    time.sleep(delay)
+                    continue
                 # 目录一旦定下就不再改名：本场后续回合若才取到昵称，也不能换目录名，
                 # 否则同一场录制会分裂出 <slug> 和 <slug>_<昵称> 两处。
                 # 开播确认后才创建输出目录，避免"先无昵称、后有昵称"的双目录残留。
@@ -227,6 +241,28 @@ class Engine:
             self.detect_interval - self.detect_jitter,
             self.detect_interval + self.detect_jitter,
         )
+
+    def _stream_reject_reason(self, url: str) -> str | None:
+        """录制前校验流地址：返回 None = 通过，否则返回拒绝原因（进日志）。
+
+        活着的直播流对 Range 探测立即返回 200/206；400/403/404/410 是
+        陈旧/过期地址（如离线页残留 FLV）→ 拒绝并回到检测。其余状态码、
+        网络错误/超时与非 HTTP 协议（rtmp 等）一律放行，交给 ffmpeg 处理：
+        校验只拦"确定拉不到"的地址，不做二次误杀。
+        """
+        request = urllib.request.Request(
+            url, headers={"Range": "bytes=0-1", "User-Agent": FFMPEG_UA}
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=5) as response:
+                response.read(1)
+        except urllib.error.HTTPError as exc:
+            if exc.code in (400, 403, 404, 410):
+                return f"HTTP {exc.code}"
+            return None
+        except Exception:  # noqa: BLE001 — 校验器绝不打断检测轮询
+            return None
+        return None
 
     def _safe_nickname(self) -> str | None:
         try:

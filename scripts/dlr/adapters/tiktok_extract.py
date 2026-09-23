@@ -208,6 +208,11 @@ def _stream_url_from_sigi(text: str) -> str | None:
                 pass
 
     live_room = data.get("LiveRoom", {}).get("liveRoomUserInfo", {}).get("liveRoom", {})
+    # 陈旧流数据防护：离线页仍会携带上次直播的 streamData（其中 FLV 永远 404）。
+    # status 明确非 2（如离线 4）时拒绝抽取，避免"检测成功 → ffmpeg 秒退"空转。
+    status = live_room.get("status")
+    if status is not None and status != 2:
+        return None
     walk(live_room.get("streamData", {}))
     walk(live_room.get("hevcStreamData", {}))
     return next((url for url in urls if ".flv" in url), None) or (urls[0] if urls else None)
@@ -242,17 +247,18 @@ def _get_stream_url_with_browser(username: str, timeout: int = 25) -> str | None
     from dlr.browserd import render_document
 
     # 等待条件锚定 SIGI_STATE：
-    #   - streamData 出现（直播且流数据就绪）→ 立即取 DOM；
-    #   - status 明确非 0/2（如离线 4）→ 无需水合，直接收工，避免空等满 timeout；
+    #   - status==2（直播中）且 streamData 就绪 → 立即取 DOM；
+    #   - status 明确非 0/2（如离线 4）→ 快速收工（抽取层会拒绝残留的
+    #     陈旧 streamData，不会误报开播）；
     #   - 挑战页没有 SIGI → 一直等到 deadline（给 WAF 挑战留出解决时间）。
     wait_js = """(() => {
   const s = document.querySelector('script#SIGI_STATE');
   if (!s) return false;
   try {
     const room = ((JSON.parse(s.textContent).LiveRoom || {}).liveRoomUserInfo || {}).liveRoom || {};
-    if (room.streamData || room.hevcStreamData) return true;
     const st = room.status;
-    return typeof st === 'number' && st !== 0 && st !== 2;
+    if (st === 2) return Boolean(room.streamData || room.hevcStreamData);
+    return typeof st === 'number' && st !== 0;
   } catch (e) { return false; }
 })()"""
     html = render_document(
