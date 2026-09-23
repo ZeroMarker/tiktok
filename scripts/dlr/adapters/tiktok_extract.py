@@ -472,7 +472,8 @@ def get_stream_url(
             return stream_url
 
     # ---- 步骤2：用 curl_cffi 解析页面 ----
-    print("[tiktok_extract] yt-dlp 未返回源，尝试 curl_cffi 检测 ...", file=sys.stderr)
+    # 轻量检测每轮都在进程内完成；yt-dlp/浏览器是升级轮才用的兜底。
+    print("[tiktok_extract] 轻量检测中（页面 + webcast API）...", file=sys.stderr)
 
     r = _request_with_retry(session, live_url, impersonate="chrome131", timeout=20)
     if r is None:
