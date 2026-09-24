@@ -21,6 +21,7 @@ import subprocess
 import shlex
 import tempfile
 import threading
+import time
 from functools import wraps
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -41,6 +42,7 @@ REPLAY_ENV = CONFIG_DIR / "replay.env"
 SESSION_FILE = PROJECT_ROOT / ".bilibili_session.json"
 PUSH_ENV = CONFIG_DIR / "push.env"
 CONTROL_LOCK = threading.Lock()
+_STATIC_CACHE: dict[str, tuple[float, bytes]] = {}
 
 # PWA 静态资源：URL 路径 -> (文件, MIME, Cache-Control)。作用域锁死 WEBUI_DIR，防目录穿越。
 PWA_STATIC: dict[str, tuple[Path, str, str]] = {
@@ -83,25 +85,47 @@ SYSTEMCTL = ["systemctl", "--user"]
 
 def run(argv: list[str], timeout: int = 20, check: bool = True) -> subprocess.CompletedProcess[str]:
     return subprocess.run(argv, text=True, capture_output=True, timeout=timeout, check=check)
-def _show(unit: str) -> dict[str, str]:
-    r = run([*SYSTEMCTL, "show", unit, "-p", "ActiveState,SubState,MainPID"], check=False)
-    props = dict(
-        line.split("=", 1) for line in r.stdout.splitlines() if "=" in line
-    )
+def _unit_props(props: dict[str, str]) -> dict[str, object]:
+    try:
+        pid = int(props.get("MainPID", "0") or 0)
+    except ValueError:
+        pid = 0
     return {
         "active": props.get("ActiveState", "unknown"),
         "sub": props.get("SubState", "unknown"),
-        "pid": int(props.get("MainPID", "0") or 0),
+        "pid": pid,
     }
 
 
-def _has_ffmpeg(root_pid: int) -> bool | None:
-    """MainPID 下是否有 ffmpeg 子孙进程（即是否正在推流）。"""
-    if not root_pid:
-        return False
+def _show_many(*units: str) -> dict[str, dict[str, object]]:
+    """一次 systemctl show 查多个单元（单元间以空行分隔），比逐个查少一半 fork。"""
+    found: dict[str, dict[str, object]] = {}
+    r = run([*SYSTEMCTL, "show", *units, "-p", "Id,ActiveState,SubState,MainPID"], check=False)
+    if r.returncode == 0:
+        for block in re.split(r"\n\s*\n", r.stdout.strip()):
+            props = dict(line.split("=", 1) for line in block.splitlines() if "=" in line)
+            name = props.get("Id")
+            if name in units and name not in found:
+                found[name] = _unit_props(props)
+    for unit in units:  # 输出格式对不上时逐个兜底：宁可多 fork 一次也不给前端错状态
+        if unit not in found:
+            rr = run([*SYSTEMCTL, "show", unit, "-p", "Id,ActiveState,SubState,MainPID"], check=False)
+            props = dict(line.split("=", 1) for line in rr.stdout.splitlines() if "=" in line)
+            found[unit] = _unit_props(props)
+    return found
+
+
+def _show(unit: str) -> dict[str, object]:
+    return _show_many(unit)[unit]
+
+
+def _pushing(root_pids) -> dict[int, bool | None]:
+    """一次遍历 /proc 构建进程树，同时回答多个 MainPID 是否在推流（有 ffmpeg 子孙）。"""
+    roots = list(dict.fromkeys(int(p) for p in root_pids))
+    result: dict[int, bool | None] = {pid: False for pid in roots}
+    children: dict[int, list[int]] = {}
+    comms: dict[int, str] = {}
     try:
-        children: dict[int, list[int]] = {}
-        comms: dict[int, str] = {}
         for pid_dir in Path("/proc").iterdir():
             if not pid_dir.name.isdigit():
                 continue
@@ -113,14 +137,24 @@ def _has_ffmpeg(root_pid: int) -> bool | None:
             except (OSError, ValueError, IndexError):
                 continue
     except OSError:
-        return None
-    stack = [root_pid]
-    while stack:
-        cur = stack.pop()
-        if comms.get(cur) == "ffmpeg" and cur != root_pid:
-            return True
-        stack.extend(children.get(cur, []))
-    return comms.get(root_pid) == "ffmpeg"
+        for pid in roots:
+            if pid:
+                result[pid] = None
+        return result
+
+    def has_ffmpeg(root: int) -> bool:
+        stack = [root]
+        while stack:
+            cur = stack.pop()
+            if comms.get(cur) == "ffmpeg" and cur != root:
+                return True
+            stack.extend(children.get(cur, ()))
+        return comms.get(root) == "ffmpeg"
+
+    for root in roots:
+        if root:
+            result[root] = has_ffmpeg(root)
+    return result
 
 
 def _read_env(path: Path, key: str) -> str:
@@ -144,10 +178,61 @@ def _write_env(path: Path, lines: list[str]) -> None:
         Path(name).unlink(missing_ok=True)
 
 
+ROOM_TTL = 15.0    # 新鲜期内直接复用缓存：10 秒轮询不再每次起 live.py 打 B 站接口
+ROOM_STALE = 300.0  # 旧值可用上限：之内 stale-while-revalidate，超过则同步阻塞刷新
+_room_lock = threading.Lock()
+_room_event = threading.Event()
+_room_state: dict = {"data": None, "ts": 0.0, "refreshing": False}
+
+
+def _fetch_room() -> dict[str, object]:
+    try:
+        r = run(["python3", str(LIVE_PY), "status"], timeout=30, check=False)
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return {"ok": False, "text": f"房间状态查询失败: {exc}"}
+    return {"ok": r.returncode == 0, "text": (r.stdout + r.stderr).strip()[-2000:]}
+
+
+def _room_refresh_bg() -> None:
+    try:
+        data = _fetch_room()
+        with _room_lock:
+            _room_state["data"] = data
+            _room_state["ts"] = time.monotonic()
+    finally:
+        with _room_lock:
+            _room_state["refreshing"] = False
+        _room_event.set()
+
+
 def room_status() -> dict[str, object]:
-    r = run(["python3", str(LIVE_PY), "status"], timeout=30, check=False)
-    out = (r.stdout + r.stderr).strip()
-    return {"ok": r.returncode == 0, "text": out[-2000:]}
+    with _room_lock:
+        data = _room_state["data"]
+        age = time.monotonic() - _room_state["ts"]
+        if data is not None and age < ROOM_TTL:
+            return dict(data)
+        if _room_state["refreshing"]:
+            if data is not None:
+                return dict(data)  # 已有刷新在跑：先给旧值
+        elif data is not None and age < ROOM_STALE:
+            _room_state["refreshing"] = True
+            threading.Thread(target=_room_refresh_bg, daemon=True).start()
+            return dict(data)  # stale-while-revalidate：旧值先上屏，后台补新
+        else:
+            data = _fetch_room()  # 首次或太久没刷：持锁同步取，天然合并非首次并发请求
+            _room_state["data"] = data
+            _room_state["ts"] = time.monotonic()
+            return dict(data)
+    _room_event.wait(35)  # 首个结果生成中：等后台线程出结果
+    with _room_lock:
+        data = _room_state["data"]
+    return dict(data) if data else {"ok": False, "text": "房间状态查询中…"}
+
+
+def invalidate_room() -> None:
+    """开播/停播/改标题后强制下次重新查询，操作完立即看到新状态。"""
+    with _room_lock:
+        _room_state["ts"] = float("-inf")
 
 
 def sync_push_env() -> None:
@@ -183,6 +268,7 @@ def ensure_room_live() -> None:
     if r.returncode != 0:
         raise RuntimeError((r.stdout + r.stderr).strip()[-2000:] or "关播状态下自动开播失败")
     sync_push_env()
+    invalidate_room()
 
 
 def _ctl(*args: str) -> None:
@@ -192,7 +278,6 @@ def _ctl(*args: str) -> None:
 
 
 def _wait_inactive(unit: str, timeout: int = 35) -> bool:
-    import time
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if _show(unit)["active"] in ("inactive", "failed"):
@@ -216,10 +301,11 @@ def probe_tiktok(target: str, timeout: int = 150) -> str:
 
 
 def status() -> dict[str, object]:
-    live = _show(LIVE_UNIT)
-    replay = _show(REPLAY_UNIT)
-    live["pushing"] = _has_ffmpeg(live["pid"])
-    replay["pushing"] = _has_ffmpeg(replay["pid"])
+    units = _show_many(LIVE_UNIT, REPLAY_UNIT)
+    live, replay = units[LIVE_UNIT], units[REPLAY_UNIT]
+    pushing = _pushing([live["pid"], replay["pid"]])  # 只扫一次 /proc，两个单元共用进程树
+    live["pushing"] = pushing.get(live["pid"], False)
+    replay["pushing"] = pushing.get(replay["pid"], False)
     live["target"] = _read_env(LIVE_ENV, "TARGET")
     replay["args"] = _read_env(REPLAY_ENV, "REPLAY_ARGS")
     if live["active"] == "active" and replay["active"] == "active":
@@ -302,6 +388,7 @@ def stop_all() -> dict[str, object]:
 def room(data: dict) -> dict[str, object]:
     action = str(data.get("action", ""))
     if action == "start":
+        invalidate_room()
         try:
             area = int(data.get("area", 0))
         except (TypeError, ValueError):
@@ -322,6 +409,7 @@ def room(data: dict) -> dict[str, object]:
                 _ctl("restart", unit)
         return {"ok": True, "output": r.stdout.strip()[-2000:], "status": status()}
     if action == "stop":
+        invalidate_room()
         r = run(["python3", str(LIVE_PY), "stop"], timeout=60, check=False)
         if r.returncode != 0:
             raise RuntimeError((r.stdout + r.stderr).strip()[-2000:] or "停播失败")
@@ -329,6 +417,7 @@ def room(data: dict) -> dict[str, object]:
         _ctl("disable", "--now", REPLAY_UNIT)
         return {"ok": True, "output": r.stdout.strip()[-1000:], "status": status()}
     if action == "update":
+        invalidate_room()
         title = str(data.get("title", "")).strip()
         if not title or len(title) > 40 or "\n" in title:
             raise ValueError("title 非空、≤40 字符、禁 emoji/换行")
@@ -385,7 +474,13 @@ class Handler(BaseHTTPRequestHandler):
         return True
 
     def send_file(self, path: Path, mime: str, cache: str, extra: dict[str, str] | None = None) -> None:
-        body = path.read_bytes()
+        mtime = path.stat().st_mtime  # 静态文件按 mtime 缓存字节，避免每请求读盘
+        hit = _STATIC_CACHE.get(str(path))
+        if hit is not None and hit[0] == mtime:
+            body = hit[1]
+        else:
+            body = path.read_bytes()
+            _STATIC_CACHE[str(path)] = (mtime, body)
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", mime)
         self.send_header("Content-Length", str(len(body)))
