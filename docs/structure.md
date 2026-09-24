@@ -87,6 +87,9 @@ WebUI 的最近文件列表扫描 `RECORDINGS_DIR`，不会遍历整个仓库。
 
 `webui/app.py`（常驻 systemd 服务）通过 `systemd-run` 按需生成每频道临时单元
 `livestream-rec-{platform}-{channel}.service`，调用各平台 `record.sh`。
+后端实现拆分为 `webui/{config,jobs,files,stats,server}.py`（配置 / 任务与 systemd
+操作 / 录制文件 / 概览聚合 / HTTP 层），`app.py` 仅为兼容门面与直接执行入口；
+跨模块配置一律经 `config.X` 运行时读取，便于测试在定义处 patch。
 临时单元带 `KillMode=mixed`、`TimeoutStopSec=30s`、网络就绪依赖与崩溃自动重启。
 `KillMode=mixed` 只把 SIGTERM 发给主进程（bash→python 引擎），由引擎给 ffmpeg 收尾当前
 分段后再退出；引擎的信号处理器在 C 回调栈（curl_cffi）里也直接 `os._exit`，因此停止请求

@@ -11,13 +11,17 @@ from subprocess import CompletedProcess
 from unittest.mock import patch
 
 from webui import app
+from webui import config as app_config
+from webui import files as app_files
+from webui import jobs as app_jobs
+from webui import stats as app_stats
 
 # 所有用例都在临时任务目录上运行：start_job 会持久化启动参数（state/tasks.json，
 # 供「暂停/继续」使用），未隔离时会把测试数据写进真实部署目录。
 _STATE_DIR = tempfile.TemporaryDirectory(prefix="webui_test_state_")
 _STATE_PATCHES = [
-    patch.object(app, "STATE_DIR", Path(_STATE_DIR.name)),
-    patch.object(app, "CATALOG_FILE", Path(_STATE_DIR.name) / "tasks.json"),
+    patch.object(app_config, "STATE_DIR", Path(_STATE_DIR.name)),
+    patch.object(app_config, "CATALOG_FILE", Path(_STATE_DIR.name) / "tasks.json"),
 ]
 
 
@@ -130,7 +134,7 @@ class WebUIHTTPTest(unittest.TestCase):
 
     def test_api_jobs_without_token_is_allowed(self):
 
-        with patch.object(app, "list_jobs", return_value=[]):
+        with patch.object(app_jobs, "list_jobs", return_value=[]):
             status, _, body = self._get("/api/jobs")
         self.assertEqual(status, HTTPStatus.OK)
         self.assertEqual(json.loads(body), [])
@@ -172,9 +176,9 @@ class WebUIHelpersTest(unittest.TestCase):
 
     def test_start_job_rejects_duplicate_target(self):
         existing = [{"platform": "tiktok", "target": "@Some.User", "unit": "livestream-rec-tiktok-some-user-abc.service"}]
-        with patch.object(app, "list_jobs", return_value=existing), \
-                patch.object(app, "_live_units", return_value=[]), \
-                patch.object(app, "run") as mocked:
+        with patch.object(app_jobs, "list_jobs", return_value=existing), \
+                patch.object(app_jobs, "_live_units", return_value=[]), \
+                patch.object(app_jobs, "run") as mocked:
             with self.assertRaises(ValueError) as ctx:
                 app.start_job({"platform": "tiktok", "target": " @some.user "})
         self.assertIn("已存在", str(ctx.exception))
@@ -184,8 +188,8 @@ class WebUIHelpersTest(unittest.TestCase):
 
     def test_start_job_allows_different_case_on_other_platform(self):
         existing = [{"platform": "tiktok", "target": "@Some.User", "unit": "livestream-rec-tiktok-some-user-abc.service"}]
-        with patch.object(app, "list_jobs", return_value=existing), \
-                patch.object(app, "run", return_value=CompletedProcess([], 0, stdout="", stderr="")):
+        with patch.object(app_jobs, "list_jobs", return_value=existing), \
+                patch.object(app_jobs, "run", return_value=CompletedProcess([], 0, stdout="", stderr="")):
             unit = app.start_job({"platform": "kick", "target": "@some.user"})
         self.assertTrue(unit.startswith("livestream-rec-kick-"))
     def test_recent_files_uses_configured_recordings_directory(self):
@@ -196,13 +200,13 @@ class WebUIHelpersTest(unittest.TestCase):
             video = nested / "clip.mp4"
             video.write_bytes(b"video")
             (nested / "ignored.flv").write_bytes(b"stream")
-            with patch.object(app, "RECORDINGS_DIR", directory):
+            with patch.object(app_config, "RECORDINGS_DIR", directory):
                 files = app.recent_files()
             self.assertEqual(len(files), 1)
             self.assertEqual(files[0]["path"], os.path.join("channel", "clip.mp4"))
 
     def test_recent_files_handles_missing_directory(self):
-        with patch.object(app, "RECORDINGS_DIR", "/definitely/missing/directory"):
+        with patch.object(app_config, "RECORDINGS_DIR", "/definitely/missing/directory"):
             self.assertEqual(app.recent_files(), [])
 
     def test_list_jobs_uses_one_batch_details_query(self):
@@ -216,7 +220,7 @@ class WebUIHelpersTest(unittest.TestCase):
             "Id=livestream-rec-kick-two.service\nActiveState=inactive\nSubState=dead\n"
             "Description=Live recorder: kick two\nMainPID=0\nMemoryCurrent=0\nNRestarts=1\n"
         ), stderr="")
-        with patch.object(app, "run", side_effect=[listed, shown]) as mocked_run:
+        with patch.object(app_jobs, "run", side_effect=[listed, shown]) as mocked_run:
             jobs = app.list_jobs()
         self.assertEqual(mocked_run.call_count, 2)
         self.assertEqual([job["target"] for job in jobs], ["one", "two"])
@@ -230,7 +234,7 @@ class WebUIHelpersTest(unittest.TestCase):
             "Description=Live recorder: tiktok one\nMainPID=[not set]\n"
             "MemoryCurrent=[not set]\nNRestarts=[not set]\n"
         ), stderr="")
-        with patch.object(app, "run", side_effect=[listed, shown]):
+        with patch.object(app_jobs, "run", side_effect=[listed, shown]):
             jobs = app.list_jobs()
         self.assertEqual(jobs[0]["pid"], 0)
         self.assertEqual(jobs[0]["memory"], 0)
@@ -250,8 +254,8 @@ class WebUIHelpersTest(unittest.TestCase):
             "Id=livestream-rec-kick-three.service\nActiveState=inactive\nSubState=dead\n"
             "Description=Live recorder: kick three\nMainPID=0\nMemoryCurrent=0\nNRestarts=1\n"
         ), stderr="")
-        with patch.object(app, "run", side_effect=[listed, shown]), \
-                patch.object(app, "_ffmpeg_descendant", side_effect=[True, False]) as probed:
+        with patch.object(app_jobs, "run", side_effect=[listed, shown]), \
+                patch.object(app_jobs, "_ffmpeg_descendant", side_effect=[True, False]) as probed:
             jobs = app.list_jobs()
         self.assertEqual([job["live"] for job in jobs], ["live", "waiting", "offline"])
         # 非活动单元无需探测进程树（只有活动任务才查 ffmpeg 子进程）
@@ -259,7 +263,7 @@ class WebUIHelpersTest(unittest.TestCase):
 
     def test_live_status_is_unknown_when_process_tree_unavailable(self):
         self.assertEqual(app._live_status("active", 0), "unknown")
-        with patch.object(app, "_ffmpeg_descendant", return_value=None):
+        with patch.object(app_jobs, "_ffmpeg_descendant", return_value=None):
             self.assertEqual(app._live_status("active", 99), "unknown")
         self.assertEqual(app._live_status("failed", 99), "offline")
 
@@ -270,9 +274,9 @@ class WebUIHelpersTest(unittest.TestCase):
             {"platform": "tiktok", "state": "failed", "live": "offline"},
         ]
         with (
-            patch.object(app, "list_jobs", return_value=jobs),
-            patch.object(app, "list_files", return_value={"total": 0, "offset": 0, "files": []}),
-            patch.object(app, "system_stats", return_value={"load": [0.1, 0.2, 0.3], "mem_total": 1000, "mem_available": 500}),
+            patch.object(app_jobs, "list_jobs", return_value=jobs),
+            patch.object(app_files, "list_files", return_value={"total": 0, "offset": 0, "files": []}),
+            patch.object(app_stats, "system_stats", return_value={"load": [0.1, 0.2, 0.3], "mem_total": 1000, "mem_available": 500}),
         ):
             data = app.overview()
         self.assertEqual(data["live"], 1)
@@ -295,13 +299,13 @@ class WebUIHelpersTest(unittest.TestCase):
             os.utime(older, (older_ts, older_ts))
             os.utime(recent, (recent_ts, recent_ts))
             os.utime(other, (recent_ts - 50, recent_ts - 50))
-            with patch.object(app, "RECORDINGS_DIR", directory):
+            with patch.object(app_config, "RECORDINGS_DIR", directory):
                 data = app.list_files()
             self.assertEqual(data["total"], 3)
             self.assertEqual([f["name"] for f in data["files"]], ["clip_2.mp4", "live.mp4", "clip_1.mp4"])
             self.assertEqual(data["files"][0]["dir"], "tiktok_alpha")
             self.assertEqual(data["files"][1]["dir"], "soop_beta")
-            with patch.object(app, "RECORDINGS_DIR", directory):
+            with patch.object(app_config, "RECORDINGS_DIR", directory):
                 filtered = app.list_files(query="clip_1")
             self.assertEqual(filtered["total"], 1)
             self.assertEqual(filtered["files"][0]["name"], "clip_1.mp4")
@@ -312,7 +316,7 @@ class WebUIHelpersTest(unittest.TestCase):
             for i in range(5):
                 (root / f"f{i}.mp4").write_bytes(b"x")
                 os.utime(root / f"f{i}.mp4", (1_700_000_000 + i, 1_700_000_000 + i))
-            with patch.object(app, "RECORDINGS_DIR", directory):
+            with patch.object(app_config, "RECORDINGS_DIR", directory):
                 page = app.list_files(limit=2, offset=2)
             self.assertEqual(page["total"], 5)
             self.assertEqual([f["name"] for f in page["files"]], ["f2.mp4", "f1.mp4"])
@@ -322,27 +326,27 @@ class WebUIHelpersTest(unittest.TestCase):
             root = Path(directory)
             outside = root.parent / "outside.mp4"
             outside.write_bytes(b"secret")
-            with patch.object(app, "RECORDINGS_DIR", directory):
+            with patch.object(app_config, "RECORDINGS_DIR", directory):
                 self.assertIsNone(app.resolve_recording("../outside.mp4"))
                 self.assertIsNone(app.resolve_recording("/etc/passwd"))
                 self.assertIsNone(app.resolve_recording(""))
                 self.assertIsNone(app.resolve_recording("missing.mp4"))
             (root / "ok.mp4").write_bytes(b"data")
-            with patch.object(app, "RECORDINGS_DIR", directory):
+            with patch.object(app_config, "RECORDINGS_DIR", directory):
                 self.assertEqual(app.resolve_recording("ok.mp4").name, "ok.mp4")
 
     def test_delete_file(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "gone.mp4").write_bytes(b"data")
-            with patch.object(app, "RECORDINGS_DIR", directory):
+            with patch.object(app_config, "RECORDINGS_DIR", directory):
                 app.delete_file("gone.mp4")
                 self.assertFalse((root / "gone.mp4").exists())
                 with self.assertRaises(ValueError):
                     app.delete_file("../etc/passwd")
 
     def test_job_logs_tail(self):
-        with patch.object(app, "run", return_value=CompletedProcess([], 0, stdout="log line\n", stderr="")) as mocked:
+        with patch.object(app_jobs, "run", return_value=CompletedProcess([], 0, stdout="log line\n", stderr="")) as mocked:
             app.job_logs("livestream-rec-tiktok-x-abc.service", tail=1000)
         args = mocked.call_args.args[0]
         self.assertIn("-n", args)
@@ -351,7 +355,7 @@ class WebUIHelpersTest(unittest.TestCase):
             app.job_logs("evil.service")
 
     def test_restart_job_validates_unit(self):
-        with patch.object(app, "run", return_value=CompletedProcess([], 0, stdout="", stderr="")) as mocked:
+        with patch.object(app_jobs, "run", return_value=CompletedProcess([], 0, stdout="", stderr="")) as mocked:
             app.restart_job("livestream-rec-tiktok-x-abc.service")
         self.assertEqual(mocked.call_args.args[0][0], "systemctl")
         self.assertIn("restart", mocked.call_args.args[0])
@@ -363,7 +367,7 @@ class WebUIHelpersTest(unittest.TestCase):
             root = Path(directory)
             video = root / "clip.mp4"
             video.write_bytes(b"0123456789")
-            with patch.object(app, "RECORDINGS_DIR", directory):
+            with patch.object(app_config, "RECORDINGS_DIR", directory):
                 handler = _FakeHandler("/api/file?path=clip.mp4")
                 handler.headers["Range"] = "bytes=2-5"
                 handler.do_GET()
@@ -375,7 +379,7 @@ class WebUIHelpersTest(unittest.TestCase):
             self.assertEqual(body, b"2345")
 
     def test_download_rejects_traversal(self):
-        with patch.object(app, "RECORDINGS_DIR", "/tmp"):
+        with patch.object(app_config, "RECORDINGS_DIR", "/tmp"):
             handler = _FakeHandler("/api/file?path=..%2F..%2Fetc%2Fpasswd")
             handler.do_GET()
         raw = handler.wfile.getvalue()
@@ -386,16 +390,16 @@ class WebUIHelpersTest(unittest.TestCase):
 
         jobs = [{"platform": "tiktok", "state": "active"}, {"platform": "tiktok", "state": "failed"}]
         with (
-            patch.object(app, "list_jobs", return_value=jobs),
-            patch.object(app, "list_files", return_value={"total": 0, "offset": 0, "files": []}),
-            patch.object(app, "system_stats", return_value={"load": [0.1, 0.2, 0.3], "mem_total": 1000, "mem_available": 500}),
+            patch.object(app_jobs, "list_jobs", return_value=jobs),
+            patch.object(app_files, "list_files", return_value={"total": 0, "offset": 0, "files": []}),
+            patch.object(app_stats, "system_stats", return_value={"load": [0.1, 0.2, 0.3], "mem_total": 1000, "mem_available": 500}),
         ):
             data = app.overview()
         self.assertEqual(data["running"], 1)
         self.assertEqual(data["failed"], 1)
         self.assertEqual(data["platforms"], {"tiktok": 2})
         handler = _FakeHandler("/api/files")
-        with patch.object(app, "list_files", return_value={"total": 0, "offset": 0, "files": []}):
+        with patch.object(app_files, "list_files", return_value={"total": 0, "offset": 0, "files": []}):
             handler.do_GET()
         raw = handler.wfile.getvalue()
         head, _, body = raw.partition(b"\r\n\r\n")
@@ -404,23 +408,23 @@ class WebUIHelpersTest(unittest.TestCase):
 
 
     def test_start_job_forwards_quality(self):
-        with patch.object(app, "list_jobs", return_value=[]), \
-                patch.object(app, "run", return_value=CompletedProcess([], 0, stdout="", stderr="")) as mocked:
+        with patch.object(app_jobs, "list_jobs", return_value=[]), \
+                patch.object(app_jobs, "run", return_value=CompletedProcess([], 0, stdout="", stderr="")) as mocked:
             app.start_job({"platform": "tiktok", "target": "@user", "quality": "720p"})
         argv = mocked.call_args.args[0]
         self.assertIn("--quality", argv)
         self.assertEqual(argv[argv.index("--quality") + 1], "720p")
 
     def test_start_job_defaults_to_best_quality(self):
-        with patch.object(app, "list_jobs", return_value=[]), \
-                patch.object(app, "run", return_value=CompletedProcess([], 0, stdout="", stderr="")) as mocked:
+        with patch.object(app_jobs, "list_jobs", return_value=[]), \
+                patch.object(app_jobs, "run", return_value=CompletedProcess([], 0, stdout="", stderr="")) as mocked:
             app.start_job({"platform": "tiktok", "target": "@user"})
         argv = mocked.call_args.args[0]
         self.assertNotIn("--quality", argv)
 
     def test_start_job_rejects_invalid_quality(self):
-        with patch.object(app, "list_jobs", return_value=[]), \
-                patch.object(app, "run") as mocked:
+        with patch.object(app_jobs, "list_jobs", return_value=[]), \
+                patch.object(app_jobs, "run") as mocked:
             with self.assertRaises(ValueError):
                 app.start_job({"platform": "tiktok", "target": "@user", "quality": "4k"})
         mocked.assert_not_called()
@@ -430,7 +434,7 @@ class WebUIHelpersTest(unittest.TestCase):
             root = Path(directory)
             video = root / "clip.mp4"
             video.write_bytes(b"0123456789")
-            with patch.object(app, "RECORDINGS_DIR", directory):
+            with patch.object(app_config, "RECORDINGS_DIR", directory):
                 handler = _FakeHandler("/api/file?path=clip.mp4")
                 handler.do_GET()
         head, _, _ = handler.wfile.getvalue().partition(b"\r\n\r\n")
@@ -519,7 +523,7 @@ class TaskPauseResumeDeleteTest(unittest.TestCase):
         self.addCleanup(shutil.rmtree, base, ignore_errors=True)
         self.catalog_file = base / "tasks.json"
         for target, value in (("STATE_DIR", base), ("CATALOG_FILE", self.catalog_file)):
-            patcher = patch.object(app, target, value)
+            patcher = patch.object(app_config, target, value)
             patcher.start()
             self.addCleanup(patcher.stop)
 
@@ -539,12 +543,12 @@ class TaskPauseResumeDeleteTest(unittest.TestCase):
 
     def test_pause_stops_unit_and_persists_spec(self):
         self.catalog_file.write_text(json.dumps({self.UNIT: self._spec()}), encoding="utf-8")
-        with patch.object(app, "_live_units", return_value=[self.UNIT]), \
-                patch.object(app, "run", return_value=CompletedProcess([], 0, stdout="", stderr="")) as mocked_run:
+        with patch.object(app_jobs, "_live_units", return_value=[self.UNIT]), \
+                patch.object(app_jobs, "run", return_value=CompletedProcess([], 0, stdout="", stderr="")) as mocked_run:
             app.pause_job(self.UNIT)
         self.assertEqual(mocked_run.call_args.args[0], [app.SYSTEMCTL, "stop", self.UNIT])
         # 暂停后单元已被回收：仍能从任务目录列出，且状态为 paused
-        with patch.object(app, "_live_units", return_value=[]):
+        with patch.object(app_jobs, "_live_units", return_value=[]):
             jobs = app.list_jobs()
         self.assertEqual([(job["unit"], job["state"], job["live"]) for job in jobs], [(self.UNIT, "paused", "paused")])
         self.assertTrue(self._catalog()[self.UNIT]["paused"])
@@ -552,8 +556,8 @@ class TaskPauseResumeDeleteTest(unittest.TestCase):
     def test_resume_respawns_unit_with_saved_arguments(self):
         paused = {**self._spec(), "paused": True}
         self.catalog_file.write_text(json.dumps({self.UNIT: paused}), encoding="utf-8")
-        with patch.object(app, "_live_units", return_value=[]), \
-                patch.object(app, "run", return_value=CompletedProcess([], 0, stdout="", stderr="")) as mocked_run:
+        with patch.object(app_jobs, "_live_units", return_value=[]), \
+                patch.object(app_jobs, "run", return_value=CompletedProcess([], 0, stdout="", stderr="")) as mocked_run:
             unit = app.resume_job(self.UNIT)
         self.assertEqual(unit, self.UNIT)
         argv = mocked_run.call_args.args[0]
@@ -567,8 +571,8 @@ class TaskPauseResumeDeleteTest(unittest.TestCase):
 
     def test_pause_recovers_arguments_from_systemd_when_catalog_is_empty(self):
         """旧版本/命令行创建的任务没有目录记录，暂停时从单元 ExecStart 反推参数。"""
-        with patch.object(app, "_live_units", return_value=[self.UNIT]), \
-                patch.object(app, "run", side_effect=[
+        with patch.object(app_jobs, "_live_units", return_value=[self.UNIT]), \
+                patch.object(app_jobs, "run", side_effect=[
                     self._unit_show("480p"), CompletedProcess([], 0, stdout="", stderr="")
                 ]):
             app.pause_job(self.UNIT)
@@ -578,38 +582,38 @@ class TaskPauseResumeDeleteTest(unittest.TestCase):
 
     def test_delete_stops_running_unit_and_drops_record(self):
         self.catalog_file.write_text(json.dumps({self.UNIT: self._spec()}), encoding="utf-8")
-        with patch.object(app, "_live_units", return_value=[self.UNIT]), \
-                patch.object(app, "run", return_value=CompletedProcess([], 0, stdout="", stderr="")) as mocked_run:
+        with patch.object(app_jobs, "_live_units", return_value=[self.UNIT]), \
+                patch.object(app_jobs, "run", return_value=CompletedProcess([], 0, stdout="", stderr="")) as mocked_run:
             app.delete_job(self.UNIT)
         self.assertEqual(mocked_run.call_args.args[0], [app.SYSTEMCTL, "stop", self.UNIT])
         self.assertEqual(self._catalog(), {})
-        with patch.object(app, "_live_units", return_value=[]):
+        with patch.object(app_jobs, "_live_units", return_value=[]):
             self.assertEqual(app.list_jobs(), [])
 
     def test_deleting_paused_task_does_not_call_systemctl(self):
         self.catalog_file.write_text(json.dumps({self.UNIT: {**self._spec(), "paused": True}}), encoding="utf-8")
-        with patch.object(app, "_live_units", return_value=[]), \
-                patch.object(app, "run") as mocked_run:
+        with patch.object(app_jobs, "_live_units", return_value=[]), \
+                patch.object(app_jobs, "run") as mocked_run:
             app.delete_job(self.UNIT)
         mocked_run.assert_not_called()
         self.assertEqual(self._catalog(), {})
 
     def test_pause_rejects_unit_that_is_not_running(self):
-        with patch.object(app, "_live_units", return_value=[]), patch.object(app, "run") as mocked_run:
+        with patch.object(app_jobs, "_live_units", return_value=[]), patch.object(app_jobs, "run") as mocked_run:
             with self.assertRaises(ValueError):
                 app.pause_job(self.UNIT)
         mocked_run.assert_not_called()
 
     def test_resume_rejects_task_that_is_not_paused(self):
         self.catalog_file.write_text(json.dumps({self.UNIT: self._spec()}), encoding="utf-8")
-        with patch.object(app, "_live_units", return_value=[self.UNIT]), patch.object(app, "run") as mocked_run:
+        with patch.object(app_jobs, "_live_units", return_value=[self.UNIT]), patch.object(app_jobs, "run") as mocked_run:
             with self.assertRaises(ValueError):
                 app.resume_job(self.UNIT)
         mocked_run.assert_not_called()
 
     def test_start_rejects_duplicate_of_paused_task(self):
         self.catalog_file.write_text(json.dumps({self.UNIT: {**self._spec(), "paused": True}}), encoding="utf-8")
-        with patch.object(app, "_live_units", return_value=[]), patch.object(app, "run") as mocked_run:
+        with patch.object(app_jobs, "_live_units", return_value=[]), patch.object(app_jobs, "run") as mocked_run:
             with self.assertRaises(ValueError) as ctx:
                 app.start_job({"platform": "tiktok", "target": " CHAN ", "quality": "best"})
         self.assertIn("暂停", str(ctx.exception))
@@ -617,8 +621,8 @@ class TaskPauseResumeDeleteTest(unittest.TestCase):
 
     def test_restore_respawns_missing_nonpaused_task(self):
         self.catalog_file.write_text(json.dumps({self.UNIT: self._spec()}), encoding="utf-8")
-        with patch.object(app, "_live_units", return_value=[]), \
-                patch.object(app, "run", return_value=CompletedProcess([], 0, stdout="", stderr="")) as mocked_run:
+        with patch.object(app_jobs, "_live_units", return_value=[]), \
+                patch.object(app_jobs, "run", return_value=CompletedProcess([], 0, stdout="", stderr="")) as mocked_run:
             restored, failed = app.restore_jobs()
         self.assertEqual(restored, [self.UNIT])
         self.assertEqual(failed, {})
@@ -634,8 +638,8 @@ class TaskPauseResumeDeleteTest(unittest.TestCase):
             paused_unit: {**self._spec(), "target": "paused", "paused": True},
         }
         self.catalog_file.write_text(json.dumps(catalog), encoding="utf-8")
-        with patch.object(app, "_live_units", return_value=[self.UNIT]), \
-                patch.object(app, "run") as mocked_run:
+        with patch.object(app_jobs, "_live_units", return_value=[self.UNIT]), \
+                patch.object(app_jobs, "run") as mocked_run:
             restored, failed = app.restore_jobs()
         self.assertEqual((restored, failed), ([], {}))
         mocked_run.assert_not_called()
@@ -643,7 +647,7 @@ class TaskPauseResumeDeleteTest(unittest.TestCase):
     def test_restore_failure_does_not_delete_catalog(self):
         self.catalog_file.write_text(json.dumps({self.UNIT: self._spec()}), encoding="utf-8")
         failure = CompletedProcess([], 1, stdout="", stderr="systemd unavailable")
-        with patch.object(app, "_live_units", return_value=[]), patch.object(app, "run", return_value=failure):
+        with patch.object(app_jobs, "_live_units", return_value=[]), patch.object(app_jobs, "run", return_value=failure):
             restored, failed = app.restore_jobs()
         self.assertEqual(restored, [])
         self.assertIn("systemd unavailable", failed[self.UNIT])
@@ -651,7 +655,7 @@ class TaskPauseResumeDeleteTest(unittest.TestCase):
 
     def test_corrupt_catalog_does_not_break_listing(self):
         self.catalog_file.write_text("{ not json", encoding="utf-8")
-        with patch.object(app, "_live_units", return_value=[]):
+        with patch.object(app_jobs, "_live_units", return_value=[]):
             self.assertEqual(app.list_jobs(), [])
 
 
@@ -659,18 +663,18 @@ class TaskControlHTTPTest(unittest.TestCase):
     """任务控制接口的路由（暂停/继续/删除任务，以及已移除的 /api/stop）。"""
 
     def test_delete_task_route_dispatches_to_delete_job(self):
-        with patch.object(app, "delete_job") as mocked:
+        with patch.object(app_jobs, "delete_job") as mocked:
             status, _ = WebUIHTTPTest()._post("/api/delete-task", {"unit": "u.service"})
         self.assertEqual(status, HTTPStatus.OK)
         mocked.assert_called_once_with("u.service")
 
     def test_pause_and_resume_routes_dispatch(self):
         handler = WebUIHTTPTest()
-        with patch.object(app, "pause_job") as paused:
+        with patch.object(app_jobs, "pause_job") as paused:
             status, _ = handler._post("/api/pause", {"unit": "u.service"})
         self.assertEqual(status, HTTPStatus.OK)
         paused.assert_called_once_with("u.service")
-        with patch.object(app, "resume_job", return_value="new.service") as resumed:
+        with patch.object(app_jobs, "resume_job", return_value="new.service") as resumed:
             status, body = handler._post("/api/resume", {"unit": "u.service"})
         self.assertEqual(status, HTTPStatus.OK)
         resumed.assert_called_once_with("u.service")
