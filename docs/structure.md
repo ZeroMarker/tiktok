@@ -20,7 +20,7 @@ scripts/
         └── douyin.py      # 抖音：复用 douyin/get_stream.py（DouyinLiveRecorder 子模块）
 ```
 
-每平台的 `record.sh` 均为薄包装，只转发给引擎：
+每平台的 `record.sh` 均为薄包装，只转发给引擎（单进程 WebUI 不经此包装、直接构造引擎；包装保留给命令行手动使用）：
 
 ```bash
 exec python3 "${SCRIPT_DIR}/../scripts/dlr.py" <platform> "$@"
@@ -96,9 +96,11 @@ systemd 临时单元，也不再经 `record.sh` 包装（包装仅保留给命�
 
 生命周期语义与旧多进程模型一一对等：
 
-- **优雅停止**：暂停/删除/停服（SIGTERM/SIGINT）都会对每个引擎 `request_stop()`——
-  置停止位、中断长等待（检测间隔可长达 3–5 分钟）、让 ffmpeg 收尾当前分段后再
-  回收线程；单元 `TimeoutStopSec=60s` 兜底，命令行路径（dlr.py）仍由引擎信号
+- **优雅停止**：暂停/删除/停服都会对每个引擎 `request_stop()`——置停止位、中断长等待
+  （检测间隔可长达 5 分钟）、立即向 ffmpeg 发终止信号收尾当前分段。控制类操作（暂停/
+  删除/重启）短 join 最长 5 秒：引擎若正阻在网络调用（页面抓取超时可达 20s）里，超时
+  即返回、线程后台自行退出并从任务表自摘，API 不挂起；停服（SIGTERM/SIGINT）则并行
+  join 全部引擎（单元 `TimeoutStopSec=60s` 兜底）。命令行路径（dlr.py）仍由引擎信号
   处理器直接 `os._exit`，停止不会等到超时才生效。
 - **崩溃自动重启**：引擎线程内未捕获异常按 10 秒退避重建（等价旧
   `Restart=on-failure RestartSec=10s`），重启计数即任务状态里的 `restarts`。
@@ -112,7 +114,10 @@ systemd 临时单元，也不再经 `record.sh` 包装（包装仅保留给命�
 未暂停任务，因此服务器重启后任务会恢复；已暂停任务不会自动启动。单个任务恢复失败
 只写入服务日志，不会删除其目录记录或阻止 WebUI 启动。目录读取失败或损坏时按空目录
 处理，不影响其他功能。`livestream-rec-*.service` 命名仅作为稳定任务 ID 沿用
-（目录键、日志文件名、API 字段），历史数据零迁移。文件为运行产物（已 gitignore），
+（目录键、日志文件名、API 字段），历史数据零迁移。**列表接口** = 运行任务的进程内
+状态快照（`recorder.status()`）拼上目录里 `paused:true` 的条目，两者字段形状一致
+（前端零改动）；因此暂停任务重启后仍显示，运行任务的状态永远来自真实线程而非缓存。
+文件为运行产物（已 gitignore），
 路径可用 `WEBUI_STATE_DIR`/`STATE_DIRECTORY` 覆盖；服务单元通过
 `ReadWritePaths=.../state` 放行写入。
 

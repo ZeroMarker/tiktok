@@ -152,14 +152,12 @@ find ~/snap/chromium/common/chromium-headless -mindepth 1 -maxdepth 1 2>/dev/nul
 ps -eo pid,ppid,etime,args | grep -E '/snap/chromium/.+--headless' | grep -v grep
 ```
 
-如果确认任务已经停止，但仍有残留临时目录，先停止全部 TikTok 录制单元并确认没有
-Headless Chromium 进程，再只清理下面两个临时目录。不要删除 `~/tiktok` 或
+如果确认任务已经停止，但仍有残留临时目录，先确保没有引擎在探测（单进程模型下探测
+逻辑都是 `livestream-webui` 进程内的线程，可在 WebUI 暂停/删除全部 TikTok 任务），
+确认无 Headless Chromium 进程后，只清理下面两个临时目录。不要删除 `~/tiktok` 或
 `recordings/`：
 
 ```bash
-units=$(systemctl list-units 'livestream-rec-tiktok-*.service' --all --no-legend | awk '{print $1}')
-[ -z "$units" ] || sudo systemctl stop $units
-
 find /tmp -maxdepth 1 -type d -name 'tiktok-chromium-*' -exec rm -rf -- {} +
 find ~/snap/chromium/common/chromium-headless -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + 2>/dev/null
 ```
@@ -169,7 +167,7 @@ find ~/snap/chromium/common/chromium-headless -mindepth 1 -maxdepth 1 -exec rm -
 
 ```bash
 ps -eo pid,ppid,user,etime,args | grep -E 'dlr.py tiktok|chromium.*headless' | grep -v grep
-systemctl list-units --type=service --all | grep livestream-rec-tiktok
+pgrep -af 'browserd|tiktok/webui/app.py'   # 共享渲染服务与录制主进程（无线索单元）
 ```
 
 ## WebUI 无法启动
@@ -189,7 +187,7 @@ journalctl -u livestream-webui -n 100 --no-pager
 
 ```bash
 df -h "$(systemctl show livestream-webui -p Environment --value | tr ' ' '\n' | sed -n 's/^RECORDINGS_DIR=//p')"
-du -sh /root/tiktok/recordings/* 2>/dev/null | sort -h
+du -sh /home/ubuntu/tiktok/recordings/* 2>/dev/null | sort -h
 ```
 
 删除录像属于不可恢复操作。先确认录像已备份或不再需要，再按明确的日期、频道和文件路径人工清理；项目不会自动删除录像。

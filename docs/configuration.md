@@ -47,8 +47,12 @@ yt-dlp --update-to nightly
 ```text
 LIVE_WEBUI_HOST=127.0.0.1
 LIVE_WEBUI_PORT=8766
-RECORDINGS_DIR=/root/tiktok/recordings
+RECORDINGS_DIR=/home/ubuntu/tiktok/recordings
 ```
+
+服务以 `ubuntu` 运行（单进程模型：录制引擎线程与 WebUI 同进程），依赖
+（yt-dlp / curl_cffi）取自其 `~/.local`，单元内已显式补齐 `PATH`（旧版靠
+`record.sh` 包装桥接，包装仅保留给命令行）。
 
 后端不校验令牌，因此必须保持监听回环地址，并仅在内网、VPN 或带访问控制的反向代理后使用。修改配置后执行：
 
@@ -120,7 +124,7 @@ SOOP（Sooplive）的会员订阅直播需要登录才能取流。引擎会自�
   `machine afreecatv login <SOOP用户ID> password <SOOP密码>`，引擎自动加 `--netrc`。
 - **环境变量**：`SOOP_USERNAME` / `SOOP_PASSWORD`，引擎自动带 `--username`/`--password`。
 - **Cookie**：登录后的 Netscape 会话 Cookie。存为项目根 `soop-cookies.txt`
-  （已 gitignore）时 `soop/record.sh` 会自动附带 `--cookies`；也可显式
-  `bash soop/record.sh <id> --cookies file`。
+  （已 gitignore）时命令行 `soop/record.sh` 与 WebUI 任务都会自动附带 `--cookies`；
+  也可显式 `bash soop/record.sh <id> --cookies file`。
 
 凭据不要提交仓库、写入日志或日志系统。会员直播通常还需对主播订阅/付费才能观看。

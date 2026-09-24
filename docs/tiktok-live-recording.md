@@ -5,7 +5,7 @@
 日常录制统一使用：
 
 ```bash
-bash /root/tiktok/tk/record.sh <username>
+bash tk/record.sh <username>
 ```
 
 历史调试脚本（`tk_direct.sh`、`tk.sh`、`fallback_tk*.sh`、`playwright_*.py` 等）已移除。不要仅凭 Web API 的 GroupBlock 或离线结果判定无法录制；应首先直接运行正式入口，让引擎轮询实际流地址。
@@ -32,14 +32,14 @@ bash /root/tiktok/tk/record.sh <username>
 ## 2. 快速开始
 
 ```bash
-bash /root/tiktok/tk/record.sh hana_kuraki87
+bash tk/record.sh hana_kuraki87
 ```
 
 ⚠️ 脚本会长期占用终端，**必须在 tmux / zellij 新窗口中运行**，不要在当前会话直接执行：
 
 ```bash
 tmux new -s tk_hana
-bash /root/tiktok/tk/record.sh hana_kuraki87
+bash tk/record.sh hana_kuraki87
 # 退出窗口：Ctrl+B 然后 D（detach），录制继续后台运行
 ```
 
@@ -176,9 +176,9 @@ yt-dlp --impersonate chrome --cookies cookies.txt \
 
 > 历史案例（emma_kusunoki 等）与经验沉淀见 [tk/error.md](../tk/error.md)。
 
-## 7. 辅助工具链（/root/tiktok/tk/）
+## 7. 辅助工具链（tk/）
 
-排障与备用检测工具集中在 `/root/tiktok/tk/`（脚本目录，可正常访问）：
+排障与备用检测工具集中在 `tk/`（脚本目录，可正常访问）：
 
 | 文件 | 说明 |
 |------|------|
@@ -189,7 +189,7 @@ yt-dlp --impersonate chrome --cookies cookies.txt \
 **tiktok_extract.py 单独使用**（yt-dlp 失败时取流/二次确认）：
 
 ```bash
-python /root/tiktok/scripts/dlr/adapters/tiktok_extract.py <username>
+python scripts/dlr/adapters/tiktok_extract.py <username>
 # 成功 → stdout 输出一行流 URL；失败 → exit 1
 ```
 
@@ -212,6 +212,6 @@ yt-dlp "https://www.tiktok.com/@<user>/live" -f "b[ext=flv]" --get-url
 
 ## 9. 注意事项
 
-- 不要用 `find`/`grep` 扫描 `/root/tiktok` 目录（约 14GB，会卡死）；但 `/root/tiktok/tk/` 是脚本目录（见 §7），不受此限制
+- 不要用 `find`/`grep` 扫描 `/home/ubuntu/tiktok` 目录（约 14GB，会卡死）；但 `tk/` 是脚本目录（见 §7），不受此限制
 - 日常功能应优先合入并测试 `tk/record.sh`；备用脚本只保留平台兼容实验，不作为默认入口
 - 涉及脚本改动用 git 确认版本、`git diff` 对比后再动
