@@ -222,3 +222,8 @@ soop-cookies*.txt
 node_modules/
 bili/.bilibili_session.json
 .bilibili_session.json
+
+# 前端源码目录不能被上面的运行产物规则（logs/、recordings/ 匹配任意层级）误伤：
+# features/{logs,recordings} 是 Vue 特性模块，必须入库（CI 构建校验依赖）。
+!webui/frontend/src/features/logs/
+!webui/frontend/src/features/recordings/

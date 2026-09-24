@@ -26,6 +26,13 @@ from dlr.adapters.tiktok_extract import (  # noqa: E402
     get_room_id_from_universal,
 )
 
+try:  # 取流网络层依赖 curl_cffi；缺失环境（如最小化镜像）下相关用例自动 skip
+    import curl_cffi  # noqa: F401
+
+    HAS_CURL_CFFI = True
+except ImportError:  # pragma: no cover
+    HAS_CURL_CFFI = False
+
 
 def sigi_page(payload: object) -> str:
     """包一层直播页的 SIGI_STATE 脚本标签。payload 已是 JSON 字符串时原样嵌入。"""
@@ -154,6 +161,7 @@ class _FakeSession:
         return self._response
 
 
+@unittest.skipUnless(HAS_CURL_CFFI, "curl_cffi 未安装")
 class CheckLiveViaWebcastApiTest(unittest.TestCase):
     FLV = {
         "ORIGIN": "https://cdn/live.flv",
@@ -240,6 +248,7 @@ class CheckLiveViaWebcastApiTest(unittest.TestCase):
             self.assertIsNone(check_live_via_webcast_api(_FakeSession(None), "7123"))
 
 
+@unittest.skipUnless(HAS_CURL_CFFI, "curl_cffi 未安装")
 class RequestWithRetryTest(unittest.TestCase):
     def test_retries_transient_errors_then_succeeds(self):
         sentinel = object()
