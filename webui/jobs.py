@@ -133,8 +133,11 @@ def start_job(data: dict) -> str:
     return unit
 
 
-def pause_job(unit: str, timeout: float = 25.0) -> None:
-    """暂停任务：优雅停止引擎线程（ffmpeg 收尾当前分段）并保留启动参数。"""
+def pause_job(unit: str, timeout: float = 5.0) -> None:
+    """暂停任务：优雅停止引擎线程（ffmpeg 收尾当前分段）并保留启动参数。
+
+    短 join（默认 5s）：线程阻在长网络调用时超时转后台收尾，API 不阻塞
+    （旧版同步等待可长达 20s+，前端体验差）。"""
     if not _valid_unit(unit):
         raise ValueError("任务名称无效")
     with _CATALOG_LOCK:
@@ -165,7 +168,7 @@ def resume_job(unit: str) -> str:
     return unit
 
 
-def delete_job(unit: str, timeout: float = 25.0) -> None:
+def delete_job(unit: str, timeout: float = 5.0) -> None:
     """删除任务：停止引擎线程并移除任务目录记录（录制文件不受影响）。"""
     if not _valid_unit(unit):
         raise ValueError("任务名称无效")

@@ -161,13 +161,21 @@ class Recorder:
                 break
             if not task.last_error:
                 task.last_error = "引擎意外退出，自动重启中"
-        # 线程收尾：因 stop 结束时清空错误（干净停止不算失败）
+        # 线程收尾：因 stop 结束时清空错误（干净停止不算失败），并把自己从
+        # 任务表摘除（短 join 超时后的后台收尾不能依赖状态轮询来清理）。
         if task.stop.is_set():
             task.last_error = ""
+        with self._lock:
+            if self._tasks.get(task.unit) is task:
+                del self._tasks[task.unit]
 
-    def stop(self, unit: str, timeout: float = 25.0) -> bool:
-        """优雅停止任务（ffmpeg 收尾当前分段）。返回 False 表示线程超时仍未退出
-        （如阻塞在网络调用中；其停止位已置，完成当前调用后会自行退出）。"""
+    def stop(self, unit: str, timeout: float = 5.0) -> bool:
+        """优雅停止任务（ffmpeg 收尾当前分段）。
+
+        短 join：request_stop 已同步向 ffmpeg 发终止信号，分段收尾与线程退出
+        都不依赖这里的等待——若线程正阻在网络调用里（页面抓取可达 20s），
+        join 超时后线程在后台自行退出（停止位已置，状态接口已隐藏，不阻塞 API）。
+        返回 False 仅表示线程尚未退出。"""
         with self._lock:
             task = self._tasks.get(unit)
             if task is None:

@@ -822,3 +822,59 @@ class TaskControlHTTPTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SlowWindDownPauseTest(unittest.TestCase):
+    """暂停不得被慢收尾阻塞：引擎阻在网络调用（等价页面抓取 20s 超时）时，
+    短 join 超时后转后台收尾——API 及时返回、任务立即从状态隐藏、目录已落盘。"""
+
+    def setUp(self):
+        base = Path(tempfile.mkdtemp(prefix="webui_slowpause_"))
+        self.addCleanup(shutil.rmtree, base, ignore_errors=True)
+        self.catalog_file = base / "tasks.json"
+        for target, value in (("STATE_DIR", base), ("CATALOG_FILE", self.catalog_file)):
+            patcher = patch.object(app_config, target, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.rec = app_recorder.Recorder(restart_backoff=0.05)
+        rec_patcher = patch.object(app_jobs, "_recorder", self.rec)
+        rec_patcher.start()
+        self.addCleanup(rec_patcher.stop)
+        self.addCleanup(self.rec.shutdown, 5)
+
+    def test_pause_returns_promptly_while_engine_still_wind_down(self):
+        unit = app.unit_name("tiktok", "slowchan")
+        release = threading.Event()
+
+        class _SlowEngine(_FakeEngine):
+            def run(self):
+                # 模拟阻塞在 HTTP 调用里：request_stop 后仍要等"请求"完成
+                release.wait(10)
+                return 0
+
+        with patch.object(app_recorder, "build_engine",
+                          side_effect=lambda u, s: _SlowEngine(u, s)):
+            self.rec.start(unit, {"platform": "tiktok", "target": "slowchan", "quality": "best"})
+            # 等引擎进入阻塞态
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline:
+                task = self.rec._tasks.get(unit)
+                if task is not None and task.engine is not None:
+                    break
+                time.sleep(0.01)
+            started = time.monotonic()
+            app.pause_job(unit, timeout=0.2)  # 短 join
+            elapsed = time.monotonic() - started
+        self.assertLess(elapsed, 2.0, "暂停被慢收尾阻塞")
+        self.assertFalse(self.rec.is_running(unit))          # 立即视为已暂停
+        self.assertNotIn(unit, {j["unit"] for j in self.rec.status()})  # 状态隐藏
+        self.assertTrue(self._catalog()[unit]["paused"])     # 目录已落盘
+        # 后台：请求完成 → 线程自行退出，不留悬挂
+        release.set()
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline and unit in self.rec._tasks:
+            time.sleep(0.02)
+        self.assertNotIn(unit, self.rec._tasks, "慢收尾线程未自行退出")
+
+    def _catalog(self) -> dict:
+        return json.loads(self.catalog_file.read_text(encoding="utf-8"))
