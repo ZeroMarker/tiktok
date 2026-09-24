@@ -22,8 +22,8 @@ fi
 
 install -d -m 700 "$CONF_DIR" "$UNIT_DIR" "$PROJECT_ROOT/logs"
 
-# Unit 模板不能假定仓库位于 ~/bili。替换真实路径，并使用 systemd
-# 支持的 C 风格转义保护空白及其他特殊字符。
+# Unit 模板用 @PROJECT_ROOT@ 占位符，安装时替换为本仓库真实路径（不假定仓库
+# 位置），并使用 systemd 支持的 C 风格转义保护空白及其他特殊字符。
 escape_unit_value() {
     local value="$1"
     value="${value//\\/\\x5c}"
