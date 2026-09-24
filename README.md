@@ -66,7 +66,7 @@ bash douyin/import_cookies.sh chrome
 bash douyin/record.sh <直播间> --cookies douyin-cookies.txt
 ```
 
-转推 Bilibili（开播、推流、轮播）见独立仓库 [ZeroMarker/bili](https://github.com/ZeroMarker/bili)。
+转推 Bilibili（开播、推流、轮播）见本仓库 [`bili/`](bili/README.md)（含开播/停播/改标题、直播推流、文件轮播、轮播值守与管理页）。
 
 ## WebUI 与 systemd
 
@@ -98,7 +98,24 @@ WebUI 同时提供 PWA 支持：可安装到桌面/主屏幕，断网时仍可�
 - [使用说明](docs/usage.md)
 - [排障](docs/troubleshooting.md)
 - [TikTok 直播录制使用与排障](docs/tiktok-live-recording.md)
-- [Bilibili 推流（独立仓库 ZeroMarker/bili）](https://github.com/ZeroMarker/bili)
+- [Bilibili 推流](bili/README.md)
+
+## 开发与测试
+
+全部 Python 单元测试基于标准库 `unittest`，**无需安装额外依赖**：
+
+```bash
+bash test.sh    # 运行 tests/ 与 bili/tests/ 两套测试
+```
+
+前端（`webui/frontend/`，Vue 3 + Vite）改动后必须重新构建单文件产物，否则 CI 会失败：
+
+```bash
+cd webui/frontend && npm ci && npm run build   # 产出覆盖 webui/index.html
+```
+
+CI（`.github/workflows/checks.yml`）会校验：两套单元测试、全部 shell 脚本语法、
+以及 `webui/index.html` 与前端源码的一致性（防止改了 `frontend/src` 忘记构建）。
 
 ## 运行产物
 

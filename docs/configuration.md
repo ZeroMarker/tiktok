@@ -35,7 +35,9 @@ yt-dlp --update-to nightly
 
 ## Bilibili 推流
 
-已迁移至独立仓库 [ZeroMarker/bili](https://github.com/ZeroMarker/bili)，见该仓库 `README.md`。
+见本仓库 [`bili/README.md`](../bili/README.md)：命令行开播/推流/轮播、systemd user
+单元（`bili-live` / `bili-replay` / `bili-webui`）与推流码管理（`~/.config/bili/`）。
+安装：`bash bili/systemd/install.sh`。
 
 
 ## WebUI

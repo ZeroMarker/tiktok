@@ -121,9 +121,9 @@ python douyin/get_stream.py 1930162853 --cookies /secure/douyin-cookies.txt
 
 ## 转推到 Bilibili
 
-Bilibili 相关（开播、转推、轮播、值守、质检）已迁移至独立仓库
-[ZeroMarker/bili](https://github.com/ZeroMarker/bili)，见该仓库 `README.md`。
-本仓库保留转推目标所需的录制输出（`recordings/`）与各平台抓流能力。
+Bilibili 相关（开播、转推、轮播、值守、质检）见本仓库 [`bili/`](../bili/README.md)，
+与录制侧同仓：轮播直接消费本仓库的录制输出（`recordings/`），
+`watch.sh` 自动携带本仓库根的 `cookies.txt`。
 
 ### Twitch
 

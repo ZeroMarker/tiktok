@@ -18,14 +18,14 @@
 python3 live.py login        # 终端显示二维码，Bilibili App 扫码
 python3 live.py areas        # 列出分区，记下子分区 ID
 python3 live.py start --area 646 --title "频道名" --print-export
-bash replay.sh "recordings/tiktok/<频道目录>"       # 或 bash push.sh <tiktok_username>
+bash replay.sh "../recordings/tiktok/<频道目录>"    # 或 bash push.sh <tiktok_username>
 python3 live.py update --title "新标题"
 python3 live.py stop         # 关播（先停推流进程再关）
 ```
 
 ## WebUI（推荐）
 
-独立实现，不依赖 tiktok 仓库。两种推流模式**互斥**（同时最多跑一个，启动一个会自动停掉并 disable 另一个）：
+已并入 Live Stream Toolkit 仓库（本目录 `bili/`，独立仓库 ZeroMarker/bili 为历史来源）：与录制侧同仓，`watch.sh` 自动携带仓库根 `cookies.txt`。两种推流模式**互斥**（同时最多跑一个，启动一个会自动停掉并 disable 另一个）：
 
 - 直播推流 `bili-live.service`（`push.sh`）
 - 文件轮播 `bili-replay.service`（`replay.sh`）
@@ -98,7 +98,7 @@ ffmpeg -hide_banner -v error -i <file> -f null - 2>&1 | grep -c "concealing"
 ## 故障排查
 
 - TikTok 判未开播但用户侧在播：机房 IP 可能被 SlardarWAF/GroupBlock 封锁
-  （见 tiktok 仓库 `tk/error.md`），以用户侧为准，或从浏览器 Network 面板抓
+  （见本仓库 `tk/error.md`），以用户侧为准，或从浏览器 Network 面板抓
   `m3u8`/FLV 直链；亦可用 `cookies.txt` 登录态（部分主播需登录才返流）。
 - unit 起不来、`203/EXEC`：脚本缺可执行位（`chmod +x`），`systemd-analyze verify` 校验。
 - 双推流冲突：同一房间同时只能一路流；`status` 报 `conflict` 时停掉一路。

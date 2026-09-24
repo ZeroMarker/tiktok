@@ -37,14 +37,16 @@ exec python3 "${SCRIPT_DIR}/../scripts/dlr.py" <platform> "$@"
 ├── youtube/               # YouTube（record.sh 入口）
 ├── kick/                  # Kick（record.sh 入口）
 ├── chzzk/                 # CHZZK（record.sh 入口）
-├── twitch/                # Twitch -> Bilibili 脚本（推流目标侧见独立仓库 ZeroMarker/bili）
+├── twitch/                # Twitch -> Bilibili 脚本
+├── bili/                  # Bilibili 推流（开播/推流/轮播/值守 + 独立 WebUI 与 user 单元，见 bili/README.md）
 ├── scripts/               # 统一录制引擎（见上）
 ├── systemd/               # WebUI/browserd systemd unit 与安装脚本
-├── tests/                 # WebUI 与引擎单元测试
+├── tests/                 # WebUI 与引擎单元测试（bili/ 另有 bili/tests/，由 test.sh 一并运行）
 ├── webui/                 # 本地录制任务管理页面与 API
 ├── docs/                  # 使用、配置、排障和维护文档
 ├── start.sh               # TikTok 直播源快速检测入口
-└── yt.sh                  # YouTube -> Bilibili 脚本
+├── yt.sh                  # YouTube -> Bilibili 脚本
+└── test.sh                # 运行仓库全部单元测试（tests/ + bili/tests/，纯标准库）
 ```
 
 ## 运行产物

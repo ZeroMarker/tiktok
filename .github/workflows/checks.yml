@@ -12,10 +12,35 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Python tests
-        run: python -m unittest discover -s tests -v
+      - name: Recorder tests
+        run: python -m unittest discover -s tests
+      - name: Bilibili push tests
+        run: python -m unittest discover -s bili/tests
       - name: Shell syntax
         run: |
           while IFS= read -r script; do
             bash -n "$script"
           done < <(find . -path './douyin/DouyinLiveRecorder' -prune -o -name '*.sh' -type f -print)
+
+  frontend-build:
+    # webui/index.html 是 vite-plugin-singlefile 的构建产物（有意入库，供 systemd 直接服务）。
+    # 本 job 重新构建并要求零 diff，防止只改 frontend/src 忘记 npm run build。
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: webui/frontend/package-lock.json
+      - name: Build frontend
+        working-directory: webui/frontend
+        run: |
+          npm ci
+          npm run build
+      - name: Verify committed build artifact is up to date
+        run: |
+          if ! git diff --exit-code webui/index.html; then
+            echo "::error::webui/index.html 与前端源码不一致：请在本地运行 cd webui/frontend && npm ci && npm run build 并提交产物。"
+            exit 1
+          fi
