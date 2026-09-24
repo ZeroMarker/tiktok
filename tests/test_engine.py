@@ -961,3 +961,58 @@ class SignalStopTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ThreadedEngineTest(unittest.TestCase):
+    """单进程宿主语义：引擎可在线程中构造、被中断、日志分流（webui/recorder.py 依赖）。
+
+    历史约束：Engine.__init__ 曾无条件 signal.signal()（仅主线程合法），
+    且长等待用 time.sleep（最长 5 分钟），多线程宿主下无法优雅停止。
+    """
+
+    def test_construction_in_worker_thread_does_not_raise(self):
+        errors = []
+
+        def build():
+            try:
+                Engine("kick", "thready", tempfile.mkdtemp(prefix="engine_thread_"))
+            except Exception as exc:  # pragma: no cover
+                errors.append(exc)
+
+        t = threading.Thread(target=build)
+        t.start()
+        t.join(5)
+        self.assertEqual(errors, [])
+
+    def test_request_stop_interrupts_long_detect_sleep(self):
+        root = tempfile.mkdtemp(prefix="engine_stop_")
+        sink: list[str] = []
+        engine = Engine(
+            "kick", "sleeptest", root,
+            detect_interval=300, detect_jitter=0,
+            nickname_attempts=1, nickname_retry_delay=0,
+            log_sink=sink.append,
+        )
+        engine.adapter.detect_stream_url = lambda: None
+        engine.adapter.get_nickname = lambda: None
+        thread = threading.Thread(target=engine.run, daemon=True)
+        thread.start()
+        # 等它打印出"等待 300 秒后重试"并进入（或即将进入）长等待
+        deadline = time.time() + 5
+        while time.time() < deadline and not any("重试" in line for line in sink):
+            time.sleep(0.02)
+        self.assertTrue(any("重试" in line for line in sink), sink)
+        engine.request_stop()
+        thread.join(3)
+        self.assertFalse(thread.is_alive(), "request_stop 未打断长等待（检测间隔 300s）")
+        self.assertEqual(engine.phase, "stopping")
+
+    def test_log_sink_captures_instead_of_stdout(self):
+        sink: list[str] = []
+        engine = Engine(
+            "kick", "sinky", tempfile.mkdtemp(prefix="engine_sink_"),
+            log_sink=sink.append,
+        )
+        engine.log("hello", "world")
+        self.assertEqual(sink, ["hello world"])
+        self.assertFalse(engine.is_recording)

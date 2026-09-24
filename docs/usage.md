@@ -190,11 +190,12 @@ journalctl -u livestream-webui -f
 sudo systemctl restart livestream-webui
 ```
 
-WebUI 创建的录制任务名称以 `livestream-rec-` 开头，可以直接用 systemd 查看：
+WebUI 创建的录制任务是服务进程内的引擎线程（单进程模型），任务 ID 仍以
+`livestream-rec-` 开头。查看整体运行与单频道日志：
 
 ```bash
-systemctl list-units 'livestream-rec-*.service' --all
-journalctl -u '<任务名称>' -f
+journalctl -u livestream-webui -f                      # 所有频道（带 [平台:频道] 前缀）
+less recordings/logs/tiktok/engine_<任务ID>.log        # 单频道引擎日志
 ```
 
 默认仅允许本机连接。通过 SSH 隧道远程访问：

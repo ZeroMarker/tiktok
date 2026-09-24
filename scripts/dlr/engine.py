@@ -54,6 +54,7 @@ class Engine:
         quality: str = "best",
         nickname_attempts: int = 3,
         nickname_retry_delay: float = 3.0,
+        log_sink=None,
     ) -> None:
         self.platform = platform
         self.recordings_root = Path(recordings_dir).expanduser().resolve()
@@ -80,12 +81,22 @@ class Engine:
         self.identifier = self.adapter.identifier
         self.ffmpeg_proc: subprocess.Popen | None = None
         self._stopping = False
+        # 停止事件：线程宿主（WebUI 单进程多频道）用它中断长等待并优雅收尾；
+        # 与 _stopping 双写，兼容外部直接置 _stopping 的调用方（含测试）。
+        self._stop_event = threading.Event()
+        # 生命周期阶段：detecting / recording / stopping（供宿主上报状态）。
+        self.phase = "idle"
+        # 日志出口：单进程宿主按频道分流（log_sink）；缺省原样 print 到 stdio。
+        self.log_sink = log_sink
         self.nickname: str | None = None
         self.out_dir: Path | None = None
 
-        # 优雅停止：SIGTERM/SIGINT 时先结束 ffmpeg 再退出（配合 KillMode=mixed）
-        signal.signal(signal.SIGTERM, self._on_signal)
-        signal.signal(signal.SIGINT, self._on_signal)
+        # 优雅停止：SIGTERM/SIGINT 时先结束 ffmpeg 再退出（配合 KillMode=mixed）。
+        # signal.signal 只能在主线程注册：多线程宿主里的引擎子线程不注册，
+        # 由宿主调用 request_stop() 做同等的优雅收尾。
+        if threading.current_thread() is threading.main_thread():
+            signal.signal(signal.SIGTERM, self._on_signal)
+            signal.signal(signal.SIGINT, self._on_signal)
 
     @classmethod
     def from_args(cls, args) -> "Engine":
@@ -117,6 +128,7 @@ class Engine:
         保证停止立即生效。
         """
         self._stopping = True
+        self._stop_event.set()
         # Buffered stdout/stderr may already be executing when Python dispatches
         # the signal from a C callback. Re-entering print()/flush() then raises
         # RuntimeError before os._exit(), so use an unbuffered file-descriptor
@@ -134,10 +146,43 @@ class Engine:
                 proc.kill()
         os._exit(0)
 
+    def log(self, *args, file=None, flush: bool = True) -> None:
+        """统一日志出口：log_sink（宿主按频道分流）优先，否则原样 print。"""
+        if self.log_sink is not None:
+            self.log_sink(" ".join(str(a) for a in args))
+        else:
+            print(*args, file=file, flush=flush)
+
+    def _wait(self, seconds: float) -> bool:
+        """可中断等待：已请求停止立即返回；否则睡到时限或停止事件触发。"""
+        if self._stopping:
+            return True
+        return self._stop_event.wait(seconds)
+
+    @property
+    def is_recording(self) -> bool:
+        """ffmpeg 是否正在写分段（即主播直播中）。"""
+        proc = self.ffmpeg_proc
+        return proc is not None and proc.poll() is None
+
+    def request_stop(self) -> None:
+        """线程内优雅停止（不 os._exit）：置停止位、让 ffmpeg 收尾当前分段。
+
+        长等待（检测间隔/重试）由 _stop_event 立即中断，循环在下一次
+        条件检查时退出；宿主随后 join 线程。
+        """
+        self._stopping = True
+        self.phase = "stopping"
+        self._stop_event.set()
+        proc = self.ffmpeg_proc
+        if proc is not None and proc.poll() is None:
+            proc.terminate()
+
     # ---- 生命周期 ----
 
     def run(self) -> int:
-        print(f"开始无人值守录制 {self.platform}：{self.identifier}", flush=True)
+        self.phase = "detecting"
+        self.log(f"开始无人值守录制 {self.platform}：{self.identifier}", flush=True)
 
         # 昵称抓取不依赖开播状态，但输出目录要等开播确认才创建：避免轮询期间
         # 先建无昵称目录、补取后再建昵称目录的双目录残留。昵称在每轮检测前补抓
@@ -145,8 +190,8 @@ class Engine:
         log_dir = self.recordings_root / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
 
-        print(f"每 {self.segment_seconds} 秒生成一个分段", flush=True)
-        print(
+        self.log(f"每 {self.segment_seconds} 秒生成一个分段", flush=True)
+        self.log(
             "未开播检测间隔："
             f"{self.detect_interval - self.detect_jitter}–"
             f"{self.detect_interval + self.detect_jitter} 秒（随机抖动）",
@@ -155,7 +200,7 @@ class Engine:
 
         while not self._stopping:
             try:
-                print(
+                self.log(
                     f"[{datetime.now():%Y-%m-%d %H:%M:%S}] 尝试抓取直播源 @{self.identifier} ...",
                     flush=True,
                 )
@@ -168,31 +213,31 @@ class Engine:
                     delay = self._next_detect_delay()
                     reason = getattr(self.adapter, "last_detect_error", None)
                     if reason:
-                        print(
+                        self.log(
                             f"  → 未获取到直播源：{reason}（等待 {delay} 秒后重试）",
                             flush=True,
                         )
                     else:
-                        print(
+                        self.log(
                             f"  → 直播未开启 / 抓取失败，等待 {delay} 秒后重试...",
                             flush=True,
                         )
-                    time.sleep(delay)
+                    self._wait(delay)
                     continue
 
                 # 只打印去掉签名参数的开头，避免整串 token 进日志
-                print(f"  → 成功抓到直播源：{stream_url.split('?')[0]}", flush=True)
+                self.log(f"  → 成功抓到直播源：{stream_url.split('?')[0]}", flush=True)
                 # 录制前轻量校验：离线页残留的陈旧 FLV 等地址会 404/403，
                 # 判为未开播回到检测循环，避免 ffmpeg 秒退空转（rc=8 循环）。
                 delay = self._next_detect_delay()
                 reject_reason = self._stream_reject_reason(stream_url)
                 if reject_reason:
-                    print(
+                    self.log(
                         f"  → 流地址校验未通过：{reject_reason}，视为未开播，"
                         f"等待 {delay} 秒后重试...",
                         flush=True,
                     )
-                    time.sleep(delay)
+                    self._wait(delay)
                     continue
                 # 目录一旦定下就不再改名：本场后续回合若才取到昵称，也不能换目录名，
                 # 否则同一场录制会分裂出 <slug> 和 <slug>_<昵称> 两处。
@@ -201,33 +246,35 @@ class Engine:
                 try:
                     out_dir.mkdir(parents=True, exist_ok=True)
                 except Exception as exc:
-                    print(
+                    self.log(
                         f"创建输出目录失败，本轮回合放弃：{exc}",
                         file=sys.stderr,
                         flush=True,
                     )
-                    time.sleep(self.break_seconds)
+                    self._wait(self.break_seconds)
                     continue
                 self.out_dir = out_dir
-                print(f"输出目录：{self.out_dir}", flush=True)
+                self.log(f"输出目录：{self.out_dir}", flush=True)
 
-                print("开始录制...", flush=True)
+                self.log("开始录制...", flush=True)
+                self.phase = "recording"
                 self._record(self.out_dir, log_dir, stream_url, self.nickname)
-                print(
+                self.phase = "detecting"
+                self.log(
                     f"录制中断，等待 {self.break_seconds} 秒后重新抓取源...",
                     flush=True,
                 )
                 if not self._stopping:
-                    time.sleep(self.break_seconds)
+                    self._wait(self.break_seconds)
             except Exception as exc:
                 # 单次检测/录制回合的异常不应压垮监控循环：记录后继续下一轮回合。
-                print(
+                self.log(
                     f"[{self.platform}] 检测回合异常：{exc}",
                     file=sys.stderr,
                     flush=True,
                 )
                 if not self._stopping:
-                    time.sleep(self._next_detect_delay())
+                    self._wait(self._next_detect_delay())
 
         return 0
 
@@ -268,7 +315,7 @@ class Engine:
         try:
             return self.adapter.get_nickname()
         except Exception as exc:  # 昵称失败不影响录制
-            print(f"获取昵称失败：{exc}", file=sys.stderr, flush=True)
+            self.log(f"获取昵称失败：{exc}", file=sys.stderr, flush=True)
             return None
 
     def _refresh_nickname(self) -> None:
@@ -288,16 +335,16 @@ class Engine:
             nickname = self._safe_nickname()
             if nickname:
                 self.nickname = nickname
-                print(f"获取到主播昵称：{nickname}", flush=True)
+                self.log(f"获取到主播昵称：{nickname}", flush=True)
                 return
             if attempt < self.nickname_attempts:
-                print(
+                self.log(
                     f"  → 昵称未取到（{attempt}/{self.nickname_attempts}），"
                     f"{self.nickname_retry_delay:g} 秒后重试...",
                     flush=True,
                 )
-                time.sleep(self.nickname_retry_delay)
-        print(
+                self._wait(self.nickname_retry_delay)
+        self.log(
             f"  → 昵称获取失败（已重试 {self.nickname_attempts} 次）",
             flush=True,
         )
@@ -320,9 +367,9 @@ class Engine:
             try:
                 if not path.is_dir():
                     path.mkdir(parents=True, exist_ok=True)
-                    print(f"检测到输出目录被删除，已自动重建：{path}", flush=True)
+                    self.log(f"检测到输出目录被删除，已自动重建：{path}", flush=True)
             except Exception as exc:
-                print(f"重建输出目录失败：{exc}", file=sys.stderr, flush=True)
+                self.log(f"重建输出目录失败：{exc}", file=sys.stderr, flush=True)
 
     def _name_parts(self, nickname: str | None) -> list[str]:
         """输出目录/文件名的公共片段：频道标识[_昵称]（平台已作为顶层目录）。"""
@@ -359,7 +406,7 @@ class Engine:
             self._ensure_dir(out_dir)
             self._ensure_dir(log_file.parent)
         except Exception as exc:
-            print(
+            self.log(
                 f"创建输出/日志目录失败，本轮回合放弃：{exc}", file=sys.stderr, flush=True
             )
             return
@@ -408,7 +455,7 @@ class Engine:
             rc = proc.wait()
         except Exception as exc:
             # 启动或运行期的异常（如日志文件无法打开）不应压垮监控循环
-            print(f"录制回合异常：{exc}，即将重试...", file=sys.stderr, flush=True)
+            self.log(f"录制回合异常：{exc}，即将重试...", file=sys.stderr, flush=True)
             rc = -1
         finally:
             stop.set()
@@ -416,4 +463,4 @@ class Engine:
             self.ffmpeg_proc = None
 
         if rc != 0:
-            print(f"ffmpeg 异常退出（rc={rc}，源可能已断），即将重试...", flush=True)
+            self.log(f"ffmpeg 异常退出（rc={rc}，源可能已断），即将重试...", flush=True)

@@ -1,20 +1,29 @@
 [Unit]
-Description=Live Stream Toolkit Web UI
+Description=Live Stream Toolkit Web UI + single-process recorder
 After=network-online.target
 Wants=network-online.target
 
 [Service]
-Type=simple
-User=root
+# 单进程模型：本服务进程内调度所有频道的录制引擎线程（webui/recorder.py），
+# 以 ubuntu 运行以原生使用其 ~/.local 下的 yt-dlp / curl_cffi（旧版桥接
+# PYTHONPATH 的 record.sh 包装仅保留给命令行手动使用）。
+# 停止时 SIGTERM → 并行 request_stop 所有引擎 → ffmpeg 收尾当前分段 → 退出。
+User=ubuntu
+Group=ubuntu
+Environment=HOME=/home/ubuntu
+# systemd 服务默认 PATH 不含 ~/.local/bin（旧版靠 record.sh 包装桥接），
+# 单进程模型不再经包装，这里直接补齐，保证子进程能找到 yt-dlp 等用户工具。
+Environment=PATH=/home/ubuntu/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 WorkingDirectory=__PROJECT_ROOT__
 EnvironmentFile=-/etc/default/livestream-webui
 ExecStart=/usr/bin/python3 __PROJECT_ROOT__/webui/app.py
 Restart=on-failure
 RestartSec=5s
+TimeoutStopSec=60s
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ReadWritePaths=__PROJECT_ROOT__/recordings __PROJECT_ROOT__/logs __PROJECT_ROOT__/state /run /var/log/journal
+ReadWritePaths=__PROJECT_ROOT__/recordings __PROJECT_ROOT__/logs __PROJECT_ROOT__/state
 
 [Install]
 WantedBy=multi-user.target

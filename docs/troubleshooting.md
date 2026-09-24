@@ -121,10 +121,12 @@ yt-dlp --impersonate chrome --cookies cookies.txt \
 ### TikTok 未获取到流与 Chromium 临时目录
 
 “未获取到流”首先不等于程序故障。若主播已经下播，`yt-dlp`、Web API 和浏览器兜底
-都可能没有流地址；正式入口会按间隔继续轮询。先查看任务日志：
+都可能没有流地址；正式入口会按间隔继续轮询。先查看任务日志（WebUI 日志面板，或）：
 
 ```bash
-sudo journalctl -u livestream-rec-tiktok-<频道对应单元>.service -n 100 --no-pager -o cat
+less recordings/logs/tiktok/engine_livestream-rec-tiktok-<频道>.log
+# 或从服务 stdout（带 [平台:频道] 前缀）过滤：
+journalctl -u livestream-webui -n 200 --no-pager | grep tiktok
 ```
 
 重点区分以下两种情况：

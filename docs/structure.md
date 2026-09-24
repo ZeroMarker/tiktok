@@ -85,30 +85,46 @@ WebUI 的最近文件列表扫描 `RECORDINGS_DIR`，不会遍历整个仓库。
 
 ## 控制面
 
-`webui/app.py`（常驻 systemd 服务）通过 `systemd-run` 按需生成每频道临时单元
-`livestream-rec-{platform}-{channel}.service`，调用各平台 `record.sh`。
-后端实现拆分为 `webui/{config,jobs,files,stats,server}.py`（配置 / 任务与 systemd
-操作 / 录制文件 / 概览聚合 / HTTP 层），`app.py` 仅为兼容门面与直接执行入口；
-跨模块配置一律经 `config.X` 运行时读取，便于测试在定义处 patch。
-临时单元带 `KillMode=mixed`、`TimeoutStopSec=30s`、网络就绪依赖与崩溃自动重启。
-`KillMode=mixed` 只把 SIGTERM 发给主进程（bash→python 引擎），由引擎给 ffmpeg 收尾当前
-分段后再退出；引擎的信号处理器在 C 回调栈（curl_cffi）里也直接 `os._exit`，因此停止请求
-不会等到 `TimeoutStopSec` 到期才生效。控制类接口（暂停/继续/重启/删除）超时设为 35s
-（`CONTROL_TIMEOUT`），前端对应请求也与之对齐。
+录制执行是**单进程模型**：`webui/app.py`（常驻 systemd 服务 `livestream-webui.service`，
+以 `ubuntu` 运行）在自身进程内调度所有频道——每个任务是一个引擎线程
+（`webui/recorder.py` 驱动 `scripts/dlr/engine.py` 的 `Engine`），不再按频道创建
+systemd 临时单元，也不再经 `record.sh` 包装（包装仅保留给命令行手动使用）。
 
-**任务目录（`state/tasks.json`）**：`systemd-run --collect` 创建的单元在停止后即被 systemd
-回收（对已回收单元 `systemctl start` 会报 "Unit not found"）。因此 WebUI 在创建任务时把
-启动参数（平台/频道/画质/Cookie）写入任务目录；「暂停」置 `paused=true`，「继续」按记录重建
-同名单元，「删除」清理记录。WebUI 启动时会把目录作为期望状态，自动重建所有缺失且未暂停的
-任务，因此服务器重启后任务会恢复；已暂停任务不会自动启动。单个任务恢复失败只写入服务日志，
-不会删除其目录记录或阻止 WebUI 启动。目录读取失败或损坏时按空目录处理，不影响其他功能。
-文件为运行产物（已 gitignore），路径可用 `WEBUI_STATE_DIR`/`STATE_DIRECTORY` 覆盖；
-服务单元通过 `ReadWritePaths=.../state` 放行写入。
+后端实现拆分为 `webui/{config,jobs,files,stats,server,recorder}.py`（配置 / 任务编排与
+任务目录 / 录制文件 / 概览聚合 / HTTP 层 / 引擎线程调度），`app.py` 仅为兼容门面与
+直接执行入口；跨模块配置一律经 `config.X` 运行时读取，便于测试在定义处 patch。
 
-**运行用户**：录制服务应以安装了 yt-dlp/curl_cffi 的普通用户运行（本部署为
-`ubuntu`，依赖其 `~/.local` 站点目录），否则子进程 yt-dlp 会因找不到 `yt_dlp`
-模块而静默失败，导致所有 yt-dlp 抓流方法失效。本仓库 `tk/record.sh` 会为子进程
-自动补充该用户的 `PYTHONPATH`/`PATH` 作为兜底。
+生命周期语义与旧多进程模型一一对等：
+
+- **优雅停止**：暂停/删除/停服（SIGTERM/SIGINT）都会对每个引擎 `request_stop()`——
+  置停止位、中断长等待（检测间隔可长达 3–5 分钟）、让 ffmpeg 收尾当前分段后再
+  回收线程；单元 `TimeoutStopSec=60s` 兜底，命令行路径（dlr.py）仍由引擎信号
+  处理器直接 `os._exit`，停止不会等到超时才生效。
+- **崩溃自动重启**：引擎线程内未捕获异常按 10 秒退避重建（等价旧
+  `Restart=on-failure RestartSec=10s`），重启计数即任务状态里的 `restarts`。
+- **状态**：`active/running`（检测或录制中）、`active/activating`（构建/退避窗口）、
+  `active/deactivating`（停止收尾）、`failed`、`paused`；`live` 由引擎
+  `phase == recording 且 ffmpeg 存活` 直接判定，不再扫描 /proc 进程树。
+
+**任务目录（`state/tasks.json`）**：仍是期望状态与参数持久化——创建任务时写入启动
+参数（平台/频道/画质/Cookie），「暂停」置 `paused=true`（参数留存、线程停止），
+「继续」按记录重建线程，「删除」清理记录。WebUI 启动时把目录作为期望状态恢复所有
+未暂停任务，因此服务器重启后任务会恢复；已暂停任务不会自动启动。单个任务恢复失败
+只写入服务日志，不会删除其目录记录或阻止 WebUI 启动。目录读取失败或损坏时按空目录
+处理，不影响其他功能。`livestream-rec-*.service` 命名仅作为稳定任务 ID 沿用
+（目录键、日志文件名、API 字段），历史数据零迁移。文件为运行产物（已 gitignore），
+路径可用 `WEBUI_STATE_DIR`/`STATE_DIRECTORY` 覆盖；服务单元通过
+`ReadWritePaths=.../state` 放行写入。
+
+**任务日志**：每个引擎的输出写入 `recordings/logs/<平台>/engine_<任务ID>.log`
+（WebUI 日志面板读取，尾部上限 5000 行/100KB），同时带 `[平台:频道]` 前缀镜像到
+服务 stdout（`journalctl -u livestream-webui -f` 可整体回看）；ffmpeg 自身日志仍按
+`ffmpeg_record_*.log` 分文件。
+
+**运行用户**：`livestream-webui.service` 以 `ubuntu` 运行（与 browserd 一致），
+原生使用其 `~/.local` 下的 yt-dlp / curl_cffi；换用户运行时需自行保证依赖可见。
+旧版每频道单元靠 `tk/record.sh` 等包装桥接 `PYTHONPATH`/`PATH`，该兜底仅对命令行
+入口保留。
 
 **共享浏览器（`tiktok-browserd.service`）**：TikTok 检测的浏览器兜底统一走
 `scripts/dlr/browserd.py`（`127.0.0.1:9555`，`TIKTOK_BROWSERD_URL` 可覆盖）：

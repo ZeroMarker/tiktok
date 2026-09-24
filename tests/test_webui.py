@@ -1,19 +1,27 @@
+"""WebUI 单元测试。
+
+控制面已是单进程模型（webui/recorder.py：任务 = 引擎线程，不再有 systemd
+临时单元）；测试通过替换 recorder.build_engine 工厂为假引擎来驱动
+暂停/继续/删除/重启/恢复语义，不触发真实网络与 ffmpeg。
+"""
+
 import io
 import json
 import os
 import re
 import shutil
 import tempfile
+import threading
+import time
 import unittest
-from http import HTTPStatus
 from pathlib import Path
-from subprocess import CompletedProcess
 from unittest.mock import patch
 
 from webui import app
 from webui import config as app_config
 from webui import files as app_files
 from webui import jobs as app_jobs
+from webui import recorder as app_recorder
 from webui import stats as app_stats
 
 # 所有用例都在临时任务目录上运行：start_job 会持久化启动参数（state/tasks.json，
@@ -34,6 +42,35 @@ def setUpModule() -> None:
 def tearDownModule() -> None:
     for patcher in _STATE_PATCHES:
         patcher.stop()
+
+
+class _FakeEngine:
+    """线程内假引擎：run() 阻塞到 request_stop；fail=True 模拟引擎构建/运行崩溃。"""
+
+    def __init__(self, unit: str, spec: dict, fail: bool = False) -> None:
+        self.unit = unit
+        self.spec = dict(spec)
+        self.fail = fail
+        self.phase = "detecting"
+        self.is_recording = False
+        self._stop = threading.Event()
+
+    def run(self):
+        if self.fail:
+            raise RuntimeError("boom")
+        self._stop.wait(30)  # 模拟长时间检测/录制轮询
+        return 0
+
+    def request_stop(self) -> None:
+        self.phase = "stopping"
+        self._stop.set()
+
+
+def _fake_build(fail: bool = False):
+    def build(unit: str, spec: dict) -> _FakeEngine:
+        return _FakeEngine(unit, spec, fail=fail)
+
+    return build
 
 
 class _FakeHandler(app.Handler):
@@ -86,13 +123,13 @@ class WebUIHTTPTest(unittest.TestCase):
 
     def test_manifest_served_with_pwa_mime(self):
         status, content_type, body = self._get("/manifest.webmanifest")
-        self.assertEqual(status, HTTPStatus.OK)
+        self.assertEqual(status, 200)
         self.assertIn("application/manifest+json", content_type)
         self.assertIn(b'"start_url"', body)
 
     def test_service_worker_served_as_javascript(self):
         status, content_type, _ = self._get("/sw.js")
-        self.assertEqual(status, HTTPStatus.OK)
+        self.assertEqual(status, 200)
         self.assertIn("javascript", content_type)
 
     def test_icons_and_favicon_served(self):
@@ -104,21 +141,20 @@ class WebUIHTTPTest(unittest.TestCase):
             ("favicon.ico", "image/x-icon"),
         ]:
             status, content_type, body = self._get(f"/{name}")
-            self.assertEqual(status, HTTPStatus.OK, name)
+            self.assertEqual(status, 200, name)
             self.assertEqual(content_type, mime, name)
             self.assertEqual(body, (app.WEBUI_DIR / name).read_bytes(), name)
 
     def test_index_alias_served(self):
         status, content_type, _ = self._get("/index.html")
-        self.assertEqual(status, HTTPStatus.OK)
+        self.assertEqual(status, 200)
         self.assertIn("text/html", content_type)
 
     def test_unknown_path_is_404(self):
         status, _, _ = self._get("/nope")
-        self.assertEqual(status, HTTPStatus.NOT_FOUND)
+        self.assertEqual(status, 404)
 
     def test_manifest_icons_are_valid(self):
-
         manifest = json.loads((app.WEBUI_DIR / "manifest.webmanifest").read_text())
         self.assertTrue(manifest["start_url"])
         purposes = {icon["purpose"] for icon in manifest["icons"]}
@@ -126,17 +162,15 @@ class WebUIHTTPTest(unittest.TestCase):
         self.assertTrue(all((app.WEBUI_DIR / icon["src"]).is_file() for icon in manifest["icons"]))
 
     def test_api_requires_no_auth_token(self):
-
         # 认证已移除：无令牌请求必须被放行。
         status, content_type, body = self._get("/api/health")
-        self.assertEqual(status, HTTPStatus.OK)
+        self.assertEqual(status, 200)
         self.assertEqual(json.loads(body)["ok"], True)
 
     def test_api_jobs_without_token_is_allowed(self):
-
         with patch.object(app_jobs, "list_jobs", return_value=[]):
             status, _, body = self._get("/api/jobs")
-        self.assertEqual(status, HTTPStatus.OK)
+        self.assertEqual(status, 200)
         self.assertEqual(json.loads(body), [])
 
     def test_api_works_when_token_env_is_empty(self):
@@ -166,6 +200,14 @@ class WebUIHTTPTest(unittest.TestCase):
 
 
 class WebUIHelpersTest(unittest.TestCase):
+    def setUp(self):
+        # 每个用例一个全新的单进程调度器（假引擎），互不串扰。
+        self.rec = app_recorder.Recorder(restart_backoff=0.05)
+        patcher = patch.object(app_jobs, "_recorder", self.rec)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.addCleanup(self.rec.shutdown, 2)
+
     def test_unit_name_is_stable_and_safe(self):
         first = app.unit_name("tiktok", "@Some.User/live?a=1")
         self.assertEqual(first, app.unit_name("tiktok", "@Some.User/live?a=1"))
@@ -175,23 +217,49 @@ class WebUIHelpersTest(unittest.TestCase):
         self.assertNotEqual(app.unit_name("kick", "one"), app.unit_name("kick", "two"))
 
     def test_start_job_rejects_duplicate_target(self):
-        existing = [{"platform": "tiktok", "target": "@Some.User", "unit": "livestream-rec-tiktok-some-user-abc.service"}]
+        existing = [
+            {"platform": "tiktok", "target": "@Some.User",
+             "unit": "livestream-rec-tiktok-some-user-abc.service"}
+        ]
         with patch.object(app_jobs, "list_jobs", return_value=existing), \
-                patch.object(app_jobs, "_live_units", return_value=[]), \
-                patch.object(app_jobs, "run") as mocked:
+                patch.object(app_recorder, "build_engine", side_effect=AssertionError("不应启动引擎")):
             with self.assertRaises(ValueError) as ctx:
                 app.start_job({"platform": "tiktok", "target": " @some.user "})
         self.assertIn("已存在", str(ctx.exception))
-        # 重复任务不得真的去拉起 systemd 单元
-        spawns = [call for call in mocked.call_args_list if app.SYSTEMD_RUN in call.args[0]]
-        self.assertEqual(spawns, [])
+        # 重复任务不得真的启动任何线程
+        self.assertEqual(self.rec.status(), [])
 
     def test_start_job_allows_different_case_on_other_platform(self):
-        existing = [{"platform": "tiktok", "target": "@Some.User", "unit": "livestream-rec-tiktok-some-user-abc.service"}]
+        existing = [
+            {"platform": "tiktok", "target": "@Some.User",
+             "unit": "livestream-rec-tiktok-some-user-abc.service"}
+        ]
         with patch.object(app_jobs, "list_jobs", return_value=existing), \
-                patch.object(app_jobs, "run", return_value=CompletedProcess([], 0, stdout="", stderr="")):
+                patch.object(app_recorder, "build_engine", side_effect=_fake_build()):
             unit = app.start_job({"platform": "kick", "target": "@some.user"})
         self.assertTrue(unit.startswith("livestream-rec-kick-"))
+        self.assertTrue(self.rec.is_running(unit))
+        self.assertEqual(self.rec.get_spec(unit)["target"], "@some.user")
+
+    def test_start_job_forwards_quality(self):
+        with patch.object(app_jobs, "list_jobs", return_value=[]), \
+                patch.object(app_recorder, "build_engine", side_effect=_fake_build()):
+            unit = app.start_job({"platform": "tiktok", "target": "@user", "quality": "720p"})
+        self.assertEqual(self.rec.get_spec(unit)["quality"], "720p")
+
+    def test_start_job_defaults_to_best_quality(self):
+        with patch.object(app_jobs, "list_jobs", return_value=[]), \
+                patch.object(app_recorder, "build_engine", side_effect=_fake_build()):
+            unit = app.start_job({"platform": "tiktok", "target": "@user"})
+        self.assertEqual(self.rec.get_spec(unit)["quality"], "best")
+
+    def test_start_job_rejects_invalid_quality(self):
+        with patch.object(app_jobs, "list_jobs", return_value=[]), \
+                patch.object(app_recorder, "build_engine", side_effect=AssertionError("不应启动")):
+            with self.assertRaises(ValueError):
+                app.start_job({"platform": "tiktok", "target": "@user", "quality": "4k"})
+        self.assertEqual(self.rec.status(), [])
+
     def test_recent_files_uses_configured_recordings_directory(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -208,64 +276,6 @@ class WebUIHelpersTest(unittest.TestCase):
     def test_recent_files_handles_missing_directory(self):
         with patch.object(app_config, "RECORDINGS_DIR", "/definitely/missing/directory"):
             self.assertEqual(app.recent_files(), [])
-
-    def test_list_jobs_uses_one_batch_details_query(self):
-        listed = CompletedProcess([], 0, stdout=(
-            "livestream-rec-tiktok-one.service loaded active running first\n"
-            "livestream-rec-kick-two.service loaded inactive dead second\n"
-        ), stderr="")
-        shown = CompletedProcess([], 0, stdout=(
-            "Id=livestream-rec-tiktok-one.service\nActiveState=active\nSubState=running\n"
-            "Description=Live recorder: tiktok one\nMainPID=12\nMemoryCurrent=34\nNRestarts=0\n\n"
-            "Id=livestream-rec-kick-two.service\nActiveState=inactive\nSubState=dead\n"
-            "Description=Live recorder: kick two\nMainPID=0\nMemoryCurrent=0\nNRestarts=1\n"
-        ), stderr="")
-        with patch.object(app_jobs, "run", side_effect=[listed, shown]) as mocked_run:
-            jobs = app.list_jobs()
-        self.assertEqual(mocked_run.call_count, 2)
-        self.assertEqual([job["target"] for job in jobs], ["one", "two"])
-
-    def test_list_jobs_handles_unset_numeric_properties(self):
-        listed = CompletedProcess([], 0, stdout=(
-            "livestream-rec-tiktok-one.service loaded inactive dead one\n"
-        ), stderr="")
-        shown = CompletedProcess([], 0, stdout=(
-            "Id=livestream-rec-tiktok-one.service\nActiveState=inactive\nSubState=dead\n"
-            "Description=Live recorder: tiktok one\nMainPID=[not set]\n"
-            "MemoryCurrent=[not set]\nNRestarts=[not set]\n"
-        ), stderr="")
-        with patch.object(app_jobs, "run", side_effect=[listed, shown]):
-            jobs = app.list_jobs()
-        self.assertEqual(jobs[0]["pid"], 0)
-        self.assertEqual(jobs[0]["memory"], 0)
-        self.assertEqual(jobs[0]["restarts"], 0)
-
-    def test_list_jobs_reports_streamer_live_status(self):
-        listed = CompletedProcess([], 0, stdout=(
-            "livestream-rec-tiktok-one.service loaded active running first\n"
-            "livestream-rec-tiktok-two.service loaded active running second\n"
-            "livestream-rec-kick-three.service loaded inactive dead third\n"
-        ), stderr="")
-        shown = CompletedProcess([], 0, stdout=(
-            "Id=livestream-rec-tiktok-one.service\nActiveState=active\nSubState=running\n"
-            "Description=Live recorder: tiktok one\nMainPID=11\nMemoryCurrent=34\nNRestarts=0\n\n"
-            "Id=livestream-rec-tiktok-two.service\nActiveState=active\nSubState=running\n"
-            "Description=Live recorder: tiktok two\nMainPID=22\nMemoryCurrent=34\nNRestarts=0\n\n"
-            "Id=livestream-rec-kick-three.service\nActiveState=inactive\nSubState=dead\n"
-            "Description=Live recorder: kick three\nMainPID=0\nMemoryCurrent=0\nNRestarts=1\n"
-        ), stderr="")
-        with patch.object(app_jobs, "run", side_effect=[listed, shown]), \
-                patch.object(app_jobs, "_ffmpeg_descendant", side_effect=[True, False]) as probed:
-            jobs = app.list_jobs()
-        self.assertEqual([job["live"] for job in jobs], ["live", "waiting", "offline"])
-        # 非活动单元无需探测进程树（只有活动任务才查 ffmpeg 子进程）
-        self.assertEqual([call.args[0] for call in probed.call_args_list], [11, 22])
-
-    def test_live_status_is_unknown_when_process_tree_unavailable(self):
-        self.assertEqual(app._live_status("active", 0), "unknown")
-        with patch.object(app_jobs, "_ffmpeg_descendant", return_value=None):
-            self.assertEqual(app._live_status("active", 99), "unknown")
-        self.assertEqual(app._live_status("failed", 99), "offline")
 
     def test_overview_counts_live_and_waiting(self):
         jobs = [
@@ -345,22 +355,50 @@ class WebUIHelpersTest(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     app.delete_file("../etc/passwd")
 
-    def test_job_logs_tail(self):
-        with patch.object(app_jobs, "run", return_value=CompletedProcess([], 0, stdout="log line\n", stderr="")) as mocked:
-            app.job_logs("livestream-rec-tiktok-x-abc.service", tail=1000)
-        args = mocked.call_args.args[0]
-        self.assertIn("-n", args)
-        self.assertEqual(args[args.index("-n") + 1], "1000")
+    def test_job_logs_tails_engine_log_file(self):
+        unit = app.unit_name("tiktok", "chan")
+        with tempfile.TemporaryDirectory() as directory:
+            path = app_recorder.engine_log_path(directory, "tiktok", unit)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("".join(f"line{i}\n" for i in range(10)), encoding="utf-8")
+            with patch.object(app_config, "RECORDINGS_DIR", directory), \
+                    patch.object(app_jobs, "_recorder", _spec_recorder(unit, "tiktok")):
+                tail = app.job_logs(unit, tail=4)
+            self.assertEqual(tail.splitlines(), ["line6", "line7", "line8", "line9"])
+
+    def test_job_logs_clamps_tail_and_handles_missing(self):
+        unit = app.unit_name("tiktok", "chan")
+        with tempfile.TemporaryDirectory() as directory:
+            path = app_recorder.engine_log_path(directory, "tiktok", unit)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("".join(f"l{i}\n" for i in range(6000)), encoding="utf-8")
+            with patch.object(app_config, "RECORDINGS_DIR", directory), \
+                    patch.object(app_jobs, "_recorder", _spec_recorder(unit, "tiktok")):
+                tail = app.job_logs(unit, tail=999999)  # 上限 5000 行
+            self.assertEqual(len(tail.splitlines()), 5000)
+            self.assertTrue(tail.endswith("l5999\n"))
+        # 校验失败 / 无日志文件
         with self.assertRaises(ValueError):
             app.job_logs("evil.service")
+        with patch.object(app_jobs, "_recorder", _spec_recorder(app.unit_name("kick", "x"), "kick")):
+            self.assertEqual(app.job_logs(app.unit_name("kick", "x")), "")
 
-    def test_restart_job_validates_unit(self):
-        with patch.object(app_jobs, "run", return_value=CompletedProcess([], 0, stdout="", stderr="")) as mocked:
-            app.restart_job("livestream-rec-tiktok-x-abc.service")
-        self.assertEqual(mocked.call_args.args[0][0], "systemctl")
-        self.assertIn("restart", mocked.call_args.args[0])
+    def test_restart_job_requires_running_task(self):
+        unit = app.unit_name("tiktok", "chan")
         with self.assertRaises(ValueError):
             app.restart_job("../../evil")
+        with self.assertRaises(RuntimeError):
+            app.restart_job(unit)  # 未运行（含暂停中）
+
+    def test_restart_job_respawns_thread(self):
+        unit = app.unit_name("tiktok", "chan")
+        with patch.object(app_recorder, "build_engine", side_effect=_fake_build()):
+            self.rec.start(unit, {"platform": "tiktok", "target": "chan", "quality": "best"})
+            app.restart_job(unit)
+        self.assertTrue(self.rec.is_running(unit))
+        status = self.rec.status()
+        self.assertEqual(status[0]["unit"], unit)
+        self.assertEqual(status[0]["restarts"], 0)  # 手动重启清零计数
 
     def test_download_range(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -387,7 +425,6 @@ class WebUIHelpersTest(unittest.TestCase):
         self.assertEqual(head.decode("latin-1").splitlines()[0].split()[1], "404")
 
     def test_files_api_and_overview_platforms(self):
-
         jobs = [{"platform": "tiktok", "state": "active"}, {"platform": "tiktok", "state": "failed"}]
         with (
             patch.object(app_jobs, "list_jobs", return_value=jobs),
@@ -405,29 +442,6 @@ class WebUIHelpersTest(unittest.TestCase):
         head, _, body = raw.partition(b"\r\n\r\n")
         self.assertEqual(head.decode("latin-1").splitlines()[0].split()[1], "200")
         self.assertEqual(json.loads(body)["total"], 0)
-
-
-    def test_start_job_forwards_quality(self):
-        with patch.object(app_jobs, "list_jobs", return_value=[]), \
-                patch.object(app_jobs, "run", return_value=CompletedProcess([], 0, stdout="", stderr="")) as mocked:
-            app.start_job({"platform": "tiktok", "target": "@user", "quality": "720p"})
-        argv = mocked.call_args.args[0]
-        self.assertIn("--quality", argv)
-        self.assertEqual(argv[argv.index("--quality") + 1], "720p")
-
-    def test_start_job_defaults_to_best_quality(self):
-        with patch.object(app_jobs, "list_jobs", return_value=[]), \
-                patch.object(app_jobs, "run", return_value=CompletedProcess([], 0, stdout="", stderr="")) as mocked:
-            app.start_job({"platform": "tiktok", "target": "@user"})
-        argv = mocked.call_args.args[0]
-        self.assertNotIn("--quality", argv)
-
-    def test_start_job_rejects_invalid_quality(self):
-        with patch.object(app_jobs, "list_jobs", return_value=[]), \
-                patch.object(app_jobs, "run") as mocked:
-            with self.assertRaises(ValueError):
-                app.start_job({"platform": "tiktok", "target": "@user", "quality": "4k"})
-        mocked.assert_not_called()
 
     def test_download_serves_inline_for_playback(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -460,6 +474,125 @@ class WebUIHelpersTest(unittest.TestCase):
             ".inline-player",
         ):
             self.assertIn(fragment, index, fragment)
+
+
+class RecorderStatusTest(unittest.TestCase):
+    """单进程调度器状态聚合：字段形状与旧 systemctl show 聚合一致（前端零改动）。"""
+
+    def setUp(self):
+        self.rec = app_recorder.Recorder(restart_backoff=0.05)
+        patcher = patch.object(app_jobs, "_recorder", self.rec)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.addCleanup(self.rec.shutdown, 2)
+
+    def _start(self, platform="tiktok", target="chan"):
+        unit = app.unit_name(platform, target)
+        with patch.object(app_recorder, "build_engine", side_effect=_fake_build()):
+            self.rec.start(unit, {"platform": platform, "target": target, "quality": "best"})
+        return unit
+
+    def test_status_shape_matches_frontend_contract(self):
+        unit = self._start()
+        # start 后引擎构建在线程内异步完成（activating 窗口），等它进入 running
+        deadline = time.monotonic() + 2
+        job = None
+        while time.monotonic() < deadline:
+            status = self.rec.status()
+            if status:
+                job = status[0]
+                if job["substate"] == "running":
+                    break
+            time.sleep(0.01)
+        self.assertIsNotNone(job)
+        for key in ("unit", "state", "substate", "description", "started",
+                    "platform", "target", "pid", "memory", "restarts", "live", "quality"):
+            self.assertIn(key, job)
+        self.assertEqual(job["unit"], unit)
+        self.assertEqual(job["state"], "active")
+        self.assertEqual(job["substate"], "running")
+        self.assertEqual(job["live"], "waiting")  # 检测中（无 ffmpeg）
+        self.assertEqual(job["description"], "Live recorder: tiktok chan")
+        self.assertGreater(job["memory"], 0)
+        self.assertGreater(job["pid"], 0)
+
+    def test_recording_engine_reports_live(self):
+        unit = self._start()
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            engine = self.rec._tasks[unit].engine
+            if engine is not None:
+                engine.phase = "recording"
+                engine.is_recording = True
+                break
+            time.sleep(0.01)
+        job = next(j for j in self.rec.status() if j["unit"] == unit)
+        self.assertEqual(job["live"], "live")
+        self.assertEqual(job["substate"], "running")
+
+    def test_construction_failure_reports_activating(self):
+        unit = app.unit_name("tiktok", "broken")
+        with patch.object(app_recorder, "build_engine", side_effect=ValueError("bad spec")):
+            self.rec.start(unit, {"platform": "tiktok", "target": "broken", "quality": "best"})
+            deadline = time.monotonic() + 2
+            job = None
+            while time.monotonic() < deadline:
+                status = self.rec.status()
+                if status:
+                    job = status[0]
+                    if job["substate"] == "activating":
+                        break
+                time.sleep(0.01)
+        self.assertIsNotNone(job)
+        self.assertEqual(job["state"], "active")
+        self.assertEqual(job["substate"], "activating")
+
+    def test_engine_crash_auto_restarts_with_backoff(self):
+        """引擎异常退出按退避自动重启（等价旧 transient unit Restart=on-failure）。"""
+        unit = app.unit_name("tiktok", "crashy")
+        with patch.object(app_recorder, "build_engine", side_effect=_fake_build(fail=True)):
+            self.rec.start(unit, {"platform": "tiktok", "target": "crashy", "quality": "best"})
+            deadline = time.monotonic() + 3
+            restarts = 0
+            while time.monotonic() < deadline:
+                status = self.rec.status()
+                if status:
+                    restarts = status[0]["restarts"]
+                    if restarts >= 1:
+                        break
+                time.sleep(0.02)
+        self.assertGreaterEqual(restarts, 1)
+
+    def test_start_twice_raises_and_shutdown_stops_all(self):
+        unit = self._start()
+        with patch.object(app_recorder, "build_engine", side_effect=AssertionError("不应重建")):
+            with self.assertRaises(RuntimeError):
+                self.rec.start(unit, {"platform": "tiktok", "target": "chan"})
+        engines_before = [t.engine for t in self.rec._tasks.values() if t.engine]
+        self.rec.shutdown(timeout=2)
+        self.assertEqual(self.rec.status(), [])
+        for engine in engines_before:
+            if engine is not None:
+                self.assertTrue(engine._stop.is_set())
+
+    def test_hidden_stopped_task_not_listed(self):
+        """stop 置位中的任务对状态接口隐藏（暂停/删除瞬间不闪烁成运行中）。"""
+        unit = self._start()
+        task = self.rec._tasks[unit]
+        task.stop.set()  # 模拟停止中窗口（线程仍在收尾）
+        self.assertNotIn(unit, {j["unit"] for j in self.rec.status()})
+        self.assertFalse(self.rec.is_running(unit))
+
+
+def _spec_recorder(unit: str, platform: str) -> app_recorder.Recorder:
+    """带一个"运行中"任务的调度器（仅用于 job_logs 反查平台，不启动线程）。"""
+    rec = app_recorder.Recorder()
+    task = app_recorder._Task(unit, {"platform": platform, "target": "x", "quality": "best"})
+    task.thread = threading.Thread(target=lambda: None)
+    task.thread.start()
+    task.thread.join()
+    rec._tasks[unit] = task
+    return rec
 
 
 class FrontendTemplateWiringTest(unittest.TestCase):
@@ -509,11 +642,10 @@ class FrontendTemplateWiringTest(unittest.TestCase):
 
 
 class TaskPauseResumeDeleteTest(unittest.TestCase):
-    """暂停/继续/删除任务的后端语义。
+    """暂停/继续/删除任务的单进程语义。
 
-    背景：单元由 `systemd-run --collect` 创建，停止后会被 systemd 回收（重新 start 会
-    "Unit not found"）。暂停必须把启动参数留在任务目录（`state/tasks.json`），
-    否则「继续」无法按原参数重新拉起。
+    任务目录（state/tasks.json）仍是期望状态：暂停 = 停线程 + paused 标记
+    （参数留存）；继续 = 按参数重建线程；WebUI 启动时按目录恢复未暂停任务。
     """
 
     UNIT = app.unit_name("tiktok", "chan")
@@ -526,6 +658,15 @@ class TaskPauseResumeDeleteTest(unittest.TestCase):
             patcher = patch.object(app_config, target, value)
             patcher.start()
             self.addCleanup(patcher.stop)
+        # 全新调度器 + 假引擎工厂（含构建工厂 patch 的清理顺序：先停线程再还原 patch）
+        self.rec = app_recorder.Recorder(restart_backoff=0.05)
+        rec_patcher = patch.object(app_jobs, "_recorder", self.rec)
+        rec_patcher.start()
+        self.addCleanup(rec_patcher.stop)
+        build_patcher = patch.object(app_recorder, "build_engine", side_effect=_fake_build())
+        build_patcher.start()
+        self.addCleanup(build_patcher.stop)
+        self.addCleanup(self.rec.shutdown, 2)
 
     def _catalog(self) -> dict:
         return json.loads(self.catalog_file.read_text(encoding="utf-8"))
@@ -533,102 +674,84 @@ class TaskPauseResumeDeleteTest(unittest.TestCase):
     def _spec(self) -> dict:
         return {"platform": "tiktok", "target": "chan", "quality": "720p", "cookie_file": "", "paused": False}
 
-    def _unit_show(self, quality: str = "480p") -> CompletedProcess:
-        """systemd show 的原始输出（ExecStart 用于从已存在单元反推启动参数）。"""
-        return CompletedProcess([], 0, stdout=(
-            f"Id={self.UNIT}\nDescription=Live recorder: tiktok chan\n"
-            "ExecStart={ path=/usr/bin/bash ; argv[]=/usr/bin/bash /home/u/tk/record.sh chan "
-            f"--quality {quality} ; ignore_errors=no ; start_time=[n/a] ; pid=1 ; code=(null) ; status=0/0 }}\n"
-        ), stderr="")
-
-    def test_pause_stops_unit_and_persists_spec(self):
-        self.catalog_file.write_text(json.dumps({self.UNIT: self._spec()}), encoding="utf-8")
-        with patch.object(app_jobs, "_live_units", return_value=[self.UNIT]), \
-                patch.object(app_jobs, "run", return_value=CompletedProcess([], 0, stdout="", stderr="")) as mocked_run:
-            app.pause_job(self.UNIT)
-        self.assertEqual(mocked_run.call_args.args[0], [app.SYSTEMCTL, "stop", self.UNIT])
-        # 暂停后单元已被回收：仍能从任务目录列出，且状态为 paused
-        with patch.object(app_jobs, "_live_units", return_value=[]):
-            jobs = app.list_jobs()
-        self.assertEqual([(job["unit"], job["state"], job["live"]) for job in jobs], [(self.UNIT, "paused", "paused")])
+    def test_pause_stops_thread_and_persists_spec(self):
+        app.start_job({"platform": "tiktok", "target": "chan", "quality": "720p"})
+        app.pause_job(self.UNIT)
+        self.assertFalse(self.rec.is_running(self.UNIT))
+        self.assertNotIn(self.UNIT, self.rec.running_units())
+        # 暂停后线程已停：仍能从任务目录列出，且状态为 paused
+        with patch.object(app_jobs, "_recorder", _empty_recorder()):
+            jobs_list = app.list_jobs()
+        self.assertEqual(
+            [(job["unit"], job["state"], job["live"]) for job in jobs_list],
+            [(self.UNIT, "paused", "paused")],
+        )
         self.assertTrue(self._catalog()[self.UNIT]["paused"])
+        self.assertEqual(self._catalog()[self.UNIT]["quality"], "720p")
 
-    def test_resume_respawns_unit_with_saved_arguments(self):
-        paused = {**self._spec(), "paused": True}
-        self.catalog_file.write_text(json.dumps({self.UNIT: paused}), encoding="utf-8")
-        with patch.object(app_jobs, "_live_units", return_value=[]), \
-                patch.object(app_jobs, "run", return_value=CompletedProcess([], 0, stdout="", stderr="")) as mocked_run:
-            unit = app.resume_job(self.UNIT)
+    def test_resume_respawns_thread_with_saved_arguments(self):
+        self.catalog_file.write_text(
+            json.dumps({self.UNIT: {**self._spec(), "paused": True}}), encoding="utf-8"
+        )
+        unit = app.resume_job(self.UNIT)
         self.assertEqual(unit, self.UNIT)
-        argv = mocked_run.call_args.args[0]
-        self.assertEqual(argv[0], app.SYSTEMD_RUN)
-        self.assertIn(f"--unit={self.UNIT.removesuffix('.service')}", argv)
-        # 画质等原始参数随「继续」一并恢复（完整命令尾部与新建时一致）
-        self.assertEqual(argv[argv.index("--") + 1:], [
-            "bash", str(app.PROJECT_ROOT / "tk/record.sh"), "chan", "--quality", "720p",
-        ])
+        self.assertTrue(self.rec.is_running(unit))
+        spec = self.rec.get_spec(unit)
+        self.assertEqual(spec["quality"], "720p")  # 原始参数随「继续」一并恢复
         self.assertFalse(self._catalog()[self.UNIT]["paused"])
 
-    def test_pause_recovers_arguments_from_systemd_when_catalog_is_empty(self):
-        """旧版本/命令行创建的任务没有目录记录，暂停时从单元 ExecStart 反推参数。"""
-        with patch.object(app_jobs, "_live_units", return_value=[self.UNIT]), \
-                patch.object(app_jobs, "run", side_effect=[
-                    self._unit_show("480p"), CompletedProcess([], 0, stdout="", stderr="")
-                ]):
-            app.pause_job(self.UNIT)
+    def test_pause_recovers_arguments_from_runtime_when_catalog_is_empty(self):
+        """任务目录缺失记录时（外部创建/旧数据），暂停从运行时反推参数。"""
+        app.start_job({"platform": "tiktok", "target": "chan", "quality": "480p"})
+        self.catalog_file.write_text("{}", encoding="utf-8")  # 目录被清空
+        app.pause_job(self.UNIT)
         spec = self._catalog()[self.UNIT]
-        self.assertEqual((spec["platform"], spec["target"], spec["quality"], spec["paused"]),
-                         ("tiktok", "chan", "480p", True))
+        self.assertEqual(
+            (spec["platform"], spec["target"], spec["quality"], spec["paused"]),
+            ("tiktok", "chan", "480p", True),
+        )
 
-    def test_delete_stops_running_unit_and_drops_record(self):
-        self.catalog_file.write_text(json.dumps({self.UNIT: self._spec()}), encoding="utf-8")
-        with patch.object(app_jobs, "_live_units", return_value=[self.UNIT]), \
-                patch.object(app_jobs, "run", return_value=CompletedProcess([], 0, stdout="", stderr="")) as mocked_run:
-            app.delete_job(self.UNIT)
-        self.assertEqual(mocked_run.call_args.args[0], [app.SYSTEMCTL, "stop", self.UNIT])
+    def test_delete_stops_running_thread_and_drops_record(self):
+        app.start_job({"platform": "tiktok", "target": "chan"})
+        app.delete_job(self.UNIT)
+        self.assertFalse(self.rec.is_running(self.UNIT))
         self.assertEqual(self._catalog(), {})
-        with patch.object(app_jobs, "_live_units", return_value=[]):
+        with patch.object(app_jobs, "_recorder", _empty_recorder()):
             self.assertEqual(app.list_jobs(), [])
 
-    def test_deleting_paused_task_does_not_call_systemctl(self):
-        self.catalog_file.write_text(json.dumps({self.UNIT: {**self._spec(), "paused": True}}), encoding="utf-8")
-        with patch.object(app_jobs, "_live_units", return_value=[]), \
-                patch.object(app_jobs, "run") as mocked_run:
-            app.delete_job(self.UNIT)
-        mocked_run.assert_not_called()
+    def test_deleting_paused_task_keeps_recordless_state(self):
+        self.catalog_file.write_text(
+            json.dumps({self.UNIT: {**self._spec(), "paused": True}}), encoding="utf-8"
+        )
+        app.delete_job(self.UNIT)
         self.assertEqual(self._catalog(), {})
 
-    def test_pause_rejects_unit_that_is_not_running(self):
-        with patch.object(app_jobs, "_live_units", return_value=[]), patch.object(app_jobs, "run") as mocked_run:
-            with self.assertRaises(ValueError):
-                app.pause_job(self.UNIT)
-        mocked_run.assert_not_called()
+    def test_pause_rejects_task_that_is_not_running(self):
+        with self.assertRaises(ValueError):
+            app.pause_job(self.UNIT)
+        self.assertFalse(self.catalog_file.exists())
 
     def test_resume_rejects_task_that_is_not_paused(self):
         self.catalog_file.write_text(json.dumps({self.UNIT: self._spec()}), encoding="utf-8")
-        with patch.object(app_jobs, "_live_units", return_value=[self.UNIT]), patch.object(app_jobs, "run") as mocked_run:
-            with self.assertRaises(ValueError):
-                app.resume_job(self.UNIT)
-        mocked_run.assert_not_called()
+        with self.assertRaises(ValueError):
+            app.resume_job(self.UNIT)
+        self.assertFalse(self.rec.is_running(self.UNIT))
 
     def test_start_rejects_duplicate_of_paused_task(self):
-        self.catalog_file.write_text(json.dumps({self.UNIT: {**self._spec(), "paused": True}}), encoding="utf-8")
-        with patch.object(app_jobs, "_live_units", return_value=[]), patch.object(app_jobs, "run") as mocked_run:
-            with self.assertRaises(ValueError) as ctx:
-                app.start_job({"platform": "tiktok", "target": " CHAN ", "quality": "best"})
+        self.catalog_file.write_text(
+            json.dumps({self.UNIT: {**self._spec(), "paused": True}}), encoding="utf-8"
+        )
+        with self.assertRaises(ValueError) as ctx:
+            app.start_job({"platform": "tiktok", "target": " CHAN ", "quality": "best"})
         self.assertIn("暂停", str(ctx.exception))
-        mocked_run.assert_not_called()
+        self.assertEqual(self.rec.status(), [])
 
     def test_restore_respawns_missing_nonpaused_task(self):
         self.catalog_file.write_text(json.dumps({self.UNIT: self._spec()}), encoding="utf-8")
-        with patch.object(app_jobs, "_live_units", return_value=[]), \
-                patch.object(app_jobs, "run", return_value=CompletedProcess([], 0, stdout="", stderr="")) as mocked_run:
-            restored, failed = app.restore_jobs()
+        restored, failed = app.restore_jobs()
         self.assertEqual(restored, [self.UNIT])
         self.assertEqual(failed, {})
-        argv = mocked_run.call_args.args[0]
-        self.assertEqual(argv[0], app.SYSTEMD_RUN)
-        self.assertIn(f"--unit={self.UNIT.removesuffix('.service')}", argv)
+        self.assertTrue(self.rec.is_running(self.UNIT))
         self.assertEqual(self._catalog()[self.UNIT]["target"], "chan")
 
     def test_restore_skips_running_and_paused_tasks(self):
@@ -638,25 +761,35 @@ class TaskPauseResumeDeleteTest(unittest.TestCase):
             paused_unit: {**self._spec(), "target": "paused", "paused": True},
         }
         self.catalog_file.write_text(json.dumps(catalog), encoding="utf-8")
-        with patch.object(app_jobs, "_live_units", return_value=[self.UNIT]), \
-                patch.object(app_jobs, "run") as mocked_run:
+        with patch.object(app_recorder, "build_engine", side_effect=AssertionError("不应启动")):
+            self.rec.start(self.UNIT, self._spec())  # 已在运行
             restored, failed = app.restore_jobs()
         self.assertEqual((restored, failed), ([], {}))
-        mocked_run.assert_not_called()
 
     def test_restore_failure_does_not_delete_catalog(self):
         self.catalog_file.write_text(json.dumps({self.UNIT: self._spec()}), encoding="utf-8")
-        failure = CompletedProcess([], 1, stdout="", stderr="systemd unavailable")
-        with patch.object(app_jobs, "_live_units", return_value=[]), patch.object(app_jobs, "run", return_value=failure):
+        with patch.object(self.rec, "start", side_effect=RuntimeError("启动失败: nope")):
             restored, failed = app.restore_jobs()
         self.assertEqual(restored, [])
-        self.assertIn("systemd unavailable", failed[self.UNIT])
+        self.assertIn("nope", failed[self.UNIT])
         self.assertIn(self.UNIT, self._catalog())
+
+    def test_restore_mismatched_unit_name_fails(self):
+        # unit_name 由 (platform, target) 决定：目录里放一个名字对不上的记录必须失败且保留记录。
+        other = app.unit_name("tiktok", "different")
+        self.catalog_file.write_text(json.dumps({other: self._spec()}), encoding="utf-8")
+        restored, failed = app.restore_jobs()
+        self.assertEqual(restored, [])
+        self.assertIn("不匹配", failed[other])
+        self.assertIn(other, self._catalog())
 
     def test_corrupt_catalog_does_not_break_listing(self):
         self.catalog_file.write_text("{ not json", encoding="utf-8")
-        with patch.object(app_jobs, "_live_units", return_value=[]):
-            self.assertEqual(app.list_jobs(), [])
+        self.assertEqual(app.list_jobs(), [])
+
+
+def _empty_recorder() -> app_recorder.Recorder:
+    return app_recorder.Recorder()
 
 
 class TaskControlHTTPTest(unittest.TestCase):
@@ -665,25 +798,25 @@ class TaskControlHTTPTest(unittest.TestCase):
     def test_delete_task_route_dispatches_to_delete_job(self):
         with patch.object(app_jobs, "delete_job") as mocked:
             status, _ = WebUIHTTPTest()._post("/api/delete-task", {"unit": "u.service"})
-        self.assertEqual(status, HTTPStatus.OK)
+        self.assertEqual(status, 200)
         mocked.assert_called_once_with("u.service")
 
     def test_pause_and_resume_routes_dispatch(self):
         handler = WebUIHTTPTest()
         with patch.object(app_jobs, "pause_job") as paused:
             status, _ = handler._post("/api/pause", {"unit": "u.service"})
-        self.assertEqual(status, HTTPStatus.OK)
-        paused.assert_called_once_with("u.service")
+            self.assertEqual(status, 200)
+            paused.assert_called_once_with("u.service")
         with patch.object(app_jobs, "resume_job", return_value="new.service") as resumed:
             status, body = handler._post("/api/resume", {"unit": "u.service"})
-        self.assertEqual(status, HTTPStatus.OK)
+        self.assertEqual(status, 200)
         resumed.assert_called_once_with("u.service")
         self.assertEqual(json.loads(body), {"unit": "new.service"})
 
     def test_legacy_stop_route_is_gone(self):
         # 停止不再是独立操作：运行中的任务用「暂停」保留恢复能力，删除用 /api/delete-task。
         status, body = WebUIHTTPTest()._post("/api/stop", {"unit": "u.service"})
-        self.assertEqual(status, HTTPStatus.NOT_FOUND)
+        self.assertEqual(status, 404)
         self.assertEqual(json.loads(body), {"error": "not found"})
 
 

@@ -79,6 +79,9 @@ sudo bash systemd/install.sh
 `install.sh` 同时部署并启用共享浏览器渲染服务 `tiktok-browserd`（TikTok 检测的浏览器
 兜底依赖它；缺失时该兜底自动跳过，轻量检测与 yt-dlp 路径不受影响）。
 
+录制执行是**单进程模型**：所有频道的引擎线程运行在 WebUI 进程内（`webui/recorder.py`），
+不再按频道创建 systemd 单元；任务状态、日志、暂停/继续/重启均由进程内调度。
+
 WebUI 后端默认监听 `127.0.0.1:8766`，应用层不校验令牌。若通过 Caddy 对外提供服务，必须在反向代理层启用 Basic Auth 或等效访问控制；最小配置片段见[配置说明](docs/configuration.md#caddy-反向代理)。真实的 `/etc/caddy/Caddyfile` 属于服务器配置，不由本仓库安装或覆盖。
 
 不开放公网时也可以使用 SSH 隧道：

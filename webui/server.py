@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 from http import HTTPStatus
@@ -188,6 +189,17 @@ class Handler(BaseHTTPRequestHandler):
 def main() -> None:
     host = os.environ.get("LIVE_WEBUI_HOST", "127.0.0.1")
     port = int(os.environ.get("LIVE_WEBUI_PORT", "8765"))
+
+    # 单进程录制：SIGTERM/SIGINT 必须先让所有引擎的 ffmpeg 收尾当前分段再退出
+    # （等价旧 transient unit 的 KillMode=mixed），否则停服会截断正在写的分段。
+    def _graceful(signum: int, _frame: object) -> None:
+        print(f"收到信号 {signum}，正在并行停止全部录制任务...", flush=True)
+        jobs.shutdown_recorder(timeout=25)
+        os._exit(0)
+
+    signal.signal(signal.SIGTERM, _graceful)
+    signal.signal(signal.SIGINT, _graceful)
+
     restored, failed = jobs.restore_jobs()
     if restored:
         print(f"已恢复 {len(restored)} 个录制任务：{', '.join(restored)}", flush=True)
@@ -201,3 +213,4 @@ def main() -> None:
         pass
     finally:
         server.server_close()
+        jobs.shutdown_recorder(timeout=25)
