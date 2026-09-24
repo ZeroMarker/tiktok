@@ -82,17 +82,29 @@ def get_room_id_from_sigi(text: str) -> tuple[str | None, int]:
     if not match:
         return None, -1
 
-    sigi = json.loads(match.group(1))
-    lr = sigi.get("LiveRoom", {})
+    # WAF/挑战页可能内嵌残缺 SIGI 脚本：解析失败按“未取到”处理，
+    # 不让 JSONDecodeError 冲出检测主流程（与 _stream_url_from_sigi 一致）。
+    try:
+        sigi = json.loads(match.group(1))
+    except (TypeError, ValueError):
+        return None, -1
+    if not isinstance(sigi, dict):
+        return None, -1
+    lr = sigi.get("LiveRoom")
+    lr = lr if isinstance(lr, dict) else {}
 
     # 检查 liveRoomUserInfo.liveRoom.status
-    room_info = lr.get("liveRoomUserInfo", {}).get("liveRoom", {})
+    room_user = lr.get("liveRoomUserInfo")
+    room_user = room_user if isinstance(room_user, dict) else {}
+    room_info = room_user.get("liveRoom")
+    room_info = room_info if isinstance(room_info, dict) else {}
     status = room_info.get("status", 0)
     room_id = room_info.get("roomId")
 
     # 如果 status != 2 或 room_id 为空，也检查 CurrentRoom
     if status != 2 or not room_id:
-        cr = sigi.get("CurrentRoom", {})
+        cr = sigi.get("CurrentRoom")
+        cr = cr if isinstance(cr, dict) else {}
         if cr:
             cr_id = cr.get("roomId")
             if cr_id:
@@ -114,16 +126,28 @@ def get_room_id_from_universal(text: str) -> str | None:
     )
     if not match:
         return None
-    data = json.loads(match.group(1))
-    default_scope = data.get("__DEFAULT_SCOPE__", {})
+    try:
+        data = json.loads(match.group(1))
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    default_scope = data.get("__DEFAULT_SCOPE__")
+    if not isinstance(default_scope, dict):
+        return None
 
     # 优先从 webcast-sse.user-detail 或 webcast.user-detail 中取
     for key in ("webcast.user-detail", "webcast-sse.user-detail", "webapp.user-detail"):
-        ud = default_scope.get(key, {})
-        if ud:
-            room_id = ud.get("userInfo", {}).get("user", {}).get("roomId", "")
-            if room_id:
-                return str(room_id)
+        ud = default_scope.get(key)
+        if not isinstance(ud, dict) or not ud:
+            continue
+        ui = ud.get("userInfo")
+        ui = ui if isinstance(ui, dict) else {}
+        user = ui.get("user")
+        user = user if isinstance(user, dict) else {}
+        room_id = user.get("roomId", "")
+        if room_id:
+            return str(room_id)
     return None
 
 
