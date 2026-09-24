@@ -18,39 +18,39 @@
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <title>Bili 推流管理</title>
 <style>
-/* Material 3 Expressive — hand-rolled, no external deps */
+/* Design tokens — 单一权威色板（原先两套 :root 互相覆盖，已合并为最终生效值） */
 :root{
-  --seed:#7c4dff;
-  --primary:#6750a4; --on-primary:#fff;
-  --primary-container:#eaddff; --on-primary-container:#21005d;
-  --secondary-container:#e8def8; --on-secondary-container:#1d192b;
-  --tertiary-container:#ffd8e4; --on-tertiary-container:#31111d;
-  --success-container:#d4edda; --on-success-container:#0f3d1e;
-  --surface:#fef7ff; --surface-container-low:#f7f2fa; --surface-container:#f3edf7;
-  --surface-container-high:#ece6f0; --surface-container-highest:#e6e0e9;
-  --on-surface:#1d1b20; --on-surface-variant:#49454f;
-  --outline:#79747e; --outline-variant:#cac4d0;
-  --error:#b3261e; --on-error:#fff; --error-container:#f9dedc;
-  --shadow:0 1px 2px rgba(0,0,0,.18),0 2px 8px rgba(0,0,0,.12);
-  --shadow-2:0 2px 6px rgba(0,0,0,.2),0 8px 24px rgba(0,0,0,.14);
-  --r-lg:28px; --r-md:20px; --r-sm:16px; --r-xs:12px;
+  color-scheme:light dark;
+  --primary:#4f46e5; --on-primary:#fff;
+  --primary-container:#e9e7ff; --on-primary-container:#27216f;
+  --secondary-container:#eef0f8; --on-secondary-container:#343746;
+  --success:#17834f; --success-container:#e1f6e9; --on-success-container:#116039;
+  --surface:#f7f8fc; --surface-container-low:#fff; --surface-container:#f2f3f8;
+  --surface-container-high:#eceef5; --surface-container-highest:#e3e6ef;
+  --on-surface:#171923; --on-surface-variant:#636779;
+  --outline:#777b8d; --outline-variant:#dfe1e9;
+  --error:#c2353c; --on-error:#fff; --error-container:#ffeaeb;
+  --shadow:0 1px 2px rgba(26,29,43,.05),0 8px 28px rgba(26,29,43,.06);
+  --shadow-2:0 2px 4px rgba(26,29,43,.06),0 16px 40px rgba(26,29,43,.1);
+  --r-lg:22px; --r-md:16px; --r-sm:14px; --r-xs:10px;
 }
 @media (prefers-color-scheme:dark){
   :root{
-    --primary:#d0bcff; --on-primary:#381e72;
-    --primary-container:#4f378b; --on-primary-container:#eaddff;
-    --secondary-container:#4a4458; --on-secondary-container:#e8def8;
-    --tertiary-container:#633b48; --on-tertiary-container:#ffd8e4;
-    --success-container:#144d28; --on-success-container:#c4f0cd;
-    --surface:#141218; --surface-container-low:#1d1b20; --surface-container:#211f26;
-    --surface-container-high:#2b2930; --surface-container-highest:#36343b;
-    --on-surface:#e6e0e9; --on-surface-variant:#cac4d0;
-    --outline:#938f99; --outline-variant:#49454f;
-    --error:#f2b8b5; --on-error:#601410; --error-container:#8c1d18;
+    --primary:#b8b3ff; --on-primary:#211a83;
+    --primary-container:#302b75; --on-primary-container:#e8e6ff;
+    --secondary-container:#282b34; --on-secondary-container:#e1e3ec;
+    --success:#56d694; --success-container:#173d2b; --on-success-container:#8aebb5;
+    --surface:#111318; --surface-container-low:#181a20; --surface-container:#1d2027;
+    --surface-container-high:#262932; --surface-container-highest:#30343e;
+    --on-surface:#eef0f7; --on-surface-variant:#aeb2c0;
+    --outline:#858999; --outline-variant:#343741;
+    --error:#ffb3b7; --on-error:#601410; --error-container:#50151a;
+    --shadow:0 1px 2px rgba(0,0,0,.22),0 12px 32px rgba(0,0,0,.18);
   }
 }
 html{-webkit-text-size-adjust:100%}
 *{box-sizing:border-box}
+[hidden]{display:none!important} /* button{display:inline-flex} 会盖掉 UA 的 [hidden]，显式兜底 */
 body{font-family:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
   margin:0;color:var(--on-surface);
   background:linear-gradient(180deg,var(--primary-container) 0,var(--surface) 320px);
@@ -158,28 +158,6 @@ pre{background:var(--surface-container-high);color:var(--on-surface);border-radi
 button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid var(--primary);outline-offset:3px}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
 
-/* 2026 visual refresh: clearer hierarchy for an operations console. */
-:root{
-  --primary:#4f46e5;--on-primary:#fff;--primary-container:#e9e7ff;--on-primary-container:#27216f;
-  --secondary-container:#eef0f8;--on-secondary-container:#343746;
-  --success:#17834f;--success-container:#e1f6e9;--on-success-container:#116039;
-  --surface:#f7f8fc;--surface-container-low:#fff;--surface-container:#f2f3f8;
-  --surface-container-high:#eceef5;--surface-container-highest:#e3e6ef;
-  --on-surface:#171923;--on-surface-variant:#636779;--outline:#777b8d;--outline-variant:#dfe1e9;
-  --error:#c2353c;--error-container:#ffeaeb;
-  --shadow:0 1px 2px rgba(26,29,43,.05),0 8px 28px rgba(26,29,43,.06);
-  --shadow-2:0 2px 4px rgba(26,29,43,.06),0 16px 40px rgba(26,29,43,.1);
-  --r-lg:22px;--r-md:16px;--r-sm:14px;--r-xs:10px
-}
-@media(prefers-color-scheme:dark){:root{
-  --primary:#b8b3ff;--on-primary:#211a83;--primary-container:#302b75;--on-primary-container:#e8e6ff;
-  --secondary-container:#282b34;--on-secondary-container:#e1e3ec;
-  --success:#56d694;--success-container:#173d2b;--on-success-container:#8aebb5;
-  --surface:#111318;--surface-container-low:#181a20;--surface-container:#1d2027;
-  --surface-container-high:#262932;--surface-container-highest:#30343e;
-  --on-surface:#eef0f7;--on-surface-variant:#aeb2c0;--outline:#858999;--outline-variant:#343741;
-  --error:#ffb3b7;--error-container:#50151a;--shadow:0 1px 2px rgba(0,0,0,.22),0 12px 32px rgba(0,0,0,.18)
-}}
 body{background:var(--surface)}
 body::before{content:"";position:fixed;inset:0 0 auto;height:360px;pointer-events:none;z-index:-1;
   background:radial-gradient(circle at 15% 0,color-mix(in srgb,var(--primary) 12%,transparent),transparent 48%),radial-gradient(circle at 90% 5%,color-mix(in srgb,#45b7a3 9%,transparent),transparent 38%)}
@@ -203,11 +181,36 @@ button{border-radius:11px;padding-left:18px;padding-right:18px}
 .notice{padding:12px 16px;border-radius:13px;font-size:13px;border:1px solid var(--outline-variant)}
 @media(min-width:1000px){
   .wrap{display:grid;grid-template-columns:repeat(12,1fr);align-items:start}
-  .wrap>.progress,.wrap>.notice,.room-card,.logs-card,.wrap>.foot{grid-column:1/-1}
-  .wrap>.card.status-card{grid-column:1/span 5;grid-row:span 2;position:sticky;top:92px}
-  .wrap>.live-card,.wrap>.replay-card{grid-column:6/-1}
+  .wrap>.progress,.wrap>.notice,.wrap>.foot{grid-column:1/-1}
+  /* 状态卡占据与右侧四张卡同高的行区（span 4 = live/replay/room/logs 四行），
+     sticky 的约束矩形覆盖整段右列滚动区：可以钉住整页又永远不会盖到其它卡片
+     （右列卡片全部限制在 6~12 列，与状态卡的 1~5 列在列上就分开）。
+     原来 grid-row:span 2 + 全宽右列卡片 => 卡片钉到底部并遮挡直播间/日志左半边。*/
+  .wrap>.card.status-card{grid-column:1/span 5;grid-row:span 4;position:sticky;top:92px;
+    max-height:calc(100dvh - 108px);overflow-y:auto} /* 矮视口下卡片内滚，底部内容永远够得着 */
+  .wrap>.live-card,.wrap>.replay-card,.wrap>.room-card,.wrap>.logs-card{grid-column:6/-1}
 }
 @media(max-width:640px){.online{display:none}.wrap{width:min(100% - 24px,1180px)}.card-head{display:block}.card-head .pill{margin-top:8px}}
+/* ---- Interaction & detail polish ---- */
+button.is-loading{position:relative;pointer-events:none}
+button.is-loading::after{content:"";width:15px;height:15px;flex:none;border-radius:50%;
+  border:2px solid currentColor;border-top-color:transparent;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+button.is-loading:disabled{opacity:1;cursor:progress}
+.card-head .pill{background:transparent;border:1px solid var(--outline-variant);color:var(--on-surface-variant);letter-spacing:.5px}
+.sub-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:16px}
+.sub-label{font-size:12px;font-weight:700;color:var(--on-surface-variant);letter-spacing:.3px}
+#paths{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px}
+input[type=file]::file-selector-button{font:inherit;font-size:13px;font-weight:700;margin-right:10px;padding:8px 14px;
+  border:none;border-radius:9px;background:var(--secondary-container);color:var(--on-secondary-container);
+  cursor:pointer;transition:background .15s}
+input[type=file]::file-selector-button:hover{background:var(--surface-container-highest)}
+pre{scrollbar-width:thin}
+#snack{cursor:pointer}
+@media(max-width:640px){
+  .topbar button{padding-left:14px;padding-right:14px}
+  #operation{font-size:13px}
+}
 </style>
 </head>
 <body>
@@ -239,14 +242,15 @@ button{border-radius:11px;padding-left:18px;padding-right:18px}
       <div class="svc"><div class="t">文件轮播 <span class="pill" id="replayPill">…</span></div>
         <div class="s" id="replayState">…</div><div class="s" id="replayArgs"></div></div>
     </div>
+    <div class="sub-head"><span class="sub-label">房间状态</span><span class="pill" id="roomPill">…</span></div>
     <pre id="room">房间状态加载中…</pre>
   </div>
 
   <div class="card live-card">
     <div class="card-head"><div><h2><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M9.75 15.02 15.5 12l-5.75-3.02v6.04zM18 3H6a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3V6a3 3 0 0 0-3-3zm1 15a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v12z"/></svg>直播推流</h2><div class="card-kicker">将 TikTok 直播源转推至当前 B 站房间</div></div><span class="pill">LIVE</span></div>
     <div class="row">
-      <div class="field"><label>TikTok 用户名</label>
-        <input id="target" type="text" placeholder="如 ayakiguchi1"></div>
+      <div class="field"><label for="target">TikTok 用户名</label>
+        <input id="target" type="text" placeholder="如 ayakiguchi1" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="go"></div>
       <button class="btn-fill" id="btnLive" onclick="goMode('live')">启动直播推流</button>
     </div>
     <div class="row">
@@ -270,13 +274,13 @@ button{border-radius:11px;padding-left:18px;padding-right:18px}
     <div class="card-head"><div><h2><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3 2 8.5V9h20v-.5L12 3zM5 10v8H3v3h18v-3h-2v-8h-3v8h-3v-8h-3v8H7v-8H5z"/></svg>直播间设置</h2><div class="card-kicker">管理开播状态、标题、分区与封面</div></div></div>
     <div class="row">
       <div class="field" style="max-width:190px"><label>子分区 ID</label>
-        <input id="area" type="number" min="1" step="1" placeholder="live.py areas 查"></div>
+        <input id="area" type="number" min="1" step="1" placeholder="live.py areas 查" enterkeyhint="go"></div>
       <div class="field"><label>标题（纯文本，禁 emoji，≤40 字）</label>
-        <input id="title" type="text" maxlength="40"></div>
+        <input id="title" type="text" maxlength="40" enterkeyhint="go"></div>
       <button class="btn-fill" id="btnStart" onclick="goRoom('start')">开播</button>
     </div>
     <div class="row">
-      <div class="field"><label>新标题</label><input id="newTitle" type="text" maxlength="40"></div>
+      <div class="field"><label>新标题</label><input id="newTitle" type="text" maxlength="40" enterkeyhint="go"></div>
       <button class="btn-tonal" id="btnUpdate" onclick="goRoom('update')">改标题</button>
       <button class="btn-danger" id="btnStop" onclick="goRoom('stop')">停播（同时停推流）</button>
     </div>
@@ -293,12 +297,17 @@ button{border-radius:11px;padding-left:18px;padding-right:18px}
   <div class="card logs-card">
     <div class="card-head"><div><h2><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M4 5h16a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H8l-5 4V6a1 1 0 0 1 1-1zm2 3v2h12V8H6zm0 4v2h8v-2H6z"/></svg>服务日志</h2><div class="card-kicker">查看最近运行记录或停止全部推流</div></div></div>
     <div class="row">
-      <select id="which" class="field-sel">
+      <select id="which" class="field-sel" aria-label="选择服务">
         <option value="live">直播推流</option><option value="replay">文件轮播</option><option value="webui">webui</option>
       </select>
+      <select id="tailSel" class="field-sel" aria-label="日志行数">
+        <option value="100">100 行</option><option value="300" selected>300 行</option><option value="600">600 行</option>
+      </select>
       <button class="btn-tonal" id="btnLogs" onclick="logs()">查看</button>
+      <label class="check"><input id="autoLogs" type="checkbox"> 每 5 秒自动刷新</label>
       <div class="spacer" style="flex:1"></div>
-      <button class="btn-outline" id="btnStopAll" onclick="stopAll()">停止全部推流</button>
+      <button class="btn-outline" id="btnCopyLog" hidden onclick="copyLogs()">复制</button>
+      <button class="btn-danger" id="btnStopAll" onclick="stopAll()">停止全部推流</button>
     </div>
     <pre id="logOut" hidden></pre>
   </div>
@@ -309,12 +318,19 @@ button{border-radius:11px;padding-left:18px;padding-right:18px}
 <div id="snack"></div>
 
 <script>
-let busy = 0;
+let busy = 0, busyBtn = null;
 function setBusy(on){
   busy += on ? 1 : -1;
   if(busy < 0) busy = 0;
+  // 被点击的按钮显示转圈，长操作（验流 ≤150s）不再“看起来卡死”
+  if(on && busy === 1 && !busyBtn){
+    const el = document.activeElement;
+    if(el && el.tagName === 'BUTTON'){ busyBtn = el; el.classList.add('is-loading'); }
+  }else if(!busy && busyBtn){
+    busyBtn.classList.remove('is-loading'); busyBtn = null;
+  }
   document.getElementById('bar').className = 'progress' + (busy ? ' show' : '');
-  for(const id of ['btnLive','btnReplay','btnStart','btnUpdate','btnStop','btnCover','btnLogs','btnStopAll','btnRefresh','forceLive'])
+  for(const id of ['btnLive','btnReplay','btnStart','btnUpdate','btnStop','btnCover','btnLogs','btnStopAll','btnRefresh','btnCopyLog','forceLive','autoLogs'])
     document.getElementById(id).disabled = !!busy;
 }
 async function api(path, data, background = false){
@@ -328,17 +344,29 @@ async function api(path, data, background = false){
   }finally{ if(!background) setBusy(false); }
 }
 let snackT = null;
+const HINT = '选择直播推流或文件轮播。切换前会验证输入并停止另一种模式。';
 function snack(msg, isErr){
   const notice = document.getElementById('operation');
   notice.textContent = msg; notice.className = 'notice' + (isErr ? ' error' : '');
   const el = document.getElementById('snack');
   el.textContent = msg; el.className = isErr ? 'err' : '';
+  el.onclick = () => { el.classList.remove('show'); clearTimeout(snackT); }; // 点一下立即关闭
   requestAnimationFrame(() => el.classList.add('show'));
   clearTimeout(snackT);
-  snackT = setTimeout(() => el.classList.remove('show'), isErr ? 8000 : 4000);
+  snackT = setTimeout(() => {
+    el.classList.remove('show');
+    // 横幅跟随恢复默认说明：错误提示也不会永久占屏
+    if(notice.textContent === msg){ notice.textContent = HINT; notice.className = 'notice'; }
+  }, isErr ? 8000 : 4000);
 }
 function showErr(e){ snack('错误：' + e.message, true); }
-function pill(el, text, cls){ const p = document.getElementById(el); p.textContent = text; p.className = 'pill' + (cls ? ' ' + cls : ''); }
+// 只在内容变化时写 DOM：每 10 秒轮询不重排未变节点，也避免 pre 滚动位置被重置
+function setText(id, value){ const el = document.getElementById(id); if(el.textContent !== value) el.textContent = value; }
+function pill(el, text, cls){
+  const p = document.getElementById(el), cls2 = 'pill' + (cls ? ' ' + cls : '');
+  if(p.textContent !== text) p.textContent = text;
+  if(p.className !== cls2) p.className = cls2;
+}
 function unitLine(u){
   return `${u.active}/${u.sub}${u.pid ? ' pid=' + u.pid : ''}${u.pushing ? ' · 推流中' : ''}`;
 }
@@ -350,18 +378,22 @@ async function load(background = false){
     const s = await api('/api/status', undefined, background);
     const connection = document.getElementById('connectionState');
     connection.textContent = '控制台在线'; connection.classList.remove('offline');
-    document.getElementById('refreshState').textContent = '更新于 ' + new Date().toLocaleTimeString() + ' · 每 10 秒刷新';
+    setText('refreshState', '更新于 ' + new Date().toLocaleTimeString() + ' · 每 10 秒刷新');
     if(!document.getElementById('target').value && s.live.target) document.getElementById('target').value = s.live.target;
     const names = {live:'直播推流', replay:'文件轮播', idle:'空闲', conflict:'冲突！双推流'};
-    document.getElementById('mode').textContent = names[s.mode] || s.mode;
+    setText('mode', names[s.mode] || s.mode);
     document.getElementById('modeDot').className = 'mode-dot' + (s.mode === 'idle' ? '' : s.mode === 'conflict' ? ' warn' : ' on');
-    document.getElementById('liveState').textContent = unitLine(s.live);
-    document.getElementById('liveTarget').textContent = s.live.target ? '目标 @' + s.live.target : '';
-    document.getElementById('replayState').textContent = unitLine(s.replay);
-    document.getElementById('replayArgs').textContent = s.replay.args || '';
+    setText('liveState', unitLine(s.live));
+    setText('liveTarget', s.live.target ? '目标 @' + s.live.target : '');
+    setText('replayState', unitLine(s.replay));
+    setText('replayArgs', s.replay.args || '');
     pill('livePill', s.live.pushing ? '推流中' : s.live.active === 'active' ? '待命' : '停止', s.live.pushing ? 'live' : s.live.active === 'active' ? '' : 'bad');
     pill('replayPill', s.replay.pushing ? '推流中' : s.replay.active === 'active' ? '待命' : '停止', s.replay.pushing ? 'live' : s.replay.active === 'active' ? '' : 'bad');
-    document.getElementById('room').textContent = s.room.text || '(房间状态未知)';
+    setText('room', s.room.text || '(房间状态未知)');
+    pill('roomPill', s.room.ok ? '已登录' : '异常', s.room.ok ? 'live' : 'bad');
+    // 空行直接隐藏，状态卡不留无意义的空白
+    document.getElementById('liveTarget').hidden = !s.live.target;
+    document.getElementById('replayArgs').hidden = !s.replay.args;
   }catch(e){
     const connection = document.getElementById('connectionState');
     connection.textContent = '连接异常'; connection.classList.add('offline');
@@ -391,6 +423,7 @@ async function goMode(mode){
 async function goRoom(action){
   try{
     saveDraft();
+    if(action === 'stop' && !confirm('停播会同时停掉全部推流（直播推流 + 文件轮播），确定停播？')) return;
     const data = {action};
     if(action === 'start'){
       data.area = parseInt(document.getElementById('area').value, 10);
@@ -424,14 +457,29 @@ async function uploadCover(){
   }catch(e){ showErr(e); }
   finally{ setBusy(false); }
 }
-async function stopAll(){ try{ await api('/api/stop', {}); snack('已停止全部推流，房间开播状态保持原样'); await load(); }catch(e){ showErr(e); } }
-async function logs(){
+async function stopAll(){
+  if(!confirm('停止全部推流？直播推流和文件轮播都会停掉，B 站房间保持当前开播状态。')) return;
+  try{ await api('/api/stop', {}); snack('已停止全部推流，房间开播状态保持原样'); await load(); }catch(e){ showErr(e); }
+}
+async function logs(background = false){
   try{
     const w = document.getElementById('which').value;
-    const r = await api('/api/logs?which=' + w + '&tail=150');
+    const tail = document.getElementById('tailSel').value;
+    const r = await api('/api/logs?which=' + w + '&tail=' + tail, undefined, background);
     const out = document.getElementById('logOut');
-    out.hidden = false; out.textContent = r.logs || '(空)';
-  }catch(e){ showErr(e); }
+    // 贴底时自动跟随新日志；手动往上翻时不打断阅读
+    const stick = out.hidden || out.scrollTop + out.clientHeight >= out.scrollHeight - 40;
+    out.hidden = false;
+    out.textContent = r.logs || '(空)';
+    document.getElementById('btnCopyLog').hidden = false;
+    if(stick) out.scrollTop = out.scrollHeight;
+  }catch(e){ if(!background) showErr(e); }
+}
+async function copyLogs(){
+  try{
+    await navigator.clipboard.writeText(document.getElementById('logOut').textContent);
+    snack('日志已复制');
+  }catch(e){ showErr(new Error('复制失败：' + e.message)); }
 }
 const draftIds = ['target','paths','encode','area','title','newTitle'];
 function saveDraft(){
@@ -456,12 +504,36 @@ document.getElementById('coverFile').addEventListener('change', e => {
   preview.src = URL.createObjectURL(file); preview.classList.add('show');
   document.getElementById('coverHint').textContent = file.name;
 });
+// 回车直接提交：不用再伸手去点按钮
+const enterGo = (id, fn) => document.getElementById(id).addEventListener('keydown', e => {
+  if(e.key === 'Enter'){ e.preventDefault(); fn(); }
+});
+enterGo('target', () => goMode('live'));
+enterGo('area', () => goRoom('start'));
+enterGo('title', () => goRoom('start'));
+enterGo('newTitle', () => goRoom('update'));
+// 切换日志服务/行数时，若日志已打开则立即跟着刷新
+for(const id of ['which','tailSel']) document.getElementById(id).addEventListener('change', () => {
+  if(!document.getElementById('logOut').hidden) logs(true);
+});
+// 日志自动刷新：每 5 秒拉一次（后台标签页暂停）
+let logTimer = null;
+document.getElementById('autoLogs').addEventListener('change', e => {
+  clearInterval(logTimer); logTimer = null;
+  if(e.target.checked){
+    logs(true);
+    logTimer = setInterval(() => { if(!document.hidden) logs(true); }, 5000);
+  }
+});
 for(const label of document.querySelectorAll('.field label')){
   const input = label.parentElement.querySelector('input,textarea');
   if(input) label.htmlFor = input.id;
 }
 load();
 setInterval(() => load(true), 10000);
+// 切回标签页立即刷新一次，不等下一个 10 秒周期（后台期间轮询是暂停的）
+document.addEventListener('visibilitychange', () => { if(!document.hidden) load(true); });
+window.addEventListener('online', () => load(true));
 // PWA: offline shell; failure must never break the control UI.
 if('serviceWorker' in navigator){
   window.addEventListener('load', () => {
