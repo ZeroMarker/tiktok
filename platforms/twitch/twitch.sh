@@ -95,14 +95,18 @@ while true; do
     LOG_FILE="${LOG_DIR}/ffmpeg_twitch_${TWITCH_USERNAME}_$(date +%Y%m%d).log"
 
     # ffmpeg 推流核心命令（优化参数组合）
+    # 2026-09-28 修正：原先 `-vf "fps=30,setpts=N/30/TB"`。前半段 fps=30 正确，
+    # 但后半段 setpts 又用帧计数器 N 重建了一遍时间戳——解码中断触发滤镜图重新
+    # 初始化时 N 归零，视频时间轴当场倒回 0 而音频继续走，偏差永久累积
+    # （与 push.sh / replay.sh 同源缺陷）。fps 已经产出严格 30fps CFR，setpts
+    # 本就多余，直接去掉。
     ffmpeg -y \
         -headers "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"$'\r\n'"Referer: https://www.twitch.tv/"$'\r\n' \
         -rw_timeout 60000000 \
         -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 10 -reconnect_on_network_error 1 \
         -i "$STREAM_URL" \
         \
-        -vf "fps=30,setpts=N/30/TB" \
-        -r 30 \
+        -vf "fps=30" \
         \
         -c:v libx264 -preset veryfast -tune zerolatency \
         -b:v 2500k -maxrate 2800k -bufsize 5000k \
@@ -117,7 +121,7 @@ while true; do
         -flvflags no_duration_filesize \
         -max_muxing_queue_size 9999 \
         -bsf:v h264_mp4toannexb \
-        -fflags +genpts+igndts+discardcorrupt \
+        -fflags +discardcorrupt \
         "$BILI_RTMP" \
         2>> "$LOG_FILE" &
 

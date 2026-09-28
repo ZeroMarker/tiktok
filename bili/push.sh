@@ -74,25 +74,42 @@ while true; do
 
     LOG_FILE="${LOG_DIR}/ffmpeg_tiktok_${USERNAME}_$(date +%Y%m%d).log"
 
-    # 2. 核心推流逻辑 (修复版 v4)
+    # 2. 核心推流逻辑 (修复版 v5)
     # v4 修复点（2026-09-08 实测：TikTok 源 EOF 重连后 ffmpeg 假死 8 分钟不退不报错）：
     # - 输入加 -rw_timeout：源端断流 15s 直接报错退出，外层重抓（此前无限挂起）
     # - 加日志看门狗：ffmpeg 日志 60s 无输出即 kill 重推（此前只管退出不管卡死）
-    # - 输出 30fps（源 30fps）：v3 的 -r 25 造成约 20% 系统性丢帧；-g 60 保持 2s GOP
+    # - 输出 30fps：-g 60 保持 2s GOP
     # - 加 -pix_fmt yuv420p：源为 yuvj420p 全范围，转限范围防偏色（同 replay.sh）
     # - 加 -reconnect_at_eof/-reconnect_on_network_error：EOF/TLS 错误也自动重连
-    # 保留 v3：setpts 重建视频时间戳、aresample=async=1 重建音频时间戳、48000Hz、x264 重编码
+    #
+    # v5 修复点（2026-09-28 实测：B 站推流音画不同步）：
+    # 起因是 v3/v4 的 `setpts=N/FRAME_RATE/TB` + `-r 30`。它用滤镜帧计数器 N 和
+    # 容器*声明*的 r_frame_rate 重建视频时间戳，而不是源的真实时间轴：
+    #   1) 源是真 VFR。实测 240s 源流前 80s 为 25fps，之后掉到 15fps 到底，而
+    #      r_frame_rate/avg_frame_rate 仍写 25。setpts 按 25 打戳，把 240s 的
+    #      视频压进 4535/25=181.4s，直接丢掉 58.7s。
+    #   2) 更致命：t≈93.4s 处源流降帧率重起 GOP，滤镜图被重新初始化，N 归零，
+    #      setpts 的时间戳当场倒回 0，而音频继续往前走。实测 240s 源推完后
+    #      视频时间轴只到 93.4s、音频到 240.0s，差 146.6s 且视频在 93s 后停住。
+    # 音频侧 `aresample=async=1` 只对音频自己的时间戳做补偿，ffmpeg 没有跨流
+    # 同步机制，两条时间轴各走各的，偏差只增不减。
+    # 改为 `-vf fps=30`：按输入真实时间戳做 CFR 转换（丢/补帧到 30fps），
+    # 保留真实时长，滤镜图重初始化也不会回卷。同一条源复测漂移 +0.25s
+    # （≈源自身尾部误差，全程锁定）。
+    # 另：输入去掉 igndts（FLV 无 PTS，igndts 会让 B 帧 PTS=DTS 而打乱显示
+    # 顺序，fps 滤镜依赖真实时间戳）；输出加 first_pts=0 把音频起点也钉到 0
+    # （同 twitch.sh）。
     ffmpeg -re \
         -headers "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"$'\r\n'"Referer: https://www.tiktok.com/"$'\r\n' \
-        -fflags +genpts+igndts+discardcorrupt \
+        -fflags +discardcorrupt \
         -rw_timeout "$RW_TIMEOUT_US" \
         -analyzeduration 5M -probesize 5M \
         -reconnect 1 -reconnect_at_eof 1 -reconnect_streamed 1 -reconnect_on_network_error 1 -reconnect_delay_max 5 \
         -i "$STREAM_URL" \
-        -vf "setpts=N/FRAME_RATE/TB" -r 30 \
+        -vf "fps=30" \
         -c:v libx264 -preset ultrafast -tune zerolatency -b:v 2500k -maxrate 2500k -bufsize 5000k -g 60 -pix_fmt yuv420p \
         -c:a aac -b:a 128k -ar 48000 -ac 2 \
-        -af "aresample=async=1" \
+        -af "aresample=async=1:first_pts=0" \
         -f flv \
         -flvflags no_duration_filesize \
         -max_muxing_queue_size 9999 \

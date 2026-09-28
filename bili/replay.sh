@@ -100,16 +100,22 @@ printf '  %s\n' "${FILES[@]}"
 
 FFMPEG_ARGS=(-re -stream_loop -1 -f concat -safe 0 -i "$LIST_FILE")
 if [ "$ENCODE" -eq 1 ]; then
-    # 重编码：setpts/aresample 重建时间戳，跨分段（VFR/断流空洞）不断流；
+    # 重编码：fps 滤镜按*输入真实时间戳*做 CFR 转换，跨分段（VFR/断流空洞）不断流；
     # 参数沿用 push.sh（x264 veryfast + aac）
+    #
+    # 2026-09-28 修正：原先是 `setpts=N/FRAME_RATE/TB` + `-r 25`，与 push.sh 同一个
+    # 缺陷——用帧计数器 N 和容器声明帧率重建时间戳。concat 列表里各分段帧率/时长
+    # 不一致时，setpts 会把视频整体压缩或拉伸；分段边界或解码中断触发滤镜图重新
+    # 初始化时 N 归零，视频时间轴当场倒回 0 而音频继续走，偏差永久累积。
+    # `fps=25` 保留真实时长，边界处不回卷。
     FFMPEG_ARGS+=(
-        -fflags +genpts+igndts
-        -vf "setpts=N/FRAME_RATE/TB" -r 25
+        -fflags +discardcorrupt
+        -vf "fps=25"
         -c:v libx264 -preset veryfast -tune zerolatency
         -b:v 2500k -maxrate 2800k -bufsize 5000k
         -g 50 -keyint_min 25 -profile:v main -level 3.1 -pix_fmt yuv420p
         -c:a aac -b:a 128k -ar 44100 -ac 2
-        -af "aresample=async=1"
+        -af "aresample=async=1:first_pts=0"
     )
 else
     FFMPEG_ARGS+=(-c copy)
