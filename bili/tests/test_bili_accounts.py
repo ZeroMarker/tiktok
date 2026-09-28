@@ -24,7 +24,7 @@ def make_session(mid="42", expires=FUTURE, **extra):
     return {
         "cookies": f"SESSDATA=val%2C{expires}%2Cdeadbeef; bili_jct=csrf; DedeUserID={mid};",
         "mid": mid,
-        "room_id": "9337260",
+        "room_id": "1234567",
         "csrf_token": "csrf",
         **extra,
     }
@@ -162,7 +162,7 @@ class ListAccountsTest(SandboxTest):
         rows = {r["name"]: r for r in acc.list_accounts()}
         self.assertEqual(set(rows), {"live", "expired"})
         self.assertEqual(rows["live"]["mid"], "1")
-        self.assertEqual(rows["live"]["room_id"], "9337260")
+        self.assertEqual(rows["live"]["room_id"], "1234567")
         self.assertEqual(rows["live"]["title"], "旧房间")
         self.assertTrue(rows["live"]["has_push_code"])
         self.assertFalse(rows["live"]["expired"])
