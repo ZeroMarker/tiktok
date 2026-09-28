@@ -19,15 +19,18 @@ RTMP 地址与推流码，替代手填 BILIBILI_PUSH_URL / BILIBILI_PUSH_CODE：
     扫码登录 → 登录态检查 → 解析 room_id/csrf → 开播取 RTMP → 停播 / 改标题
 
 用法：
-    python3 live.py login [--session FILE]
+    python3 live.py accounts                     # 列出所有账号与登录态有效期
+    python3 live.py use <账号名>                  # 把 live.py 的默认账号改成它
+    python3 live.py login [--account NAME]       # 扫码登录（默认账号 live）
     python3 live.py status
     python3 live.py areas
     python3 live.py start --area 86 [--title TITLE] [--print-export]
     python3 live.py stop
     python3 live.py update --title TITLE
 
-会话默认存为 ``.bilibili_session.json``（权限 600，已 gitignore），
-只含 Cookie / room_id / csrf / mid / rtmp 信息。Cookie 与推流码不会写入日志。
+登录态按账号分档存放，默认 ``~/.config/bili/accounts/<账号名>.json``（见
+``accounts.py``）；本工具默认用 ``live`` 账号，``--account`` 可临时指定别的。
+只含 Cookie / room_id / csrf / mid / rtmp 信息，权限 600；Cookie 与推流码不会写入日志。
 """
 
 from __future__ import annotations
@@ -45,6 +48,9 @@ import urllib.request
 from http.client import HTTPResponse
 from pathlib import Path
 from urllib.error import HTTPError
+
+import accounts as bili_accounts
+
 APP_KEY = "aae92bc66f3edfab"  # 来源：上游 src/bilibili_api.hpp（Bilibili 开放平台密钥，非本项目生成）
 APP_SECRET = "af125a0d5279fd576c1b4418a3e8276d"  # 同上
 
@@ -69,7 +75,12 @@ DEFAULT_HEADERS = {
     "User-Agent": UA,
 }
 TIMEOUT = 15
-DEFAULT_SESSION = Path(__file__).resolve().parent / ".bilibili_session.json"
+#: 迁移前的单账号会话文件。仅在 accounts/live.json 还不存在时作为回落，
+#: 首次运行任意子命令会自动迁移并把原文件改名成 .bak。
+LEGACY_SESSION = Path(__file__).resolve().parent / ".bilibili_session.json"
+DEFAULT_SESSION = LEGACY_SESSION  # 向后兼容：--session 显式路径仍按原义使用
+#: 本工具（开播/推流）的默认账号名。
+TOOL = "live"
 
 QR_GENERATE_URL = "https://passport.bilibili.com/x/passport-login/web/qrcode/generate"
 QR_POLL_URL = "https://passport.bilibili.com/x/passport-login/web/qrcode/poll"
@@ -404,13 +415,21 @@ def cmd_login(args: argparse.Namespace) -> int:
 
 def cmd_status(args: argparse.Namespace) -> int:
     session = load_session(args.session)
-    if not session.get("cookies"):
-        print("未登录：请先执行 `python3 live.py login`")
+    cookies = session.get("cookies", "")
+    name = args.account or bili_accounts.tool_default_account(TOOL)
+    if not cookies:
+        if not args.session.exists():
+            print(f"账号 {name} 尚未登录：请先执行 `python3 live.py login --account {name}`")
+        else:
+            print(f"账号 {name} 的会话文件没有 Cookie（{args.session}），请重新登录")
         return 1
-    ok, mid = check_login(session["cookies"])
+    ok, mid = check_login(cookies)
     print(f"登录状态：{'已登录' if ok else '未登录'}", end="")
     if ok:
-        print(f" mid={mid} room_id={session.get('room_id', '')}", end="")
+        print(f" 账号={name} mid={mid} room_id={session.get('room_id', '')}", end="")
+    expiry = bili_accounts.session_expiry(session)
+    if expiry:
+        print(f" SESSDATA 到期={expiry:%Y-%m-%d}", end="")
     print()
     return 0 if ok else 1
 
@@ -420,7 +439,8 @@ def cmd_is_live(args: argparse.Namespace) -> int:
     session = load_session(args.session)
     room_id = session.get("room_id") or ""
     if not room_id:
-        print("未登录或无房间号：请先执行 `python3 live.py login`")
+        name = args.account or bili_accounts.tool_default_account(TOOL)
+        print(f"账号 {name} 无房间号：请先执行 `python3 live.py login --account {name}`")
         return 1
     payload, _ = _request(f"{ROOM_INFO_URL}?room_id={urllib.parse.quote(str(room_id))}")
     data = payload.get("data") or {}
@@ -441,7 +461,8 @@ def _require_authed(args: argparse.Namespace) -> tuple[dict, str, str]:
     session = load_session(args.session)
     cookies = session.get("cookies", "")
     if not cookies:
-        raise BiliError("未登录：请先执行 `python3 live.py login`")
+        name = args.account or bili_accounts.tool_default_account(TOOL)
+        raise BiliError(f"账号 {name} 未登录：请先执行 `python3 live.py login --account {name}`")
     room_id = session.get("room_id") or ""
     csrf = session.get("csrf_token") or ""
     if not room_id or not csrf:  # 兼容老会话：缺字段时重新推导
@@ -501,10 +522,58 @@ def cmd_cover(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_accounts(_args: argparse.Namespace) -> int:
+    """列出所有已登录账号，并标出各工具当前默认用哪个。"""
+    rows = bili_accounts.list_accounts()
+    if not rows:
+        print(f"还没有任何账号（目录 {bili_accounts.accounts_dir()} 为空）")
+        print("用 `python3 live.py login --account <账号名>` 扫码添加")
+        return 1
+    defaults = bili_accounts.read_defaults()
+    header = f"{'账号':<12} {'mid':<12} {'room_id':<10} {'SESSDATA 到期':<20} 备注"
+    print(header)
+    print("-" * len(header))
+    for row in rows:
+        marks = [tool for tool in sorted(set(defaults) | {TOOL}) if defaults.get(tool) == row["name"]]
+        if not marks and row["name"] == bili_accounts.tool_default_account(TOOL):
+            marks = [TOOL]
+        note = []
+        if marks:
+            note.append("默认用于 " + "/".join(marks))
+        if row["title"]:
+            note.append(f"上次开播「{row['title']}」")
+        if row["has_push_code"]:
+            note.append("有推流码")
+        if row["expired"]:
+            note.append("**已过期**")
+        expiry = row["expires"].strftime("%Y-%m-%d") if row["expires"] else "解析失败"
+        print(f"{row['name']:<12} {row['mid'] or '-':<12} {row['room_id'] or '-':<10} {expiry:<20} {'；'.join(note)}")
+    print()
+    print(f"档案目录：{bili_accounts.accounts_dir()}")
+    print("切换：python3 live.py use <账号名>（改 live.py 默认）、"
+          "python3 upload.py use <账号名>（改投稿默认）；"
+          "临时用别的加 --account <账号名>")
+    return 0
+
+
+def cmd_use(args: argparse.Namespace) -> int:
+    target = bili_accounts.set_tool_default_account(TOOL, args.name)
+    print(f"live.py（开播/推流）默认账号已切到 {args.name}（{target}）")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="live.py", description="Bilibili 开播工具（移植自 obs-bilibili-stream）")
-    parser.add_argument("--session", type=Path, default=DEFAULT_SESSION, help="会话文件路径")
+    parser.add_argument("--session", type=Path, default=None, help="会话文件路径（覆盖账号选择）")
+    parser.add_argument("--account", default=None, help=f"使用哪个账号（默认：{TOOL}）")
     sub = parser.add_subparsers(dest="cmd", required=True)
+
+    accounts = sub.add_parser("accounts", help="列出所有账号与登录态有效期")
+    accounts.set_defaults(func=cmd_accounts)
+
+    use = sub.add_parser("use", help="把本工具的默认账号切到指定账号")
+    use.add_argument("name", help="账号名")
+    use.set_defaults(func=cmd_use)
 
     login = sub.add_parser("login", help="扫码登录并保存会话")
     login.add_argument("--timeout", type=int, default=180, help="扫码等待总时长（秒）")
@@ -540,7 +609,14 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        # 首次运行自动把老的单账号会话迁到 accounts/live.json（幂等）
+        if note := bili_accounts.migrate_legacy(LEGACY_SESSION):
+            print(note, file=sys.stderr)
+        args.session = bili_accounts.resolve_session(args.session, args.account, TOOL, LEGACY_SESSION)
         return args.func(args)
+    except bili_accounts.AccountError as exc:
+        print(f"错误：{exc}", file=sys.stderr)
+        return 1
     except BiliError as exc:
         print(f"错误：{exc}", file=sys.stderr)
         return 1

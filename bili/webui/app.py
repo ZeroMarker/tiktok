@@ -19,6 +19,7 @@ import os
 import re
 import subprocess
 import shlex
+import sys
 import tempfile
 import threading
 import time
@@ -29,6 +30,9 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+import accounts as bili_accounts  # noqa: E402  多账号档案解析（与 live.py 共用同一份逻辑）
+
 WEBUI_DIR = Path(__file__).resolve().parent
 INDEX_FILE = WEBUI_DIR / "index.html"
 MANIFEST_FILE = WEBUI_DIR / "manifest.webmanifest"
@@ -40,6 +44,11 @@ CONFIG_DIR = Path.home() / ".config" / "bili"
 LIVE_ENV = CONFIG_DIR / "live.env"
 REPLAY_ENV = CONFIG_DIR / "replay.env"
 SESSION_FILE = PROJECT_ROOT / ".bilibili_session.json"
+
+
+def session_file() -> Path:
+    """推流用的登录态：解析 live.py 的默认账号（多账号后不再固定单一文件）。"""
+    return bili_accounts.resolve_session(None, None, "live", SESSION_FILE)
 PUSH_ENV = CONFIG_DIR / "push.env"
 CONTROL_LOCK = threading.Lock()
 _STATIC_CACHE: dict[str, tuple[float, bytes]] = {}
@@ -238,7 +247,7 @@ def invalidate_room() -> None:
 def sync_push_env() -> None:
     """把最新推流码写入独立的私有配置，不修改用户 shell 配置。"""
     try:
-        data = json.loads(SESSION_FILE.read_text())
+        data = json.loads(session_file().read_text())
         url, code = data["rtmp_addr"], data["rtmp_code"]
         if not all(isinstance(v, str) and v and "\n" not in v for v in (url, code)):
             raise ValueError("推流配置为空或格式不正确")
@@ -257,7 +266,7 @@ def ensure_room_live() -> None:
     if r.returncode == 0:
         return
     try:
-        session = json.loads(SESSION_FILE.read_text())
+        session = json.loads(session_file().read_text())
         area, title = int(session.get("area_id", 0)), str(session.get("title", "")).strip()
     except (OSError, ValueError, TypeError) as exc:
         raise RuntimeError(f"读取上次开播记录失败: {exc}") from exc

@@ -2,6 +2,7 @@
 import http.client
 import importlib.util
 import json
+import os
 import subprocess
 import tempfile
 import threading
@@ -23,7 +24,10 @@ class WebUITest(unittest.TestCase):
             code = "test'\"$NOT_EXPANDED`false`&value"
             session.write_text(json.dumps({'rtmp_addr': 'rtmp://example/', 'rtmp_code': code}))
             output = config / 'push.env'
-            with mock.patch.object(app, 'CONFIG_DIR', config), mock.patch.object(app, 'PUSH_ENV', output), mock.patch.object(app, 'SESSION_FILE', session):
+            # 账号档案目录一并隔离：否则 session_file() 会回落到真实的
+            # ~/.config/bili/accounts/live.json，让测试读到线上凭证
+            with mock.patch.dict(os.environ, {'BILI_ACCOUNTS_DIR': str(root / 'no-accounts')}), \
+                    mock.patch.object(app, 'CONFIG_DIR', config), mock.patch.object(app, 'PUSH_ENV', output), mock.patch.object(app, 'SESSION_FILE', session):
                 app.sync_push_env()
                 app.sync_push_env()
             self.assertEqual(output.stat().st_mode & 0o777, 0o600)
@@ -31,6 +35,23 @@ class WebUITest(unittest.TestCase):
             result = subprocess.run(['bash', '-c', 'source "$1"; printf "%s" "$BILIBILI_PUSH_CODE"', 'test', str(output)], capture_output=True, text=True, check=True)
             self.assertEqual(result.stdout, code)
             self.assertEqual(list(config.iterdir()), [output])
+
+    def test_session_file_follows_live_account_profile(self):
+        """多账号后 WebUI 必须读 live 账号档案，而不是写死的老路径。"""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            accounts = root / 'accounts'
+            accounts.mkdir()
+            live = accounts / 'live.json'
+            live.write_text(json.dumps({'rtmp_addr': 'rtmp://live/', 'rtmp_code': 'live-code'}))
+            (accounts / 'upload.json').write_text(json.dumps({'rtmp_addr': 'rtmp://up/', 'rtmp_code': 'upload-code'}))
+            (accounts / 'defaults.json').write_text(json.dumps({'live': 'live', 'upload': 'upload'}))
+            with mock.patch.dict(os.environ, {'BILI_ACCOUNTS_DIR': str(accounts)}), \
+                    mock.patch.object(app, 'SESSION_FILE', root / 'missing-legacy.json'):
+                self.assertEqual(app.session_file(), live)
+                # 切走 live 默认账号后 WebUI 应跟随
+                (accounts / 'defaults.json').write_text(json.dumps({'live': 'upload'}))
+                self.assertEqual(app.session_file(), accounts / 'upload.json')
 
     def test_concurrent_controls_rejected_and_lock_released(self):
         entered, release = threading.Event(), threading.Event()
