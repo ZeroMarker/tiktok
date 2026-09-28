@@ -79,6 +79,42 @@ yt-dlp --no-warnings -f best --get-url "https://play.sooplive.co.kr/<频道id>"
 - `ffmpeg` 日志里是否有编码、网络或 RTMP 鉴权错误。
 - 推流码是否过期或被重置。
 
+## Bilibili 推流音画不同步
+
+症状：B 站直播间里声音和画面对不上，且**偏差随时间不断增大**，不会自愈。
+
+原因（2026-09-28 修复）：推流命令曾用 `setpts=N/FRAME_RATE/TB` 重建视频时间戳。
+这个表达式有两个问题：
+
+1. 它用**滤镜的帧计数器 `N`** 和**容器里声明的 `r_frame_rate`**，而不是源流的真实
+   时间轴。TikTok 源是真 VFR——实测一条流前 80 s 是 25 fps，之后掉到 15 fps 到底，
+   而 `r_frame_rate` 始终写 25。`setpts` 按 25 打戳就把 240 s 的视频压进 181 s。
+2. 源流降帧率重起 GOP、或解码中断时，ffmpeg 会重新初始化滤镜图，`N` 归零，
+   `setpts` 算出的时间戳**当场倒回 0**，而音频继续往前走。偏差从此永久存在。
+
+音频侧的 `aresample` 只对音频自己的时间戳做补偿，ffmpeg 没有跨流同步机制，
+所以两条时间轴一旦分开就只会越差越远。
+
+修复：改用 `-vf fps=30`（按输入真实时间戳做 CFR 转换，保留真实时长，滤镜图
+重初始化也不会回卷），音频侧补 `first_pts=0` 把起点钉到 0。`bili/push.sh`、
+`bili/replay.sh`、`platforms/twitch/twitch.sh` 均已修正。
+
+自查方法——比较推流产物里两条流的时间轴终点，差值就是当前音画偏差：
+
+```bash
+ffprobe -v error -select_streams v -show_entries packet=pts_time -of csv=p=0 out.flv | tail -1
+ffprobe -v error -select_streams a -show_entries packet=pts_time -of csv=p=0 out.flv | tail -1
+```
+
+两个数应当只差一帧以内（30 fps 约 0.03 s）。若视频终点远早于音频终点，就是
+时间轴被压缩了。若要长期监控偏差是否累积，在多个时间点比较两者的进度比例即可。
+
+注意：ffmpeg progress 里的 `frame=` 与 `time*帧率` 会**恒定差几帧**（约 0.2~0.3 s），
+这是计数口径差异、不是音画偏差。判据是「差值是否随时间增长」，不要看它是否等于 0。
+
+完整定位过程与离线对照实验见
+[docs/archive/bili-push-av-sync.md](archive/bili-push-av-sync.md)。
+
 ## 录制文件没有生成
 
 检查项：

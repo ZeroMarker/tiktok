@@ -90,6 +90,7 @@ WebUI 同时提供 PWA 支持：可安装到桌面/主屏幕，断网时仍可�
 - [Bilibili 推流与投稿](bili/README.md)
 - [Bilibili 投稿接口细节](bili/docs/bilibili-upload-api.md)
 - [归档：TikTok 录制历史排障记录](docs/archive/tiktok-live-recording.md)
+- [归档：B 站推流音画不同步的定位与修复](docs/archive/bili-push-av-sync.md)
 - [封存：根目录散脚本](archive/README.md)
 
 ## 开发与测试
