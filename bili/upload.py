@@ -13,7 +13,7 @@
 ``push`` 只把文件传上 B 站存储并落一份 state JSON，**不建稿件**；
 ``post`` 读 state 提交稿件。中断后可用同一份 state 续投已传好的文件。
 
-``--session`` / ``--state`` 是全局参数，须写在子命令之前。
+``--session`` / ``--state`` / ``--account`` 写在子命令前后都可以。
 
 登录态按账号分档存放（见 ``accounts.py``）：本工具默认用 ``upload`` 账号，
 ``live.py`` 默认用 ``live`` 账号，两者互不干扰；``--account NAME`` 可临时跨用。
@@ -71,6 +71,7 @@ MAX_TITLE = 80
 STATE_VERSION = 1
 #: 本工具（稿件投稿）的默认账号名，与 live.py 的 ``live`` 分开。
 TOOL = "upload"
+DEFAULT_STATE = Path("upload-state.json")
 
 
 def _now_ms() -> int:
@@ -574,30 +575,52 @@ def cmd_post(args: argparse.Namespace) -> int:
     return 0
 
 
+def _add_common(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
+    """把 ``--session`` / ``--account`` / ``--state`` 同时挂到主解析器与每个子命令。
+
+    默认值用 ``SUPPRESS``：未显式给出时属性不存在，否则子解析器的默认值会
+    把写在子命令之前的值覆盖掉。两种位置因此都能用：
+    ``upload.py --state s.json push`` 与 ``upload.py push --state s.json``。
+    """
+    parser.add_argument(
+        "--session", type=Path, default=argparse.SUPPRESS, help="会话文件路径（覆盖账号选择）"
+    )
+    parser.add_argument("--account", default=argparse.SUPPRESS, help=f"使用哪个账号（默认：{TOOL}）")
+    parser.add_argument(
+        "--state",
+        type=Path,
+        default=argparse.SUPPRESS,
+        help="上传凭证 state 文件（默认 upload-state.json）",
+    )
+    return parser
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="upload.py", description="Bilibili 稿件投稿（Web 端接口）")
-    parser.add_argument("--session", type=Path, default=None, help="会话文件路径（覆盖账号选择）")
-    parser.add_argument("--account", default=None, help=f"使用哪个账号（默认：{TOOL}）")
-    parser.add_argument("--state", type=Path, default=Path("upload-state.json"), help="上传凭证 state 文件")
+    parser = _add_common(
+        argparse.ArgumentParser(prog="upload.py", description="Bilibili 稿件投稿（Web 端接口）")
+    )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    accounts = sub.add_parser("accounts", help="列出所有账号与登录态有效期")
+    def add(name: str, help_: str) -> argparse.ArgumentParser:
+        return _add_common(sub.add_parser(name, help=help_))
+
+    accounts = add("accounts", "列出所有账号与登录态有效期")
     accounts.set_defaults(func=cmd_accounts)
 
-    use = sub.add_parser("use", help="把本工具的默认账号切到指定账号")
+    use = add("use", "把本工具的默认账号切到指定账号")
     use.add_argument("name", help="账号名")
     use.set_defaults(func=cmd_use)
 
-    status = sub.add_parser("status", help="检查登录状态")
+    status = add("status", "检查登录状态")
     status.set_defaults(func=cmd_status)
 
-    push = sub.add_parser("push", help="只上传文件，不建稿件")
+    push = add("push", "只上传文件，不建稿件")
     push.add_argument("inputs", nargs="+", help="mp4 文件或目录")
     push.add_argument("--limit", type=int, default=3, help="单文件分片并发数")
     push.add_argument("--reupload", action="store_true", help="忽略 state 缓存，强制重传")
     push.set_defaults(func=cmd_push)
 
-    post = sub.add_parser("post", help="提交稿件（可先传文件，也可只读 state）")
+    post = add("post", "提交稿件（可先传文件，也可只读 state）")
     post.add_argument("inputs", nargs="*", help="mp4 文件或目录；省略则只读 state")
     post.add_argument("--title", required=True, help="稿件标题")
     post.add_argument("--tid", type=int, required=True, help="分区 ID")
@@ -619,6 +642,10 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         # 与 live.py 共用同一套账号档案；此处只做自身默认账号的解析（迁移交给 live.py）
+        # SUPPRESS：只有用户显式给出（前置或后置任一位置）时属性才存在
+        for name, fallback in (("session", None), ("account", None), ("state", DEFAULT_STATE)):
+            if not hasattr(args, name):
+                setattr(args, name, fallback)
         args.session = bili_accounts.resolve_session(args.session, args.account, TOOL, LEGACY_SESSION)
         return args.func(args)
     except bili_accounts.AccountError as exc:

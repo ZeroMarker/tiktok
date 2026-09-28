@@ -562,45 +562,64 @@ def cmd_use(args: argparse.Namespace) -> int:
     return 0
 
 
+def _add_common(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
+    """把 ``--session`` / ``--account`` 同时挂到主解析器与每个子命令。
+
+    默认值用 ``SUPPRESS``：未显式给出时属性不存在，否则子解析器的默认值会
+    把写在子命令之前的值覆盖成 None。两种位置因此都能用：
+    ``live.py --account X login`` 与 ``live.py login --account X``。
+    """
+    parser.add_argument(
+        "--session", type=Path, default=argparse.SUPPRESS, help="会话文件路径（覆盖账号选择）"
+    )
+    parser.add_argument("--account", default=argparse.SUPPRESS, help=f"使用哪个账号（默认：{TOOL}）")
+    return parser
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="live.py", description="Bilibili 开播工具（移植自 obs-bilibili-stream）")
-    parser.add_argument("--session", type=Path, default=None, help="会话文件路径（覆盖账号选择）")
-    parser.add_argument("--account", default=None, help=f"使用哪个账号（默认：{TOOL}）")
+    parser = _add_common(
+        argparse.ArgumentParser(
+            prog="live.py", description="Bilibili 开播工具（移植自 obs-bilibili-stream）"
+        )
+    )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    accounts = sub.add_parser("accounts", help="列出所有账号与登录态有效期")
+    def add(name: str, help_: str) -> argparse.ArgumentParser:
+        return _add_common(sub.add_parser(name, help=help_))
+
+    accounts = add("accounts", "列出所有账号与登录态有效期")
     accounts.set_defaults(func=cmd_accounts)
 
-    use = sub.add_parser("use", help="把本工具的默认账号切到指定账号")
+    use = add("use", "把本工具的默认账号切到指定账号")
     use.add_argument("name", help="账号名")
     use.set_defaults(func=cmd_use)
 
-    login = sub.add_parser("login", help="扫码登录并保存会话")
+    login = add("login", "扫码登录并保存会话")
     login.add_argument("--timeout", type=int, default=180, help="扫码等待总时长（秒）")
     login.add_argument("--poll-interval", type=int, default=3, help="轮询间隔（秒）")
     login.set_defaults(func=cmd_login)
 
-    status = sub.add_parser("status", help="检查登录状态")
+    status = add("status", "检查登录状态")
     status.set_defaults(func=cmd_status)
 
-    areas = sub.add_parser("areas", help="列出直播分区（含子分区 ID）")
+    areas = add("areas", "列出直播分区（含子分区 ID）")
     areas.set_defaults(func=cmd_areas)
-    is_live = sub.add_parser("is-live", help="房间是否正在直播（是返回 0）")
+    is_live = add("is-live", "房间是否正在直播（是返回 0）")
     is_live.set_defaults(func=cmd_is_live)
 
-    start = sub.add_parser("start", help="开播并获取 RTMP 地址/推流码")
+    start = add("start", "开播并获取 RTMP 地址/推流码")
     start.add_argument("--area", type=int, required=True, help="子分区 ID（见 areas 输出）")
     start.add_argument("--title", default="", help="直播间标题（可选，开播后更新）")
     start.add_argument("--print-export", action="store_true", help="打印 BILIBILI_PUSH_URL 导出语句")
     start.set_defaults(func=cmd_start)
 
-    stop = sub.add_parser("stop", help="关闭 Bilibili 直播间")
+    stop = add("stop", "关闭 Bilibili 直播间")
     stop.set_defaults(func=cmd_stop)
 
-    update = sub.add_parser("update", help="更新直播间标题")
+    update = add("update", "更新直播间标题")
     update.add_argument("--title", required=True, help="直播间标题")
     update.set_defaults(func=cmd_update)
-    cover = sub.add_parser("cover", help="上传并设置直播间封面")
+    cover = add("cover", "上传并设置直播间封面")
     cover.add_argument("--file", type=Path, required=True, help="JPG/PNG/WEBP 封面文件")
     cover.set_defaults(func=cmd_cover)
     return parser
@@ -612,6 +631,10 @@ def main(argv: list[str] | None = None) -> int:
         # 首次运行自动把老的单账号会话迁到 accounts/live.json（幂等）
         if note := bili_accounts.migrate_legacy(LEGACY_SESSION):
             print(note, file=sys.stderr)
+        # SUPPRESS：只有用户显式给出（前置或后置任一位置）时属性才存在
+        for name in ("session", "account"):
+            if not hasattr(args, name):
+                setattr(args, name, None)
         args.session = bili_accounts.resolve_session(args.session, args.account, TOOL, LEGACY_SESSION)
         return args.func(args)
     except bili_accounts.AccountError as exc:

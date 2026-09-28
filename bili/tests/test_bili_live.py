@@ -157,5 +157,32 @@ class QrRenderTest(unittest.TestCase):
         self.assertIn("██", first)
 
 
+class ParserTest(unittest.TestCase):
+    # 曾经的坑：--account/--session 只能写在子命令之前，写在后面直接报
+    # "unrecognized arguments"。文档里给的却是错误用法。现在两种位置都支持。
+
+    def test_account_accepted_before_and_after_subcommand(self):
+        for argv in (["--account", "upload", "login"], ["login", "--account", "upload"]):
+            args = bili_live.build_parser().parse_args(argv)
+            self.assertEqual(args.account, "upload", argv)
+            self.assertEqual(args.cmd, "login", argv)
+
+    def test_omitted_common_args_leave_no_attribute(self):
+        # SUPPRESS 语义：未给出时属性不存在，由 main() 补默认值
+        args = bili_live.build_parser().parse_args(["status"])
+        self.assertFalse(hasattr(args, "account"))
+        self.assertFalse(hasattr(args, "session"))
+
+    def test_session_before_subcommand_not_clobbered(self):
+        args = bili_live.build_parser().parse_args(["--session", "/tmp/a.json", "status"])
+        self.assertEqual(args.session, Path("/tmp/a.json"))
+
+    def test_every_subcommand_accepts_common_args(self):
+        for argv in (["accounts"], ["use", "x"], ["login"], ["status"], ["areas"],
+                     ["is-live"], ["stop"]):
+            args = bili_live.build_parser().parse_args(argv + ["--account", "live"])
+            self.assertEqual(args.account, "live", argv)
+
+
 if __name__ == "__main__":
     unittest.main()

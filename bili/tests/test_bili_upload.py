@@ -278,9 +278,33 @@ class SubmitTest(unittest.TestCase):
 
 
 class CliTest(unittest.TestCase):
-    def test_global_state_arg_must_precede_subcommand(self):
-        with self.assertRaises(SystemExit):
-            bili_upload.build_parser().parse_args(["push", "a.mp4", "--state", "s.json"])
+    # 曾经的坑：--state/--account 只能写在子命令之前，写在后面直接报
+    # "unrecognized arguments"。那是 argparse 的全局参数位置限制，不是用户
+    # 的问题——文档里给出的却是错误用法。现在两种位置都支持。
+
+    def test_state_accepted_before_and_after_subcommand(self):
+        for argv in (
+            ["--state", "s.json", "push", "a.mp4"],
+            ["push", "a.mp4", "--state", "s.json"],
+        ):
+            args = bili_upload.build_parser().parse_args(argv)
+            self.assertEqual(args.state, Path("s.json"), argv)
+            self.assertEqual(args.inputs, ["a.mp4"], argv)
+
+    def test_account_accepted_before_and_after_subcommand(self):
+        for argv in (["--account", "live", "status"], ["status", "--account", "live"]):
+            args = bili_upload.build_parser().parse_args(argv)
+            self.assertEqual(args.account, "live", argv)
+
+    def test_omitted_common_args_leave_no_attribute(self):
+        # SUPPRESS 语义：未给出时属性不存在，由 main() 补默认值
+        args = bili_upload.build_parser().parse_args(["status"])
+        self.assertFalse(hasattr(args, "state"))
+        self.assertFalse(hasattr(args, "account"))
+
+    def test_session_before_subcommand_not_clobbered(self):
+        args = bili_upload.build_parser().parse_args(["--session", "/tmp/a.json", "status"])
+        self.assertEqual(args.session, Path("/tmp/a.json"))
 
     def test_post_defaults_to_reprint(self):
         args = bili_upload.build_parser().parse_args(["post", "--title", "T", "--tid", "160"])

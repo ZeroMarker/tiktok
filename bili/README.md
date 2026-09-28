@@ -144,7 +144,7 @@ bash watch.sh <tiktok_username> [replay.sh 参数...]   # 轮播值守
 ## 稿件投稿（upload.py）
 
 把录制文件投成 B 站**普通稿件**（分区投稿，与直播转推是两条路）。复用 `live.py login`
-的登录态。`--session` / `--state` 是全局参数，**须写在子命令之前**：
+的登录态。`--session` / `--state` / `--account` 写在子命令前后都可以：
 
 ```bash
 python3 upload.py status                                     # 检查登录态（默认 upload 账号）
@@ -152,7 +152,7 @@ python3 upload.py --state s.json push <文件|目录>            # 只传文件�
 python3 upload.py --state s.json post --title "标题" --tid 21 \
     --tag "a,b" --desc "简介" --source "来源" --part-title-prefix "标题"
 python3 upload.py post <文件|目录> --title "标题" --tid 21   # 一条龙（上传 + 提交）
-python3 upload.py --account live post ...                    # 临时改用别的账号投稿
+python3 upload.py post ... --account live                   # 临时改用别的账号投稿
 ```
 
 登录态默认用 `upload` 账号（与推流的 `live` 账号分开），见上文「登录态来源」。
