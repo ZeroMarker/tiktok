@@ -95,26 +95,17 @@ sudo install -d -m 755 /data/live
 
 不要把 Cookie 或 Bilibili 推流码提交到仓库。
 
-## 抖音子模块
+## Cookie 文件
 
-抖音录制依赖 `douyin/DouyinLiveRecorder`：
+Cookie 文件使用 Netscape 格式，从本机已登录的浏览器导出后存到项目根
+（`cookies.txt` / `soop-cookies.txt`，均已被 `.gitignore` 排除）：
 
-```bash
-git submodule update --init --recursive
+```text
+# 项目根 cookies.txt（TikTok）或 soop-cookies.txt（SOOP）
 ```
 
-如果 Python 无法导入依赖，先确认该目录存在并且子模块已拉取完成。
-抖音录制入口也会在启动时检查子模块，并提示上述初始化命令。
-
-## 抖音 Cookie
-
-Cookie 文件使用 Netscape 格式。可以用项目脚本从本机已登录的浏览器导出：
-
-```bash
-bash douyin/import_cookies.sh chrome ./douyin-cookies.txt
-```
-
-导出文件会自动设置为仅当前用户可读写，并已被 `.gitignore` 排除。不要提交、分享或写入日志。
+文件应仅当前用户可读写（`chmod 600`）。不要提交、分享或写入日志。
+各平台 `record.sh` 检测到默认文件存在时会自动附带；也可用 `--cookies FILE` 显式指定。
 
 ## SOOP 凭据
 
@@ -124,7 +115,7 @@ SOOP（Sooplive）的会员订阅直播需要登录才能取流。引擎会自�
   `machine afreecatv login <SOOP用户ID> password <SOOP密码>`，引擎自动加 `--netrc`。
 - **环境变量**：`SOOP_USERNAME` / `SOOP_PASSWORD`，引擎自动带 `--username`/`--password`。
 - **Cookie**：登录后的 Netscape 会话 Cookie。存为项目根 `soop-cookies.txt`
-  （已 gitignore）时命令行 `soop/record.sh` 与 WebUI 任务都会自动附带 `--cookies`；
-  也可显式 `bash soop/record.sh <id> --cookies file`。
+  （已 gitignore）时命令行 `platforms/soop/record.sh` 与 WebUI 任务都会自动附带 `--cookies`；
+  也可显式 `bash platforms/soop/record.sh <id> --cookies file`。
 
 凭据不要提交仓库、写入日志或日志系统。会员直播通常还需对主播订阅/付费才能观看。

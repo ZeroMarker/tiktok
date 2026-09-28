@@ -217,7 +217,6 @@ logs/
 recordings/
 state/
 cookies.txt
-douyin-cookies*.txt
 soop-cookies*.txt
 node_modules/
 bili/.bilibili_session.json

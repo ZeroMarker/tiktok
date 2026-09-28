@@ -42,7 +42,7 @@ import { askDeleteRecording } from "../features/recordings/recordingActions.js";
 const platformFilter = ref("all");
 const fileQuery = ref("");
 
-const platforms = ["tiktok", "douyin", "soop", "kick", "youtube", "chzzk"];
+const platforms = ["tiktok", "soop", "kick", "youtube", "chzzk"];
 const countText = computed(() => (visibleFiles.value.length ? `${visibleTotal.value} 个` : "无文件"));
 
 // 平台过滤在客户端按顶层目录（recordings/<platform>/…）判定：

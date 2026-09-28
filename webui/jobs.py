@@ -17,7 +17,6 @@ import json
 import hashlib
 import re
 import threading
-from pathlib import Path
 
 from webui import config, recorder
 
@@ -68,9 +67,6 @@ def _validate_spec(spec: dict[str, object]) -> None:
         raise ValueError("频道或直播 URL 无效")
     if str(spec.get("quality", "best")).lower() not in config.QUALITY_CHOICES:
         raise ValueError("不支持的录制画质")
-    cookie_file = str(spec.get("cookie_file", "")).strip()
-    if platform == "douyin" and cookie_file and not Path(cookie_file).expanduser().is_file():
-        raise ValueError("Cookie 文件不存在")
 
 
 def list_jobs() -> list[dict[str, object]]:

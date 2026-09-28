@@ -7,7 +7,7 @@
 Linux / macOS：
 
 ```bash
-bash tk/record.sh <tiktok_username>
+bash platforms/tiktok/record.sh <tiktok_username>
 ```
 
 这是日常录制的正式入口，会持续轮询直播源（yt-dlp → 多方法兜底），断流后自动重新获取。
@@ -17,68 +17,52 @@ bash tk/record.sh <tiktok_username>
 TikTok 对部分主播（登录限流、风控、或直播需要登录才能看）在无登录 Cookie 时不会返回
 直播流——yt-dlp / Web API 都会误报“未开播”，但浏览器里明明在播。
 
-解决办法是提供 Netscape 格式的登录 Cookie，`tk/record.sh` 会自动携带：
+解决办法是提供 Netscape 格式的登录 Cookie，`platforms/tiktok/record.sh` 会自动携带：
 
 ```bash
 # 将浏览器导出的 Cookie 存为项目根 cookies.txt（已 .gitignore 忽略，勿提交）
 cp ~/secrets/tiktok-cookies.txt ./cookies.txt
 
 # 直接复用项目入口即可，record.sh 自动附带 Cookie
-bash tk/record.sh <tiktok_username>
+bash platforms/tiktok/record.sh <tiktok_username>
 ```
 
 也可显式指定其他 Cookie 文件：
 
 ```bash
-bash tk/record.sh <tiktok_username> --cookies /secure/tiktok-cookies.txt
+bash platforms/tiktok/record.sh <tiktok_username> --cookies /secure/tiktok-cookies.txt
 ```
 
 > 提示：确保录制服务以能访问 `~/.local`（yt-dlp/curl_cffi）的用户运行；
 > 详见 [结构](structure.md) 的“控制面 / 运行用户”。
-
-### 抖音
-
-可传入 `web_rid`、抖音号或完整直播间 URL：
-
-```bash
-bash douyin/record.sh <web_rid|抖音号|完整URL>
-```
-
-示例：
-
-```bash
-bash douyin/record.sh 1930162853
-bash douyin/record.sh @zhangsan
-bash douyin/record.sh https://live.douyin.com/1234567890
-```
 
 ### SOOP
 
 可传入 SOOP 用户名或直播链接：
 
 ```bash
-bash soop/record.sh <soop_username|SOOP直播链接>
+bash platforms/soop/record.sh <soop_username|SOOP直播链接>
 ```
 
 示例：
 
 ```bash
-bash soop/record.sh playerid
-bash soop/record.sh https://play.sooplive.co.kr/playerid
+bash platforms/soop/record.sh playerid
+bash platforms/soop/record.sh https://play.sooplive.co.kr/playerid
 ```
 
 ### Kick
 
 ```bash
-bash kick/record.sh xqc
-bash kick/record.sh https://kick.com/xqc
+bash platforms/kick/record.sh xqc
+bash platforms/kick/record.sh https://kick.com/xqc
 ```
 
 ### YouTube
 
 ```bash
-bash youtube/record.sh @PewDiePie
-bash youtube/record.sh https://www.youtube.com/watch?v=<video_id>
+bash platforms/youtube/record.sh @PewDiePie
+bash platforms/youtube/record.sh https://www.youtube.com/watch?v=<video_id>
 ```
 
 ### CHZZK
@@ -86,89 +70,77 @@ bash youtube/record.sh https://www.youtube.com/watch?v=<video_id>
 可传入频道 ID 或完整直播间 URL：
 
 ```bash
-bash chzzk/record.sh <channel_id>
-bash chzzk/record.sh https://chzzk.naver.com/live/<channel_id>
+bash platforms/chzzk/record.sh <channel_id>
+bash platforms/chzzk/record.sh https://chzzk.naver.com/live/<channel_id>
 ```
 
 以上三个入口默认将视频写入 `./recordings/`，可通过 `RECORDINGS_DIR` 修改根目录：
 
 ```bash
-RECORDINGS_DIR=/data/live bash kick/record.sh xqc
+RECORDINGS_DIR=/data/live bash platforms/kick/record.sh xqc
 ```
 
-### 抖音 Cookie
+### Cookie
 
-从已登录的浏览器导出 Netscape 格式 Cookie：
+所有平台的 `record.sh` 都接受 `--cookies FILE`（Netscape 格式）显式指定登录态；
+TikTok 与 SOOP 另有默认文件（`cookies.txt` / `soop-cookies.txt`），存在时自动附带。
+临时使用原始 Cookie 请求头时可传 `--cookie 'name=value; ...'`——该方式可能出现在
+进程参数和终端历史中，长期运行推荐使用权限为 `600` 的 Cookie 文件。
+
+## Bilibili：推流与投稿
+
+Bilibili 相关（开播、转推、轮播、值守、质检、稿件投稿）见本仓库
+[`bili/`](../bili/README.md)，与录制侧同仓：轮播直接消费本仓库的录制输出
+（`recordings/`），`watch.sh` 自动携带本仓库根的 `cookies.txt`。
+
+### 稿件投稿
+
+把录制文件投成 B 站普通稿件（分区投稿，不进直播间）。登录态只有一条来源：
+`bili/live.py login` 扫码。登录态按账号分档存在 `~/.config/bili/accounts/`，
+推流用 `live` 账号、投稿用 `upload` 账号，互不干扰（详见
+[`bili/README.md`](../bili/README.md#登录态来源)）。`--state` 记录每个文件的
+`filename`/`cid`，中断可续传：
 
 ```bash
-bash douyin/import_cookies.sh chrome
+python3 bili/live.py login --account upload     # 首次：给投稿账号扫码
+python3 bili/live.py accounts                   # 看所有账号与登录态有效期
+python3 bili/upload.py status                   # 确认投稿账号登录态
+python3 bili/upload.py --state /tmp/s.json push <文件|目录>            # 只传文件
+python3 bili/upload.py --state /tmp/s.json post --title "标题" --tid 21 \
+    --tag "a,b" --source "来源" --part-title-prefix "标题"            # 提交稿件
 ```
 
-也可指定浏览器和输出路径：
-
-```bash
-bash douyin/import_cookies.sh firefox /secure/douyin-cookies.txt
-```
-
-录制或检测时导入：
-
-```bash
-bash douyin/record.sh 1930162853 --cookies /secure/douyin-cookies.txt
-python douyin/get_stream.py 1930162853 --cookies /secure/douyin-cookies.txt
-```
-
-临时使用原始 Cookie 请求头时可传 `--cookie 'name=value; ...'`。该方式可能出现在进程参数和终端历史中，长期运行推荐使用权限为 `600` 的 Cookie 文件。
-
-## 转推到 Bilibili
-
-Bilibili 相关（开播、转推、轮播、值守、质检）见本仓库 [`bili/`](../bili/README.md)，
-与录制侧同仓：轮播直接消费本仓库的录制输出（`recordings/`），
-`watch.sh` 自动携带本仓库根的 `cookies.txt`。
+录播要合成 1 稿多分 P：连续提交约 10 个独立稿件会触发 B 站 `code: 601`
+「上传视频过快」。版权按转载投（`--copyright 2` + `--source`）——B 站明确
+「录制他人直播不属于自制内容」。详见 [`bili/README.md`](../bili/README.md#稿件投稿uploadpy)。
 
 ### Twitch
 
 ```bash
-bash twitch/twitch.sh <twitch_username|完整URL>
+bash platforms/twitch/twitch.sh <twitch_username|完整URL>
 ```
 
 示例：
 
 ```bash
-bash twitch/twitch.sh shroud
-bash twitch/twitch.sh https://www.twitch.tv/shroud
+bash platforms/twitch/twitch.sh shroud
+bash platforms/twitch/twitch.sh https://www.twitch.tv/shroud
 ```
 
-### YouTube
+### YouTube → Bilibili 转推
 
-可传入频道 handle 或完整直播链接：
-
-```bash
-bash yt.sh <YouTube频道handle|直播链接>
-```
-
-示例：
-
-```bash
-bash yt.sh @PewDiePie
-bash yt.sh https://www.youtube.com/@MrBeast/live
-```
-
+YouTube 直播源转推到 B 站统一走 `bili/` 的转推链路（见上文「Bilibili：推流与投稿」），
+`bash platforms/youtube/record.sh <handle>` 只做本地录制。
 
 ## 直播源检测
 
-TikTok：
+各平台的检测能力已并入录制引擎与 WebUI 概览页（每个任务的 `live` 字段）：
 
 ```bash
-bash start.sh <tiktok_username|直播URL>
+bash platforms/tiktok/record.sh <tiktok_username|直播URL>   # 检测 + 录制
 ```
 
-抖音：
-
-```bash
-python3 douyin/get_stream.py 1930162853
-python3 douyin/get_stream.py 1930162853 --get-url
-python3 douyin/get_stream.py 1930162853 --get-nickname
-```
+只想判断能不能取到流、不录制，用 WebUI 概览页看 `直播中` 计数即可。
 
 ## 停止任务
 
@@ -232,7 +204,5 @@ WebUI 新建录制时可选择画质（原画/1080p/720p/480p），画质由 Web
 预览任一录制片段（`/api/file` 支持 HTTP Range 拖动进度）。
 WebUI 前端为 Vue 3 + Vite（源码在 `webui/frontend/src`），`webui/index.html` 是单文件构建产物。
 改动前端后需重新构建：`cd webui/frontend && npm run build`（构建脚本会把 `dist/index.html` 复制回 `../index.html`）。
-
-DouyinLiveRecorder 管理页面位于 `https://20070809.xyz/douyin/`。
 
 服务器状态监控页面位于 `https://20070809.xyz/sysmon/`。

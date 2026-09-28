@@ -192,7 +192,6 @@ button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{ou
 .field-group{display:flex;flex-direction:column;gap:6px;min-width:0}
 .field-group label,.field-label{color:var(--sec);font-size:11px;font-weight:650}
 .field-group input,.field-group select{width:100%;min-height:40px;padding:9px 12px}
-.cookie-row{grid-column:1/-1;margin-top:12px}
 .form-help{margin:8px 2px 0;color:var(--sec);font-size:11px}
 .hint{display:flex;align-items:center;gap:7px;margin-top:11px;color:var(--sec);font-size:12px}
 .hint:before{content:"i";flex:none;width:15px;height:15px;display:grid;place-items:center;border:1px solid var(--outl);border-radius:50%;font:700 9px/1 ui-monospace,monospace;color:var(--pri)}

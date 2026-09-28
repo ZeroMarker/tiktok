@@ -1,5 +1,10 @@
 # TikTok 直播录制使用与排障说明
 
+> **已归档（2026-09-28）**：本文档记录的是 TikTok 抓流的历史排障过程，日常使用请看
+> [使用说明](../usage.md) 与 [排障](../troubleshooting.md)。文中出现的 `tk/record.sh`
+> 等旧路径已迁移到 `platforms/tiktok/record.sh`；抖音相关章节随该平台移除一并失效。
+> 保留原文仅为排查同类问题时的经验参考。
+
 ## 当前入口
 
 日常录制统一使用：
@@ -12,7 +17,7 @@ bash tk/record.sh <username>
 
 > 适用环境：Linux，ffmpeg ≥ 6.1，yt-dlp 已安装
 > 录制服务应以装有 yt-dlp/curl_cffi 的用户（本部署 `ubuntu`）运行；
-> 需登录态主播可放 `cookies.txt` 自动携带，见 [usage.md](usage.md)。
+> 需登录态主播可放 `cookies.txt` 自动携带，见 [usage.md](../usage.md)。
 > 最后更新：2026-09-23
 
 ## 1. 概述
@@ -166,7 +171,7 @@ bash tk/record.sh hana_kuraki87
 
 **解决**：提供登录 Cookie（Netscape 格式），`tk/record.sh` 会检测项目根 `cookies.txt`
 并自动透传给引擎；引擎同时把它用于每轮轻量检测（页面 + webcast API）、昵称抓取与升级轮
-yt-dlp，登录态频道首轮即可命中；见 [使用说明](usage.md) 的“TikTok 登录 Cookie”章节。
+yt-dlp，登录态频道首轮即可命中；见 [使用说明](../usage.md) 的“TikTok 登录 Cookie”章节。
 验证命令：
 
 ```bash
@@ -174,7 +179,7 @@ yt-dlp --impersonate chrome --cookies cookies.txt \
   -f "b[ext=flv]" --get-url "https://www.tiktok.com/@<user>/live"
 ```
 
-> 历史案例（emma_kusunoki 等）与经验沉淀见 [tk/error.md](../tk/error.md)。
+> 历史案例（emma_kusunoki 等）与经验沉淀见 [tiktok-error.md](./tiktok-error.md)。
 
 ## 7. 辅助工具链（tk/）
 

@@ -16,12 +16,11 @@ INDEX_FILE = WEBUI_DIR / "index.html"
 RECORDINGS_DIR = os.environ.get("RECORDINGS_DIR", str(PROJECT_ROOT / "recordings"))
 
 PLATFORMS = {
-    "tiktok": ("tk/record.sh",),
-    "douyin": ("douyin/record.sh",),
-    "soop": ("soop/record.sh",),
-    "kick": ("kick/record.sh",),
-    "youtube": ("youtube/record.sh",),
-    "chzzk": ("chzzk/record.sh",),
+    "tiktok": ("platforms/tiktok/record.sh",),
+    "soop": ("platforms/soop/record.sh",),
+    "kick": ("platforms/kick/record.sh",),
+    "youtube": ("platforms/youtube/record.sh",),
+    "chzzk": ("platforms/chzzk/record.sh",),
 }
 QUALITY_CHOICES = {"best", "1080p", "720p", "480p"}
 

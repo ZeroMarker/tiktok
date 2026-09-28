@@ -16,38 +16,41 @@ scripts/
         ├── base.py        # 适配器接口 + 频道标识提取
         ├── ytdlp.py       # youtube / kick / chzzk / soop（yt-dlp 通用，含 impersonate 兜底）
         ├── tiktok.py      # TikTok：轻量检测每轮先行（带 Cookie），升级轮才跑 yt-dlp 与浏览器
-        ├── tiktok_extract.py  # TikTok 取流（curl_cffi 页面 + webcast API；渲染走 browserd）
-        └── douyin.py      # 抖音：复用 douyin/get_stream.py（DouyinLiveRecorder 子模块）
+        └── tiktok_extract.py  # TikTok 取流（curl_cffi 页面 + webcast API；渲染走 browserd）
 ```
 
 每平台的 `record.sh` 均为薄包装，只转发给引擎（单进程 WebUI 不经此包装、直接构造引擎；包装保留给命令行手动使用）：
 
 ```bash
-exec python3 "${SCRIPT_DIR}/../scripts/dlr.py" <platform> "$@"
+exec python3 "${SCRIPT_DIR}/../../scripts/dlr.py" <platform> "$@"
 ```
 
-支持平台：`youtube kick chzzk soop tiktok douyin`
+支持平台：`youtube kick chzzk soop tiktok`
 
 ## 平台目录
 
+平台相关脚本统一收在 `platforms/` 下，根目录不再按平台平铺：
+
 ```text
-├── tk/                    # TikTok（record.sh 转发入口）
-├── douyin/                # 抖音（record.sh + get_stream.py，依赖子模块 DouyinLiveRecorder）
-├── soop/                  # SOOP（record.sh 入口）
-├── youtube/               # YouTube（record.sh 入口）
-├── kick/                  # Kick（record.sh 入口）
-├── chzzk/                 # CHZZK（record.sh 入口）
-├── twitch/                # Twitch -> Bilibili 脚本
-├── bili/                  # Bilibili 推流（开播/推流/轮播/值守 + 独立 WebUI 与 user 单元，见 bili/README.md）
+├── platforms/
+│   ├── tiktok/             # record.sh 转发入口
+│   ├── soop/               # record.sh 入口
+│   ├── youtube/            # record.sh 入口
+│   ├── kick/               # record.sh 入口
+│   ├── chzzk/              # record.sh 入口
+│   └── twitch/             # Twitch -> Bilibili 脚本
+├── bili/                  # Bilibili 推流 + 稿件投稿（开播/推流/轮播/值守/upload.py + 独立 WebUI 与 user 单元，见 bili/README.md）
 ├── scripts/               # 统一录制引擎（见上）
 ├── systemd/               # WebUI/browserd systemd unit 与安装脚本
 ├── tests/                 # WebUI 与引擎单元测试（bili/ 另有 bili/tests/，由 test.sh 一并运行）
 ├── webui/                 # 本地录制任务管理页面与 API
-├── docs/                  # 使用、配置、排障和维护文档
-├── start.sh               # TikTok 直播源快速检测入口
-├── yt.sh                  # YouTube -> Bilibili 脚本
+├── docs/                  # 使用、配置、排障和维护文档（archive/ 存已归档的历史排障记录）
+├── archive/               # 已封存的根目录散脚本（start.sh / yt.sh，见 archive/README.md）
 └── test.sh                # 运行仓库全部单元测试（tests/ + bili/tests/，纯标准库）
 ```
+
+根目录只保留说明、测试入口和上表列出的目录。历史散脚本（`start.sh` 取流检测、
+`yt.sh` YouTube 转推）已移入 `archive/`，功能由 `platforms/` 与 `bili/` 覆盖。
 
 ## 运行产物
 
@@ -128,7 +131,7 @@ systemd 临时单元，也不再经 `record.sh` 包装（包装仅保留给命�
 
 **运行用户**：`livestream-webui.service` 以 `ubuntu` 运行（与 browserd 一致），
 原生使用其 `~/.local` 下的 yt-dlp / curl_cffi；换用户运行时需自行保证依赖可见。
-旧版每频道单元靠 `tk/record.sh` 等包装桥接 `PYTHONPATH`/`PATH`，该兜底仅对命令行
+旧版每频道单元靠 `platforms/tiktok/record.sh` 等包装桥接 `PYTHONPATH`/`PATH`，该兜底仅对命令行
 入口保留。
 
 **共享浏览器（`tiktok-browserd.service`）**：TikTok 检测的浏览器兜底统一走
@@ -138,20 +141,6 @@ systemd 临时单元，也不再经 `record.sh` 包装（包装仅保留给命�
 安装并启用；服务不可用时引擎自动跳过浏览器兜底，轻量检测与 yt-dlp 路径不受影响。
 
 **登录 Cookie**：TikTok 部分主播要求登录态才能拿到直播流（无 Cookie 时
-yt-dlp / Web API 均判“未开播”）。`tk/record.sh` 会检测项目根 `cookies.txt`
+yt-dlp / Web API 均判“未开播”）。`platforms/tiktok/record.sh` 会检测项目根 `cookies.txt`
 （Netscape 格式，已被 `.gitignore` 忽略），存在时自动附带 `--cookies` 给引擎，
 由适配器透传给 yt-dlp；Cookie 与 Bilibili 推流码等敏感信息不要提交仓库。
-
-## 子模块
-
-`douyin/DouyinLiveRecorder` 是 Git 子模块。首次克隆后需要初始化：
-
-```bash
-git submodule update --init --recursive
-```
-
-更新子模块：
-
-```bash
-git submodule update --remote douyin/DouyinLiveRecorder
-```

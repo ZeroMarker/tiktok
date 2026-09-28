@@ -19,19 +19,11 @@ yt-dlp --update-to nightly
 TikTok 可逐项验证：
 
 ```bash
-bash start.sh <tiktok_username>
+bash platforms/tiktok/record.sh <tiktok_username>
 yt-dlp -v "https://www.tiktok.com/@<tiktok_username>/live"
 yt-dlp --cookies-from-browser chrome "https://www.tiktok.com/@<tiktok_username>/live"
 yt-dlp --impersonate chrome "https://www.tiktok.com/@<tiktok_username>/live"
 yt-dlp --xff US "https://www.tiktok.com/@<tiktok_username>/live"
-```
-
-抖音可用项目内脚本验证：
-
-```bash
-python douyin/get_stream.py <web_rid|抖音号|完整URL>
-python douyin/get_stream.py <web_rid|抖音号|完整URL> --get-url
-python douyin/get_stream.py <web_rid|抖音号|完整URL> --get-nickname
 ```
 
 ## SOOP（Sooplive）订阅直播需要登录
@@ -59,20 +51,20 @@ yt-dlp --no-warnings -f best --get-url "https://play.sooplive.co.kr/<频道id>"
    ```text
    machine afreecatv login <SOOP用户ID> password <SOOP密码>
    ```
-   然后直接 `bash soop/record.sh <频道id>`，引擎自动加 `--netrc`。
+   然后直接 `bash platforms/soop/record.sh <频道id>`，引擎自动加 `--netrc`。
 
 2. **环境变量**——设置后启动引擎，自动带 `--username`/`--password`：
    ```bash
    export SOOP_USERNAME='<SOOP用户ID>'
    export SOOP_PASSWORD='<SOOP密码>'
-   bash soop/record.sh <频道id>
+   bash platforms/soop/record.sh <频道id>
    ```
 
 3. **登录 Cookie**——把登录后的 Netscape 会话 Cookie 存为 `soop-cookies.txt`
-   （项目根目录，已 gitignore），`soop/record.sh` 检测到会自动附带 `--cookies`：
+   （项目根目录，已 gitignore），`platforms/soop/record.sh` 检测到会自动附带 `--cookies`：
    ```bash
    # 存好 soop-cookies.txt 后直接录制即可
-   bash soop/record.sh <频道id>
+   bash platforms/soop/record.sh <频道id>
    ```
 
 > 注意：会员直播通常还需对主播**订阅/付费**才能观看；仅有普通账号（未订阅该主播）
@@ -103,7 +95,7 @@ yt-dlp --no-warnings -f best --get-url "https://play.sooplive.co.kr/<频道id>"
 个别账号可能出现“页面能看，但 Web API 或 `yt-dlp` 判断未开播”的情况。Web API 的 GroupBlock 不等于实际流地址一定不可用，先让正式入口持续轮询：
 
 ```bash
-bash tk/record.sh <tiktok_username>
+bash platforms/tiktok/record.sh <tiktok_username>
 ```
 
 若 yt-dlp 也持续失败，优先排查是否**需要登录 Cookie**：
@@ -114,9 +106,9 @@ yt-dlp --impersonate chrome --cookies cookies.txt \
   -f "b[ext=flv]" --get-url "https://www.tiktok.com/@<user>/live"
 ```
 
-`tk/record.sh` 会自动检测项目根 `cookies.txt` 并携带；详见
+`platforms/tiktok/record.sh` 会自动检测项目根 `cookies.txt` 并携带；详见
 [使用说明](usage.md) 的“TikTok 登录 Cookie”。历史案例（emma_kusunoki 等）见
-[tk/error.md](../tk/error.md) 与 [TikTok 录制排障](tiktok-live-recording.md)。
+[docs/archive/tiktok-error.md](../docs/archive/tiktok-error.md) 与 [TikTok 录制排障](archive/tiktok-live-recording.md)。
 
 ### TikTok 未获取到流与 Chromium 临时目录
 

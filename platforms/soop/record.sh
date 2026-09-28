@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# soop/record.sh — SOOP 录制入口（systemd / WebUI 使用）。
+# platforms/soop/record.sh — SOOP 录制入口（systemd / WebUI 使用）。
 # 新架构：统一引擎 scripts/dlr.py。
 # 若项目根存在 soop-cookies.txt（Netscape 格式，SOOP 登录态），自动附带 --cookies，
 # 以录制需要登录的会员订阅直播（live API RESULT=-6）。
@@ -12,7 +12,7 @@ if [ "$#" -lt 1 ]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-DEFAULT_COOKIE="${SCRIPT_DIR}/../soop-cookies.txt"
+DEFAULT_COOKIE="${SCRIPT_DIR}/../../soop-cookies.txt"
 
 # 依赖（yt-dlp 等）安装在开发用户的 ~/.local；服务可能以其他用户运行，
 # 这里显式补充 PYTHONPATH / PATH，保证子进程 yt-dlp 能被找到。
@@ -36,4 +36,4 @@ if [ -f "$DEFAULT_COOKIE" ] && ! printf '%s\n' "$@" | grep -qE -- '--cookies|--c
     args+=(--cookies "$DEFAULT_COOKIE")
 fi
 
-exec python3 "${SCRIPT_DIR}/../scripts/dlr.py" soop "${args[@]}"
+exec python3 "${SCRIPT_DIR}/../../scripts/dlr.py" soop "${args[@]}"

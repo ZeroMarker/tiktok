@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 from dlr.adapters.base import BaseAdapter, normalize_quality
-from dlr.adapters.douyin import DouyinAdapter
 from dlr.adapters.tiktok import TikTokAdapter
 from dlr.adapters.ytdlp import CONFIG as YTDLP_CONFIG
 from dlr.adapters.ytdlp import YTDLPAdapter
 
-__all__ = ["BaseAdapter", "DouyinAdapter", "TikTokAdapter", "YTDLPAdapter", "load_adapter"]
+__all__ = ["BaseAdapter", "TikTokAdapter", "YTDLPAdapter", "load_adapter"]
 
 
 def load_adapter(
@@ -23,6 +22,4 @@ def load_adapter(
         return YTDLPAdapter(platform, target, cookies=cookies, cookie_header=cookie_header, quality=q)
     if platform == "tiktok":
         return TikTokAdapter(target, cookies=cookies, cookie_header=cookie_header, quality=q)
-    if platform == "douyin":
-        return DouyinAdapter(target, cookies=cookies, cookie_header=cookie_header, quality=q)
     raise ValueError(f"不支持的平台：{platform}")

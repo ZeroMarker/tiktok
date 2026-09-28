@@ -23,7 +23,7 @@ jobs:
         run: |
           while IFS= read -r script; do
             bash -n "$script"
-          done < <(find . -path './douyin/DouyinLiveRecorder' -prune -o -name '*.sh' -type f -print)
+          done < <(find . -name '*.sh' -type f -print)
 
   frontend-build:
     # webui/index.html 是 vite-plugin-singlefile 的构建产物（有意入库，供 systemd 直接服务）。

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tk/record.sh — TikTok 录制入口（systemd / WebUI 使用）。
+# platforms/tiktok/record.sh — TikTok 录制入口（systemd / WebUI 使用）。
 # 新架构：统一引擎 scripts/dlr.py，本文件做转发。
 # 若项目根存在已登录的 cookies.txt，则自动附带登录态（部分主播需登录才能拿流）。
 #
@@ -11,7 +11,7 @@ if [ "$#" -lt 1 ]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-DEFAULT_COOKIE="${SCRIPT_DIR}/../cookies.txt"
+DEFAULT_COOKIE="${SCRIPT_DIR}/../../cookies.txt"
 
 # 依赖（yt-dlp/curl_cffi 等）安装在开发用户的 ~/.local；服务可能以其他用户运行，
 # 这里显式补充 PYTHONPATH / PATH，保证子进程 yt-dlp 能 import yt_dlp 并找到 curl_cffi。
@@ -35,4 +35,4 @@ if [ -f "$DEFAULT_COOKIE" ] && ! printf '%s\n' "$@" | grep -qE -- '--cookies|--c
     args+=(--cookies "$DEFAULT_COOKIE")
 fi
 
-exec python3 "${SCRIPT_DIR}/../scripts/dlr.py" tiktok "${args[@]}"
+exec python3 "${SCRIPT_DIR}/../../scripts/dlr.py" tiktok "${args[@]}"

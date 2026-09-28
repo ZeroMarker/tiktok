@@ -18,14 +18,9 @@
       </div>
       <button type="submit" :disabled="submitting" :aria-busy="submitting">{{ submitting ? "创建中…" : "开始录制" }}</button>
     </div>
-    <div v-if="platform === 'douyin'" class="field-group cookie-row">
-      <label for="cookie-file">Cookie 文件路径（可选）</label>
-      <input id="cookie-file" v-model="cookie" placeholder="例如：/secure/douyin-cookies.txt" aria-describedby="cookie-hint">
-    </div>
   </form>
   <div id="platform-hint" class="hint">{{ hint }}</div>
   <div id="target-hint" class="form-help">输入用户名、频道 ID 或完整直播地址。</div>
-  <div v-if="platform === 'douyin'" id="cookie-hint" class="form-help">Cookie 文件留在服务器本机，不会上传到浏览器。</div>
   <div v-if="errorMessage" class="inline-error" role="alert">{{ errorMessage }}</div>
 </template>
 <script setup>
@@ -39,7 +34,6 @@ import { PLATFORM_KEYS, PLATFORM_ZH, PLATFORM_HINTS, QUALITIES, QUALITY_ZH, LOGO
 const platform = ref("tiktok");
 const target = ref("");
 const quality = ref("best");
-const cookie = ref("");
 const submitting = ref(false);
 const errorMessage = ref("");
 const placeholder = computed(() => PLATFORM_HINTS[platform.value][0]);
@@ -59,7 +53,7 @@ async function submit() {
   }
   submitting.value = true;
   try {
-    const data = await startTask({ platform: platform.value, target: value, quality: quality.value, cookie_file: cookie.value.trim() });
+    const data = await startTask({ platform: platform.value, target: value, quality: quality.value });
     toast("任务已启动");
     target.value = "";
     taskState.selectedUnit = data.unit;

@@ -5,7 +5,6 @@
 ## 支持范围
 
 - TikTok：本地分段录制、转推 Bilibili
-- 抖音：本地分段录制
 - SOOP：本地分段录制、转推 Bilibili
 - Kick：本地分段录制
 - YouTube：本地分段录制、转推 Bilibili
@@ -19,7 +18,6 @@
 ```bash
 uv venv
 uv tool install "yt-dlp[default,curl-cffi]"
-git submodule update --init --recursive
 ```
 
 检测命令：
@@ -33,40 +31,29 @@ python --version
 录制 TikTok：
 
 ```bash
-bash tk/record.sh <tiktok_username>
+bash platforms/tiktok/record.sh <tiktok_username>
 ```
 
 部分 TikTok 主播需要登录态，把浏览器导出的 Netscape Cookie 存为项目根 `cookies.txt`
 （已 .gitignore 忽略），`record.sh` 会自动携带；详见 [使用说明](docs/usage.md)。
 
-录制抖音：
-
-```bash
-bash douyin/record.sh <web_rid|抖音号|完整URL>
-```
-
 录制 SOOP：
 
 ```bash
-bash soop/record.sh <soop_username|SOOP直播链接>
+bash platforms/soop/record.sh <soop_username|SOOP直播链接>
 ```
 
 录制 Kick、YouTube 或 CHZZK：
 
 ```bash
-bash kick/record.sh <Kick用户名|直播URL>
-bash youtube/record.sh <YouTube handle|直播URL>
-bash chzzk/record.sh <CHZZK频道ID|直播URL>
+bash platforms/kick/record.sh <Kick用户名|直播URL>
+bash platforms/youtube/record.sh <YouTube handle|直播URL>
+bash platforms/chzzk/record.sh <CHZZK频道ID|直播URL>
 ```
 
-抖音需要登录态时，可以从本机浏览器导出 Cookie：
+转推 Bilibili（开播、推流、轮播）见本仓库 [`bili/`](bili/README.md)（含开播/停播/改标题、直播推流、文件轮播、轮播值守与管理页）；把录制文件投成 B 站稿件用同目录的 `bili/upload.py`。
 
-```bash
-bash douyin/import_cookies.sh chrome
-bash douyin/record.sh <直播间> --cookies douyin-cookies.txt
-```
-
-转推 Bilibili（开播、推流、轮播）见本仓库 [`bili/`](bili/README.md)（含开播/停播/改标题、直播推流、文件轮播、轮播值守与管理页）。
+平台脚本统一在 `platforms/<平台>/` 下（如 `platforms/tiktok/record.sh`）。根目录曾有的散脚本 `start.sh`（取流检测）与 `yt.sh`（YouTube 转推）已移入 [`archive/`](archive/README.md)。
 
 ## WebUI 与 systemd
 
@@ -100,8 +87,10 @@ WebUI 同时提供 PWA 支持：可安装到桌面/主屏幕，断网时仍可�
 - [配置](docs/configuration.md)
 - [使用说明](docs/usage.md)
 - [排障](docs/troubleshooting.md)
-- [TikTok 直播录制使用与排障](docs/tiktok-live-recording.md)
-- [Bilibili 推流](bili/README.md)
+- [Bilibili 推流与投稿](bili/README.md)
+- [Bilibili 投稿接口细节](bili/docs/bilibili-upload-api.md)
+- [归档：TikTok 录制历史排障记录](docs/archive/tiktok-live-recording.md)
+- [封存：根目录散脚本](archive/README.md)
 
 ## 开发与测试
 
@@ -124,7 +113,7 @@ CI（`.github/workflows/checks.yml`）会校验：两套单元测试、全部 sh
 
 录制输出按平台分目录，再按账号创建频道目录，每 10 分钟生成一个 MP4 文件（文件名不含平台前缀）。日志默认写入 `recordings/logs/<平台>/`。
 
-仓库已忽略日志、视频文件、Cookie 文件和 `recordings/`。建议长期任务在仓库外或 `recordings/` 下运行，避免运行产物和源码混在一起。
+仓库已忽略日志、视频文件、Cookie 文件、`bili/upload-state*.json`（投稿凭证）和 `recordings/`。建议长期任务在仓库外或 `recordings/` 下运行，避免运行产物和源码混在一起。
 
 WebUI 创建的任务统一使用 `RECORDINGS_DIR`；概览页的磁盘容量与最近文件也以该目录为准。
 
@@ -132,7 +121,7 @@ WebUI 创建的任务统一使用 `RECORDINGS_DIR`；概览页的磁盘容量与
 
 ```bash
 python3 -m unittest discover -s tests -v
-find . -path './douyin/DouyinLiveRecorder' -prune -o -name '*.sh' -type f -print \
+find . -name '*.sh' -type f -print \
   | while IFS= read -r script; do bash -n "$script"; done
 ```
 

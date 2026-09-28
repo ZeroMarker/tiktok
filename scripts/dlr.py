@@ -7,10 +7,10 @@
     python3 scripts/dlr.py <platform> <target> [选项]
 
 平台：
-    youtube kick chzzk soop tiktok douyin
+    youtube kick chzzk soop tiktok
 
 选项：
-    --cookies FILE       Netscape 格式 Cookie 文件（抖音等需要登录的平台）
+    --cookies FILE       Netscape 格式 Cookie 文件（部分主播需登录的平台）
     --cookie HEADER      原始 Cookie 请求头
     --recordings-dir DIR 录制输出根目录（默认 $RECORDINGS_DIR 或 ./recordings）
     --segment-seconds N  每段 MP4 时长（默认 600）
@@ -27,7 +27,7 @@ import sys
 
 from dlr.engine import Engine
 
-PLATFORMS = ("youtube", "kick", "chzzk", "soop", "tiktok", "douyin")
+PLATFORMS = ("youtube", "kick", "chzzk", "soop", "tiktok")
 
 
 def build_parser() -> argparse.ArgumentParser:

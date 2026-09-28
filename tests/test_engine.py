@@ -107,13 +107,14 @@ class AdapterDispatchTest(unittest.TestCase):
         self.assertEqual(adapter.identifier, "emiri.okazaki")
         self.assertTrue(adapter.bsf_aac)
 
-    def test_douyin(self):
-        adapter = load_adapter("douyin", "1930162853")
-        self.assertEqual(adapter.identifier, "1930162853")
-
     def test_unknown_platform_raises(self):
         with self.assertRaises(ValueError):
             load_adapter("unknown", "x")
+
+    def test_removed_douyin_is_gone(self):
+        # 抖音已从引擎移除：适配器不再注册，平台表也不含它
+        with self.assertRaises(ValueError):
+            load_adapter("douyin", "1930162853")
 
 
 class LiveURLTest(unittest.TestCase):

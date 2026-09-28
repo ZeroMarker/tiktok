@@ -1,5 +1,8 @@
 # tubasa__mai 直播录制失败原因分析
 
+> **已归档（2026-09-28）**：按主播逐个记录的历史抓流失败案例，日常排障请看
+> [排障](../troubleshooting.md)。保留原文仅为遇到同类 WAF / 解析变更时的经验参考。
+
 ## 现象
 
 - 其他 TikTok 主播（emiri.okazaki、mizuno_asahi 等）均可正常录制
