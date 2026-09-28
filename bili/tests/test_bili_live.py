@@ -3,7 +3,10 @@
 被测模块来源见 ``live.py`` 模块文档（上游 Zarosmm/obs-bilibili-stream，GPL-2.0）。
 """
 
+import contextlib
 import hashlib
+import io
+import json
 import sys
 import tempfile
 import unittest
@@ -155,6 +158,70 @@ class QrRenderTest(unittest.TestCase):
         self.assertTrue(lines[-1].strip() == "")  # 底部静区
         self.assertTrue(all(line.startswith("  ") and line.endswith("  ") for line in lines))  # 左右静区
         self.assertIn("██", first)
+
+
+class ResolveRoomTest(unittest.TestCase):
+    """房间号只服务开播；纯投稿账号没有直播间，不该让登录失败。"""
+
+    def _resolve(self, payload):
+        with mock.patch.object(bili_live, "_request", return_value=(payload, "")):
+            return bili_live.resolve_room("DedeUserID=42; bili_jct=x;")
+
+    def test_normal_account(self):
+        self.assertEqual(self._resolve({"code": 0, "message": "ok", "data": {"room_id": 123}}), ("123", "x"))
+
+    def test_account_without_live_room_raises_readable_error(self):
+        # 实测：新注册账号回 code=404 + data=[]；message 字段此时也是 "ok"
+        with self.assertRaises(bili_live.BiliError) as ctx:
+            self._resolve({"code": 404, "message": "ok", "msg": "ok", "data": []})
+        msg = str(ctx.exception)
+        self.assertIn("没有直播间", msg)
+        self.assertIn("404", msg)
+        self.assertNotIn("失败：ok", msg)  # 旧写法会输出这个无信息量的提示
+
+    def test_error_reports_code_and_data_not_just_message(self):
+        with self.assertRaises(bili_live.BiliError) as ctx:
+            self._resolve({"code": -1, "message": "ok", "data": None})
+        self.assertIn("code=-1", str(ctx.exception))
+
+    def test_empty_room_id_raises(self):
+        with self.assertRaises(bili_live.BiliError) as ctx:
+            self._resolve({"code": 0, "message": "ok", "data": {"room_id": "0"}})
+        self.assertIn("room_id 为空", str(ctx.exception))
+
+    def test_data_not_dict_raises(self):
+        with self.assertRaises(bili_live.BiliError):
+            self._resolve({"code": 0, "message": "ok", "data": []})
+
+
+class LoginWithoutRoomTest(unittest.TestCase):
+    """实测过的 bug：投稿账号没有直播间时，整次登录被作废（save_session 走不到）。"""
+
+    def _run_login(self, resolve_payload):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "s.json"
+            argv = ["--session", str(path), "login", "--timeout", "1", "--poll-interval", "0"]
+            with mock.patch.object(bili_live, "qr_generate", return_value=("u", "k")), \
+                    mock.patch.object(bili_live, "render_qr_terminal", return_value="qr"), \
+                    mock.patch.object(bili_live, "qr_poll", return_value=({"code": 0}, "SESSDATA=s; bili_jct=j; DedeUserID=7;")), \
+                    mock.patch.object(bili_live, "check_login", return_value=(True, "7")), \
+                    mock.patch.object(bili_live, "_request", return_value=(resolve_payload, "")):
+                with contextlib.redirect_stdout(io.StringIO()):  # 吞掉扫码提示噪音
+                    rc = bili_live.main(argv)
+            return rc, (json.loads(path.read_text(encoding="utf-8")) if path.exists() else None)
+
+    def test_session_is_saved_even_without_live_room(self):
+        rc, saved = self._run_login({"code": 404, "message": "ok", "data": []})
+        self.assertEqual(rc, 0)
+        self.assertIsNotNone(saved, "会话未落盘——登录被作废了")
+        self.assertEqual(saved["mid"], "7")
+        self.assertEqual(saved["room_id"], "")      # 留空，首次开播时再补
+        self.assertEqual(saved["csrf_token"], "j")  # csrf 不依赖房间号，必须拿到
+
+    def test_session_saved_with_room_when_available(self):
+        rc, saved = self._run_login({"code": 0, "message": "ok", "data": {"room_id": 555}})
+        self.assertEqual(rc, 0)
+        self.assertEqual(saved["room_id"], "555")
 
 
 class ParserTest(unittest.TestCase):

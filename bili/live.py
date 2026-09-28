@@ -227,11 +227,17 @@ def resolve_room(cookies: str) -> tuple[str, str]:
     if not csrf:
         raise BiliError("Cookie 缺少 bili_jct，请重新扫码登录")
     payload, _ = _request(f"{ROOM_ID_URL}?uid={urllib.parse.quote(uid)}", cookies=cookies)
-    if payload.get("code") != 0:
-        raise BiliError(f"获取房间号失败：{payload.get('message')}")
-    room_id = str((payload.get("data") or {}).get("room_id", ""))
+    data = payload.get("data")
+    # 该接口的 message 字段成功与失败时都是 "ok"，只报它等于什么都没说；
+    # 用 code 判别，并区分「账号没有直播间」(404) 与其他失败。
+    if payload.get("code") != 0 or not isinstance(data, dict):
+        code = payload.get("code")
+        if code == 404:
+            raise BiliError(f"账号 {uid} 没有直播间（room_id_by_uid 返回 code=404）")
+        raise BiliError(f"获取房间号失败：code={code} data={data!r}")
+    room_id = str(data.get("room_id", ""))
     if not room_id or room_id == "0":
-        raise BiliError("获取房间号失败：返回为空")
+        raise BiliError(f"获取房间号失败：data.room_id 为空（{data!r}）")
     return room_id, csrf
 
 
@@ -394,12 +400,22 @@ def cmd_login(args: argparse.Namespace) -> int:
             ok, mid = check_login(cookies)
             if not ok:
                 raise BiliError("Cookie 校验未通过")
-            room_id, csrf = resolve_room(cookies)
+            csrf = extract_cookie_value(cookies, "bili_jct")
+            # 房间号只服务开播/关播/改标题。纯投稿账号（新注册、还没直播间）
+            # 查不到房间号，接口回 code=404 + data:[]。这不该让整次登录作废——
+            # Cookie 已经到手，落盘后由 _require_authed() 在首次开播时补齐。
+            room_id, room_note = "", ""
+            try:
+                room_id, csrf = resolve_room(cookies)
+            except BiliError as exc:
+                room_note = f"（{exc}）"
             save_session(
                 session_path,
                 {**old, "cookies": cookies, "mid": mid, "room_id": room_id, "csrf_token": csrf},
             )
-            print(f"登录成功 mid={mid} room_id={room_id}")
+            print(f"登录成功 mid={mid}" + (f" room_id={room_id}" if room_id else " 无直播间") + room_note)
+            if not room_id:
+                print("该账号可用于稿件投稿；若要开播，需先在 B 站开通直播间。")
             return 0
         if code == 86090:
             print("已扫码，等待手机确认…")
@@ -426,7 +442,9 @@ def cmd_status(args: argparse.Namespace) -> int:
     ok, mid = check_login(cookies)
     print(f"登录状态：{'已登录' if ok else '未登录'}", end="")
     if ok:
-        print(f" 账号={name} mid={mid} room_id={session.get('room_id', '')}", end="")
+        room_id = session.get("room_id") or ""
+        print(f" 账号={name} mid={mid}", end="")
+        print(f" room_id={room_id}" if room_id else " 无直播间（仅可投稿）", end="")
     expiry = bili_accounts.session_expiry(session)
     if expiry:
         print(f" SESSDATA 到期={expiry:%Y-%m-%d}", end="")
@@ -440,7 +458,7 @@ def cmd_is_live(args: argparse.Namespace) -> int:
     room_id = session.get("room_id") or ""
     if not room_id:
         name = args.account or bili_accounts.tool_default_account(TOOL)
-        print(f"账号 {name} 无房间号：请先执行 `python3 live.py login --account {name}`")
+        print(f"账号 {name} 没有直播间（room_id 为空），无法查询开播状态")
         return 1
     payload, _ = _request(f"{ROOM_INFO_URL}?room_id={urllib.parse.quote(str(room_id))}")
     data = payload.get("data") or {}
@@ -465,8 +483,15 @@ def _require_authed(args: argparse.Namespace) -> tuple[dict, str, str]:
         raise BiliError(f"账号 {name} 未登录：请先执行 `python3 live.py login --account {name}`")
     room_id = session.get("room_id") or ""
     csrf = session.get("csrf_token") or ""
-    if not room_id or not csrf:  # 兼容老会话：缺字段时重新推导
-        room_id, csrf = resolve_room(cookies)
+    if not room_id or not csrf:  # 兼容老会话与无直播间账号：缺字段时重新推导
+        name = args.account or bili_accounts.tool_default_account(TOOL)
+        try:
+            room_id, csrf = resolve_room(cookies)
+        except BiliError as exc:
+            raise BiliError(
+                f"账号 {name} 无法开播：{exc}。该账号仅可用于稿件投稿，"
+                f"开播需先在 B 站开通直播间。"
+            ) from exc
         session.update({"room_id": room_id, "csrf_token": csrf})
         save_session(args.session, session)
     return session, room_id, csrf

@@ -36,9 +36,16 @@ python3 live.py accounts                  # 列出所有账号 + 登录态有效
 |---|---|
 | `cookies` | 扫码拿到的 `SESSDATA` / `bili_jct` / `DedeUserID` / `DedeUserID__ckMd5` / `sid` |
 | `csrf_token` | 等于 Cookie 里的 `bili_jct`，投稿与开播的写接口都要用 |
-| `mid` / `room_id` | 由 `nav` 与 `room_id_by_uid` 推导 |
+| `mid` | 由 `nav` 推导 |
+| `room_id` | 由 `room_id_by_uid` 推导，**仅开播需要**——投稿账号没有直播间时为空 |
 | `rtmp_addr` / `rtmp_code` | 推流地址与推流码，每次 `start` 开播时刷新 |
 | `area_id` / `title` | 上次开播的分区与标题，供管理页「关播状态下自动开播」复用 |
+
+**没有直播间的账号也能登录。** 新注册账号调用 `room_id_by_uid` 会回
+`code: 404` + `data: []`（该接口的 `message` 字段成功失败时都是 `ok`，不能
+用来判别）。此时 `room_id` 留空，登录照常成功——**投稿完全不需要房间号**，
+开播时才由 `_require_authed()` 补齐，补不到会明确提示「该账号仅可投稿，
+开播需先在 B 站开通直播间」。`status` 会显示「无直播间（仅可投稿）」。
 
 ### 选择用哪个账号
 
