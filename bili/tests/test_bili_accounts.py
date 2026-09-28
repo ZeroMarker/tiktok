@@ -19,12 +19,19 @@ import accounts as acc  # noqa: E402
 FUTURE = 4102444800
 PAST = 1600000000
 
+# 夹具里所有"账号数据"都必须是明显虚构的假值，不得粘真实值：
+# 真实值往往恰好在写测试时的上下文里（此前就误用了真实房间号）。
+# 集中成常量，让断言引用同一处，避免"夹具与断言同源"的自证式断言。
+FAKE_MID = "42"
+FAKE_ROOM_ID = "1234567"
+FAKE_TITLE = "旧房间"
 
-def make_session(mid="42", expires=FUTURE, **extra):
+
+def make_session(mid=FAKE_MID, expires=FUTURE, **extra):
     return {
         "cookies": f"SESSDATA=val%2C{expires}%2Cdeadbeef; bili_jct=csrf; DedeUserID={mid};",
         "mid": mid,
-        "room_id": "1234567",
+        "room_id": FAKE_ROOM_ID,
         "csrf_token": "csrf",
         **extra,
     }
@@ -156,14 +163,14 @@ class ListAccountsTest(SandboxTest):
         self.assertEqual(acc.list_accounts(), [])
 
     def test_lists_profiles_and_skips_defaults_file(self):
-        write_account(self.dir, "live", make_session(mid="1", title="旧房间", rtmp_code="x"))
+        write_account(self.dir, "live", make_session(mid="1", title=FAKE_TITLE, rtmp_code="x"))
         write_account(self.dir, "expired", make_session(mid="2", expires=PAST))
         (self.dir / "defaults.json").write_text("{}", encoding="utf-8")
         rows = {r["name"]: r for r in acc.list_accounts()}
         self.assertEqual(set(rows), {"live", "expired"})
         self.assertEqual(rows["live"]["mid"], "1")
-        self.assertEqual(rows["live"]["room_id"], "1234567")
-        self.assertEqual(rows["live"]["title"], "旧房间")
+        self.assertEqual(rows["live"]["room_id"], FAKE_ROOM_ID)
+        self.assertEqual(rows["live"]["title"], FAKE_TITLE)
         self.assertTrue(rows["live"]["has_push_code"])
         self.assertFalse(rows["live"]["expired"])
         self.assertTrue(rows["expired"]["expired"])
