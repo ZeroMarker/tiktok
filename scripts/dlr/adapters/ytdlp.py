@@ -11,6 +11,7 @@ soop（SOOP，原 AfreecaTV）的会员订阅直播（live API RESULT=-6）需�
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 from dlr.adapters.base import BaseAdapter, extract_last_segment
 
@@ -22,7 +23,7 @@ CONFIG: dict[str, dict] = {
         "live_url": lambda t: (
             t
             if t.startswith(("http://", "https://"))
-            else f"https://www.youtube.com/@{t}/live"
+            else f"https://www.youtube.com/@{t.lstrip('@')}/live"
         ),
         "formats": ["best[ext=mp4]/best", "b[ext=flv]/best"],
     },
@@ -116,6 +117,19 @@ class YTDLPAdapter(BaseAdapter):
 
     def detect_stream_url(self) -> str | None:
         self.last_detect_error = None
+        browser_error = None
+        if self.platform == "youtube":
+            # The signed-in web player can have a usable live HLS source when
+            # yt-dlp's player API responds with a bot or reload challenge.
+            script = Path(__file__).with_name("youtube_browser.mjs")
+            rc, out, err = self._run(
+                ["node", str(script), self.live_url, str(self.quality_height or 0)],
+                timeout=40,
+            )
+            source = out.strip()
+            if rc == 0 and source.startswith(("https://", "http://")):
+                return source
+            browser_error = err.strip().splitlines()[-1] if err.strip() else "browser source unavailable"
         # 登录态/Cookie 对所有 yt-dlp 平台统一透传，soop 额外附加登录凭据
         login = [*self.cookie_args(), *self._login_args()]
         if self.quality_height:
@@ -141,6 +155,8 @@ class YTDLPAdapter(BaseAdapter):
             reason = next((ln for ln in reversed(err.strip().splitlines()) if ln), None)
             if reason:
                 self.last_detect_error = _clean_error(reason)
+        if browser_error:
+            self.last_detect_error = f"{self.last_detect_error or 'yt-dlp failed'}; {browser_error}"
         return None
 
     def get_nickname(self) -> str | None:

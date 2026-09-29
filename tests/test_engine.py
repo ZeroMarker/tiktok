@@ -121,8 +121,26 @@ class LiveURLTest(unittest.TestCase):
     def test_youtube_builds_live_url(self):
         adapter = load_adapter("youtube", "SomeHandle")
         self.assertEqual(adapter.live_url, "https://www.youtube.com/@SomeHandle/live")
+        adapter = load_adapter("youtube", "@SomeHandle")
+        self.assertEqual(adapter.live_url, "https://www.youtube.com/@SomeHandle/live")
         adapter = load_adapter("youtube", "https://youtube.com/@x/live")
         self.assertEqual(adapter.live_url, "https://youtube.com/@x/live")
+
+    def test_youtube_prefers_browser_live_source(self):
+        adapter = load_adapter("youtube", "@SomeHandle")
+        with mock.patch.object(adapter, "_run", return_value=(0, "https://cdn.example/live.m3u8\n", "")) as run:
+            self.assertEqual(adapter.detect_stream_url(), "https://cdn.example/live.m3u8")
+        self.assertEqual(run.call_count, 1)
+        self.assertEqual(run.call_args.args[0][-2:], [adapter.live_url, "0"])
+
+    def test_youtube_uses_ytdlp_when_browser_has_no_source(self):
+        adapter = load_adapter("youtube", "@SomeHandle")
+        with mock.patch.object(adapter, "_run", side_effect=[
+            (1, "", "HLS media segment returned HTTP 403"),
+            (0, "https://cdn.example/live.m3u8\n", ""),
+        ]) as run:
+            self.assertEqual(adapter.detect_stream_url(), "https://cdn.example/live.m3u8")
+        self.assertEqual(run.call_count, 2)
 
     def test_soop_builds_live_url(self):
         adapter = load_adapter("soop", "playerid")

@@ -65,6 +65,13 @@ bash platforms/youtube/record.sh @PewDiePie
 bash platforms/youtube/record.sh https://www.youtube.com/watch?v=<video_id>
 ```
 
+频道 handle 可带或不带开头的 `@`。如 YouTube 要求登录验证，可用
+`--cookies /path/to/youtube-cookies.txt` 传入从已登录浏览器导出的 Netscape
+Cookie 文件；WebUI 任务也支持通过 `cookie_file` 参数指定该文件。
+服务器上的 browser-desktop Chromium 可作为 YouTube 直播取流兜底
+（默认 CDP 地址 `http://127.0.0.1:9222`，可用 `YOUTUBE_BROWSER_CDP` 覆盖）。
+引擎会先检查 HLS 媒体分片是否可访问；分片返回 403 时即使直播清单存在也无法录制。
+
 ### CHZZK
 
 可传入频道 ID 或完整直播间 URL：
