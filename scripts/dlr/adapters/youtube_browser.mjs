@@ -93,17 +93,17 @@ async function main() {
     const variants = [];
     for (let i = 0; i < lines.length - 1; i++) {
       if (!lines[i].startsWith("#EXT-X-STREAM-INF:")) continue;
-      const match = lines[i].match(/RESOLUTION=\d+x(\d+)/);
+      const match = lines[i].match(/RESOLUTION=(\d+)x(\d+)/);
       if (match && lines[i + 1] && !lines[i + 1].startsWith("#")) {
-        variants.push({ height: Number(match[1]), url: new URL(lines[i + 1], source).href });
+        variants.push({ quality: Math.min(Number(match[1]), Number(match[2])), url: new URL(lines[i + 1], source).href });
       }
     }
-    // yt-dlp's height cap is applied to the second RESOLUTION dimension.
-    // ffmpeg receives the master playlist for best, but validate one variant
-    // first: YouTube sometimes serves a valid manifest whose segments are 403.
-    variants.sort((a, b) => a.height - b.height);
+    // Use the shorter dimension as the quality label for portrait and landscape video.
+    // Always pass the selected media playlist to ffmpeg; given the master playlist,
+    // ffmpeg may choose its first (lowest quality) variant.
+    variants.sort((a, b) => a.quality - b.quality);
     const selected = variants.length
-      ? (height ? [...variants].reverse().find((item) => item.height <= height) || variants[0] : variants.at(-1))
+      ? (height ? [...variants].reverse().find((item) => item.quality <= height) || variants[0] : variants.at(-1))
       : null;
     const mediaUrl = selected?.url || source;
     const mediaResponse = selected ? await fetch(mediaUrl) : null;
@@ -122,7 +122,7 @@ async function main() {
     const probe = await fetch(new URL(firstSegment, mediaUrl), { headers: { Range: "bytes=0-1" } });
     await probe.body?.cancel();
     if (!probe.ok) fail(`HLS media segment returned HTTP ${probe.status}`);
-    if (height && selected) source = mediaUrl;
+    source = mediaUrl;
     process.stdout.write(source + "\n");
   } finally {
     if (ws) ws.close();
