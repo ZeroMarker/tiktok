@@ -142,6 +142,19 @@ class LiveURLTest(unittest.TestCase):
             self.assertEqual(adapter.detect_stream_url(), "https://cdn.example/live.m3u8")
         self.assertEqual(run.call_count, 2)
 
+    def test_youtube_stale_live_source_waits_without_more_ytdlp_requests(self):
+        adapter = load_adapter("youtube", "@SomeHandle")
+        with mock.patch.object(adapter, "_run", return_value=(1, "", "live HLS playlist is stale (240s old)")) as run:
+            self.assertIsNone(adapter.detect_stream_url())
+        self.assertEqual(run.call_count, 1)
+        self.assertIn("stale", adapter.last_detect_error)
+
+    def test_youtube_handle_needs_no_nickname_request(self):
+        adapter = load_adapter("youtube", "@SomeHandle")
+        with mock.patch.object(adapter, "_run") as run:
+            self.assertEqual(adapter.get_nickname(), "SomeHandle")
+        run.assert_not_called()
+
     def test_soop_builds_live_url(self):
         adapter = load_adapter("soop", "playerid")
         self.assertEqual(adapter.live_url, "https://play.sooplive.co.kr/playerid")

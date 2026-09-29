@@ -70,7 +70,11 @@ bash platforms/youtube/record.sh https://www.youtube.com/watch?v=<video_id>
 Cookie 文件；WebUI 任务也支持通过 `cookie_file` 参数指定该文件。
 服务器上的 browser-desktop Chromium 可作为 YouTube 直播取流兜底
 （默认 CDP 地址 `http://127.0.0.1:9222`，可用 `YOUTUBE_BROWSER_CDP` 覆盖）。
-引擎会先检查 HLS 媒体分片是否可访问；分片返回 403 时即使直播清单存在也无法录制。
+该兜底依赖 Node 22+ 与和 yt-dlp 版本匹配的 `yt-dlp-ejs`，用于解开 HLS 地址中的
+`n` 校验值；项目根 [README](../README.md) 的 `yt-dlp[default,curl-cffi]`
+安装方式已包含 EJS。引擎会先检查 HLS 媒体分片是否可访问，避免只凭清单可读取
+就误判为可录制；若直播列表超过 3 分钟没有新片段，也会等待下轮检测，避免反复
+保存同一段旧视频。
 
 ### CHZZK
 

@@ -14,6 +14,7 @@ import sys
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime
 from pathlib import Path
@@ -225,8 +226,10 @@ class Engine:
                     self._wait(delay)
                     continue
 
-                # 只打印去掉签名参数的开头，避免整串 token 进日志
-                self.log(f"  → 成功抓到直播源：{stream_url.split('?')[0]}", flush=True)
+                # 有些签名参数在 URL 路径里（如 YouTube HLS），只记录主机名。
+                parsed_stream = urllib.parse.urlsplit(stream_url)
+                safe_source = f"{parsed_stream.scheme}://{parsed_stream.netloc}/…"
+                self.log(f"  → 成功抓到直播源：{safe_source}", flush=True)
                 # 录制前轻量校验：离线页残留的陈旧 FLV 等地址会 404/403，
                 # 判为未开播回到检测循环，避免 ffmpeg 秒退空转（rc=8 循环）。
                 delay = self._next_detect_delay()

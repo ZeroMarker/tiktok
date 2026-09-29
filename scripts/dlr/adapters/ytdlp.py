@@ -130,6 +130,9 @@ class YTDLPAdapter(BaseAdapter):
             if rc == 0 and source.startswith(("https://", "http://")):
                 return source
             browser_error = err.strip().splitlines()[-1] if err.strip() else "browser source unavailable"
+            if "live HLS playlist is stale" in browser_error:
+                self.last_detect_error = browser_error
+                return None
         # 登录态/Cookie 对所有 yt-dlp 平台统一透传，soop 额外附加登录凭据
         login = [*self.cookie_args(), *self._login_args()]
         if self.quality_height:
@@ -160,6 +163,10 @@ class YTDLPAdapter(BaseAdapter):
         return None
 
     def get_nickname(self) -> str | None:
+        if self.platform == "youtube" and not self.target.startswith(("http://", "https://")):
+            # The handle is already a stable folder label. Avoid multiple
+            # authenticated yt-dlp requests on every offline detection round.
+            return self.identifier
         login = [*self.cookie_args(), *self._login_args()]
         for field in ("channel", "uploader"):
             cmd = [
