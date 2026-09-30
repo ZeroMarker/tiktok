@@ -2,7 +2,7 @@
 
 > **已归档（2026-09-28）**：本文记录 `setpts=N/FRAME_RATE/TB` 导致推流音画不同步的完整
 > 定位过程。日常使用请看 [排障](../troubleshooting.md#bilibili-推流音画不同步)。
-> 保留原文仅为遇到同类时间戳/帧率问题时���经验参考。
+> 保留原文仅为遇到同类时间戳/帧率问题时的经验参考。
 >
 > 适用环境：Linux，ffmpeg 6.1.1，TikTok 直播源 -> Bilibili RTMP 推流
 > 涉及文件：`bili/push.sh`、`bili/replay.sh`、`platforms/twitch/twitch.sh`

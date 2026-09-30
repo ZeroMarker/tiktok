@@ -10,7 +10,8 @@ Linux / macOS：
 bash platforms/tiktok/record.sh <tiktok_username>
 ```
 
-这是日常录制的正式入口，会持续轮询直播源（yt-dlp → 多方法兜底），断流后自动重新获取。
+这是日常录制的正式入口，会持续轮询直播源（轻量检测每轮先行，连续 3 次未命中才在升级轮
+跑一次 yt-dlp 与浏览器兜底），断流后自动重新获取。
 
 #### TikTok 登录 Cookie（部分主播需要）
 
@@ -70,7 +71,7 @@ bash platforms/youtube/record.sh https://www.youtube.com/watch?v=<video_id>
 Cookie 文件；WebUI 任务也支持通过 `cookie_file` 参数指定该文件。
 服务器上的 browser-desktop Chromium 可作为 YouTube 直播取流兜底
 （默认 CDP 地址 `http://127.0.0.1:9222`，可用 `YOUTUBE_BROWSER_CDP` 覆盖）。
-该兜底依赖 Node 22+ 与和 yt-dlp 版本匹配的 `yt-dlp-ejs`，用于解开 HLS 地址中的
+该兜底依赖 Node 22+ 与版本匹配的 `yt-dlp-ejs`，用于解开 HLS 地址中的
 `n` 校验值；项目根 [README](../README.md) 的 `yt-dlp[default,curl-cffi]`
 安装方式已包含 EJS。引擎会先检查 HLS 媒体分片是否可访问，避免只凭清单可读取
 就误判为可录制；若直播列表超过 3 分钟没有新片段，也会等待下轮检测，避免反复
@@ -85,11 +86,17 @@ bash platforms/chzzk/record.sh <channel_id>
 bash platforms/chzzk/record.sh https://chzzk.naver.com/live/<channel_id>
 ```
 
-以上三个入口默认将视频写入 `./recordings/`，可通过 `RECORDINGS_DIR` 修改根目录：
+### 输出目录
+
+所有录制入口（TikTok / SOOP / Kick / YouTube / CHZZK）默认把分段写入 `./recordings/`，
+可通过 `RECORDINGS_DIR` 修改根目录：
 
 ```bash
 RECORDINGS_DIR=/data/live bash platforms/kick/record.sh xqc
 ```
+
+目录布局与自愈行为见 [结构](structure.md#运行产物)；WebUI 创建的任务同样统一使用
+`RECORDINGS_DIR`，修改后需重启服务。
 
 ### Cookie
 

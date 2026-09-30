@@ -107,8 +107,18 @@ bash test.sh    # 运行 tests/ 与 bili/tests/ 两套测试
 cd webui/frontend && npm ci && npm run build   # 产出覆盖 webui/index.html
 ```
 
-CI（`.github/workflows/checks.yml`）会校验：两套单元测试、全部 shell 脚本语法、
-以及 `webui/index.html` 与前端源码的一致性（防止改了 `frontend/src` 忘记构建）。
+CI（`.github/workflows/checks.yml`）在每次 push / PR 校验：两套单元测试、全部 shell
+脚本语法（`bash -n`）、以及 `webui/index.html` 与前端源码的一致性（防止改了
+`frontend/src` 忘记构建）。
+
+本地想逐项手动复现 CI 的检查（不依赖 `test.sh`）：
+
+```bash
+python3 -m unittest discover -s tests -v
+python3 -m unittest discover -s bili/tests -v
+find . -name '*.sh' -type f -print \
+  | while IFS= read -r script; do bash -n "$script"; done
+```
 
 ## 运行产物
 
@@ -117,13 +127,3 @@ CI（`.github/workflows/checks.yml`）会校验：两套单元测试、全部 sh
 仓库已忽略日志、视频文件、Cookie 文件、`bili/upload-state*.json`（投稿凭证）和 `recordings/`。建议长期任务在仓库外或 `recordings/` 下运行，避免运行产物和源码混在一起。
 
 WebUI 创建的任务统一使用 `RECORDINGS_DIR`；概览页的磁盘容量与最近文件也以该目录为准。
-
-## 开发检查
-
-```bash
-python3 -m unittest discover -s tests -v
-find . -name '*.sh' -type f -print \
-  | while IFS= read -r script; do bash -n "$script"; done
-```
-
-推送后 GitHub Actions 会自动执行相同检查。

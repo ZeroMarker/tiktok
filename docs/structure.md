@@ -15,17 +15,24 @@ scripts/
     └── adapters/
         ├── base.py        # 适配器接口 + 频道标识提取
         ├── ytdlp.py       # youtube / kick / chzzk / soop（yt-dlp 通用，含 impersonate 兜底）
+        ├── youtube_nsig.py  # YouTube HLS `n` 校验：走 yt-dlp 的 EJS provider（依赖 Node + yt-dlp-ejs）
+        ├── youtube_browser.mjs  # YouTube 浏览器兜底（配合 youtube_nsig 解出可访问的 HLS）
         ├── tiktok.py      # TikTok：轻量检测每轮先行（带 Cookie），升级轮才跑 yt-dlp 与浏览器
         └── tiktok_extract.py  # TikTok 取流（curl_cffi 页面 + webcast API；渲染走 browserd）
 ```
 
-每平台的 `record.sh` 均为薄包装，只转发给引擎（单进程 WebUI 不经此包装、直接构造引擎；包装保留给命令行手动使用）：
+每平台的 `record.sh` 最终都 `exec` 到引擎（单进程 WebUI 不经此包装、直接构造引擎；包装保留给命令行手动使用）：
 
 ```bash
 exec python3 "${SCRIPT_DIR}/../../scripts/dlr.py" <platform> "$@"
 ```
 
-支持平台：`youtube kick chzzk soop tiktok`
+其中 `tiktok/record.sh` 另做两件命令行便利的事：补 `PYTHONPATH`/`PATH` 让子进程
+`yt-dlp` 能找到 `~/.local` 的 `curl_cffi`，以及在未显式指定时自动附带项目根
+`cookies.txt`（见下文「登录 Cookie」）。
+
+支持平台：`youtube kick chzzk soop tiktok`（`twitch` 不走本引擎，见
+`platforms/twitch/twitch.sh`）
 
 ## 平台目录
 
@@ -69,9 +76,10 @@ recordings/
 │   └── playerid_Nickname/
 ├── youtube/
 │   └── ChannelName/
-└── logs/                      # ffmpeg 运行日志（按平台分目录）
+└── logs/                      # 日志（按平台分目录）
     ├── tiktok/
-    │   └── ffmpeg_record_emiri.okazaki_20260823.log
+    │   ├── ffmpeg_record_emiri.okazaki_20260823.log   # ffmpeg 自身日志
+    │   └── engine_livestream-rec-tiktok-emiri.okazaki.log  # 引擎日志（WebUI 任务）
     ├── soop/
     └── youtube/
 ```

@@ -95,9 +95,9 @@ yt-dlp --no-warnings -f best --get-url "https://play.sooplive.co.kr/<频道id>"
 音频侧的 `aresample` 只对音频自己的时间戳做补偿，ffmpeg 没有跨流同步机制，
 所以两条时间轴一旦分开就只会越差越远。
 
-修复：改用 `-vf fps=30`（按输入真实时间戳做 CFR 转换，保留真实时长，滤镜图
-重初始化也不会回卷），音频侧补 `first_pts=0` 把起点钉到 0。`bili/push.sh`、
-`bili/replay.sh`、`platforms/twitch/twitch.sh` 均已修正。
+修复：改用 `-vf fps=N`（按输入真实时间戳做 CFR 转换，保留真实时长，滤镜图
+重初始化也不会回卷），音频侧补 `first_pts=0` 把起点钉到 0。`bili/push.sh`（`fps=30`）、
+`bili/replay.sh`（`fps=25`）、`platforms/twitch/twitch.sh`（`fps=30`）均已修正。
 
 自查方法——比较推流产物里两条流的时间轴终点，差值就是当前音画偏差：
 
@@ -106,14 +106,15 @@ ffprobe -v error -select_streams v -show_entries packet=pts_time -of csv=p=0 out
 ffprobe -v error -select_streams a -show_entries packet=pts_time -of csv=p=0 out.flv | tail -1
 ```
 
-两个数应当只差一帧以内（30 fps 约 0.03 s）。若视频终点远早于音频终点，就是
-时间轴被压缩了。若要长期监控偏差是否累积，在多个时间点比较两者的进度比例即可。
+两个数应当只差一帧以内（30 fps 约 0.03 s，25 fps 约 0.04 s）。若视频终点远早于音频
+终点，就是时间轴被压缩了。若要长期监控偏差是否累积，在多个时间点比较两者的进度比例
+即可。
 
 注意：ffmpeg progress 里的 `frame=` 与 `time*帧率` 会**恒定差几帧**（约 0.2~0.3 s），
 这是计数口径差异、不是音画偏差。判据是「差值是否随时间增长」，不要看它是否等于 0。
 
 完整定位过程与离线对照实验见
-[docs/archive/bili-push-av-sync.md](archive/bili-push-av-sync.md)。
+[归档：B 站推流音画不同步](archive/bili-push-av-sync.md)。
 
 ## 录制文件没有生成
 
@@ -144,9 +145,10 @@ yt-dlp --impersonate chrome --cookies cookies.txt \
 
 `platforms/tiktok/record.sh` 会自动检测项目根 `cookies.txt` 并携带；详见
 [使用说明](usage.md) 的“TikTok 登录 Cookie”。历史案例（emma_kusunoki 等）见
-[docs/archive/tiktok-error.md](../docs/archive/tiktok-error.md) 与 [TikTok 录制排障](archive/tiktok-live-recording.md)。
+[归档：tiktok-error](archive/tiktok-error.md) 与
+[归档：TikTok 录制排障](archive/tiktok-live-recording.md)。
 
-### TikTok 未获取到流与 Chromium 临时目录
+### TikTok 未获取到流与浏览器渲染服务
 
 “未获取到流”首先不等于程序故障。若主播已经下播，`yt-dlp`、Web API 和浏览器兜底
 都可能没有流地址；正式入口会按间隔继续轮询。先查看任务日志（WebUI 日志面板，或）：
@@ -163,39 +165,40 @@ journalctl -u livestream-webui -n 200 --no-pager | grep tiktok
 - `浏览器兜底失败 ... timed out`：TikTok 页面或 WAF 在规定时间内没有返回；如果主播
   确实正在直播，再单独验证 `yt-dlp`、Cookie 和网络出口。
 
-离线轮询先执行单次 yt-dlp 和进程内 HTTP/API 检测，连续 3 次轻量检测均失败后才启动
-一次浏览器兜底。浏览器启动参数会禁用 Vulkan；如果系统同时安装了非 Snap 浏览器，代码
-会优先使用它，以减少 AppArmor 审计噪声。
+**检测顺序**（`scripts/dlr/adapters/tiktok.py`）：每轮必跑一次进程内轻量检测
+（`curl_cffi` 页面 + webcast API，带 Cookie）；连续 3 次轻量检测均未发现直播才进入
+「升级轮」，此时跑一次带 Cookie 的 `yt-dlp` 主域探测（日志出现
+`[tiktok] 升级轮：yt-dlp 主域兜底探测 ...`）并调用一次浏览器兜底。这样避免每轮冷启动
+一个 `yt-dlp` 进程（曾达 ~425 次/小时）。
 
-浏览器兜底会创建临时 profile。代码使用独立 Chromium 进程组，并在每次探测结束时终止
-整个进程组，然后由 `TemporaryDirectory` 回收 profile。Snap Chromium 的 profile 创建在
-`~/snap/chromium/common/chromium-headless`，确保宿主和 Snap 看到并清理的是同一个目录；
-不能使用宿主 `/tmp`，否则文件会残留在 Snap 私有 `/tmp`。后续探测还会自动删除超过
-10 分钟且未被进程引用的旧 profile，覆盖 SIGKILL、掉电等无法执行上下文清理的情况。
-运行中可观察：
+**浏览器兜底走共享常驻服务**，不是每轮冷启动一个浏览器：TikTok 渲染统一由
+`tiktok-browserd.service`（`scripts/dlr/browserd.py`，默认 `127.0.0.1:9555`，
+`TIKTOK_BROWSERD_URL` 可覆盖）开标签页完成，服务端复用同一个 Chromium 实例和
+**一份常驻 profile**（默认 `~/.cache/tiktok-browserd/profile`，
+`TIKTOK_BROWSERD_PROFILE` 可覆盖）。因此旧版本“每轮探测建临时 profile、
+结束后回收”的行为已不存在，`/tmp/tiktok-chromium-*` 不再产生。浏览器启动参数仍会
+禁用 Vulkan；若系统同时安装了非 Snap 浏览器，代码会优先使用它，以减少 AppArmor
+审计噪声。
 
-```bash
-find /tmp -maxdepth 1 -type d -name 'tiktok-chromium-*' | wc -l
-find ~/snap/chromium/common/chromium-headless -mindepth 1 -maxdepth 1 2>/dev/null | wc -l
-ps -eo pid,ppid,etime,args | grep -E '/snap/chromium/.+--headless' | grep -v grep
-```
-
-如果确认任务已经停止，但仍有残留临时目录，先确保没有引擎在探测（单进程模型下探测
-逻辑都是 `livestream-webui` 进程内的线程，可在 WebUI 暂停/删除全部 TikTok 任务），
-确认无 Headless Chromium 进程后，只清理下面两个临时目录。不要删除 `~/tiktok` 或
-`recordings/`：
+排障时先确认渲染服务本身活着：
 
 ```bash
-find /tmp -maxdepth 1 -type d -name 'tiktok-chromium-*' -exec rm -rf -- {} +
-find ~/snap/chromium/common/chromium-headless -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + 2>/dev/null
+systemctl status tiktok-browserd --no-pager
+curl -fsS http://127.0.0.1:9555/health          # 期望输出 ok
+ls ~/.cache/tiktok-browserd/profile             # 常驻 profile，正常应有内容
 ```
 
-清理后重新启动任务，并观察目录数量是否回到 0 且不再增长。若清理后目录持续增加，
-检查是否有旧版本脚本、手动启动的 `dlr.py`，或其他服务在调用 Chromium：
+服务不可用时引擎会**自动跳过浏览器兜底**，轻量检测与 `yt-dlp` 路径不受影响——所以
+“兜底失败”本身不必然等于录不到流。若 profile 损坏，可在暂停/删除全部 TikTok 任务、
+确认无 Chromium 进程后删除该目录并 `sudo systemctl restart tiktok-browserd`
+（会重建，不要删除 `~/tiktok` 或 `recordings/`）。
+
+若任务已停止却仍有残留 Chromium 进程或目录持续增加，检查是否有旧版本脚本、手动
+启动的 `dlr.py`，或其他服务在调用 Chromium：
 
 ```bash
 ps -eo pid,ppid,user,etime,args | grep -E 'dlr.py tiktok|chromium.*headless' | grep -v grep
-pgrep -af 'browserd|tiktok/webui/app.py'   # 共享渲染服务与录制主进程（无线索单元）
+pgrep -af 'browserd|webui/app.py'   # 共享渲染服务与录制主进程（单进程模型，无按频道单元）
 ```
 
 ## WebUI 无法启动
