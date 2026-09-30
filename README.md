@@ -51,7 +51,7 @@ bash platforms/youtube/record.sh <YouTube handle|直播URL>
 bash platforms/chzzk/record.sh <CHZZK频道ID|直播URL>
 ```
 
-转推 Bilibili（开播、推流、轮播）见本仓库 [`bili/`](bili/README.md)（含开播/停播/改标题、直播推流、文件轮播、轮播值守与管理页）；把录制文件投成 B 站稿件用同目录的 `bili/upload.py`。
+转推 Bilibili（开播、推流、轮播）见本仓库 [`bili/`](bili/README.md)（含开播/停播/改标题、直播推流、文件轮播、轮播值守与管理页；管理页把推流目标固定成一个 TikTok 主播并实时监测开播状态，开播自动转推、关播自动停推）；把录制文件投成 B 站稿件用同目录的 `bili/upload.py`。
 
 平台脚本统一在 `platforms/<平台>/` 下（如 `platforms/tiktok/record.sh`）。根目录曾有的散脚本 `start.sh`（取流检测）与 `yt.sh`（YouTube 转推）已移入 [`archive/`](archive/README.md)。
 

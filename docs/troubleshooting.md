@@ -79,6 +79,25 @@ yt-dlp --no-warnings -f best --get-url "https://play.sooplive.co.kr/<频道id>"
 - `ffmpeg` 日志里是否有编码、网络或 RTMP 鉴权错误。
 - 推流码是否过期或被重置。
 
+## 固定目标开播了但没自动转推
+
+管理页把直播推流的目标固定成一个 TikTok 主播（`~/.config/bili/live.env` 的
+`TARGET`），并每 60 秒验一次流：开播自动起推流，连续两次未开播自动停推流。
+没转推时按顺序查：
+
+1. 看板「固定目标开播状态」写的是**抓流失败原因**还是「未开播」。写失败原因（如
+   `The channel is not currently live` 之外的报错）说明是取流失败而不是没开播，
+   按上文 TikTok 抓流失败的几条查（WAF 封锁、需登录态、会员订阅）。按设计，
+   抓不到真实流地址时不会空起推流。
+2. 值守是否开着：`cat ~/.config/bili/auto.env`（`AUTO=0` 为关）。「停止全部推流」
+   和「停播」都会关掉它。
+3. 目标是否还是那个人：管理页输入框留空时会自动填 `TARGET`；若被改过，
+   看板上 `@名字` 就是当前目标。
+4. 两种模式互斥：文件轮播在推时监测只报状态，不会抢单元。先停轮播。
+5. 监测线程随 `bili-webui.service` 跑：`systemctl --user status bili-webui.service`，
+   日志 `journalctl --user -u bili-webui.service`。它挂了不影响已在跑的推流——
+   `push.sh` 自己每 60 秒仍在重试。
+
 ## Bilibili 推流音画不同步
 
 症状：B 站直播间里声音和画面对不上，且**偏差随时间不断增大**，不会自愈。

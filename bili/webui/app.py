@@ -7,6 +7,10 @@
 
 另可开关 B 站房间（live.py start/stop/update/status）。
 
+直播推流目标是**固定的**一个 TikTok 主播（live.env 的 TARGET，管理页填一次即固定）。
+常驻监测线程每 60 秒验一次流：开播自动起推流、关播自动停推流（值守开关 auto.env，
+「停止全部推流」/「停播」会关掉值守，避免把用户明确停掉的东西拉回来）。
+
 安全：默认只监听 127.0.0.1，无应用层认证；公网发布必须经反代加 Basic Auth。
 """
 
@@ -43,6 +47,8 @@ GET_STREAM_PY = PROJECT_ROOT / "get_stream.py"
 CONFIG_DIR = Path.home() / ".config" / "bili"
 LIVE_ENV = CONFIG_DIR / "live.env"
 REPLAY_ENV = CONFIG_DIR / "replay.env"
+# 值守开关：直播推流由管理页启动过才写 AUTO=1，监测线程据此决定是否自动接管
+AUTO_ENV = CONFIG_DIR / "auto.env"
 SESSION_FILE = PROJECT_ROOT / ".bilibili_session.json"
 
 
@@ -90,6 +96,13 @@ LOGABLE_UNITS = {LIVE_UNIT, REPLAY_UNIT, WEBUI_UNIT}
 TARGET_RE = re.compile(r"[A-Za-z0-9_.]{1,64}")
 STREAM_SCHEMES = ("http://", "https://", "rtmp://", "rtmps://")
 SYSTEMCTL = ["systemctl", "--user"]
+TRUE_WORDS = {"1", "true", "yes", "on"}
+# 目标开播探测间隔（秒）：与 push.sh 的重试节奏一致，UI 每 10 秒轮询只读快照，
+# 不会因此多打 TikTok。
+TARGET_POLL_INTERVAL = 60.0
+# 连续未开播到第几次才停推流：单次失败可能是网络抖动或 WAF 拦，误停会让停播延迟
+OFFLINE_STREAK_TO_STOP = 2
+PROBE_TIMEOUT = 120
 
 
 def run(argv: list[str], timeout: int = 20, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -293,20 +306,166 @@ def _wait_inactive(unit: str, timeout: int = 35) -> bool:
             return True
         time.sleep(1)
     return False
-def probe_tiktok(target: str, timeout: int = 150) -> str:
-    """切源前先验流：与 push.sh 同链路（get_stream.py 四级兜底）。
-    拿不到地址就抛错，调用方保持现状不动。"""
+
+
+def probe_target(target: str, timeout: int = PROBE_TIMEOUT) -> tuple[str, str]:
+    """探测目标是否开播，返回 (流地址或空, 诊断文案)。与 push.sh 同链路
+    （get_stream.py 四级兜底），但失败不抛错：把原因带给 UI——「未开播」和
+    「抓流失败」在排障时是两回事。"""
     try:
         r = run(["python3", str(GET_STREAM_PY), target], timeout=timeout, check=False)
-    except subprocess.TimeoutExpired as exc:
-        raise ValueError(f"@{target} 验流超时（已保持原推流不动）") from exc
+    except subprocess.TimeoutExpired:
+        return "", f"验流超时（>{timeout}s）"
+    except OSError as exc:
+        return "", f"验流失败：{exc}"
     for line in (r.stdout or "").splitlines():
         line = line.strip()
         if line.lower().startswith(STREAM_SCHEMES):
-            return line
-    raise ValueError(f"@{target} 当前未开播或抓不到流（已保持原推流不动）")
+            return line, "已开播"
+    err = (r.stderr or "").strip().splitlines()
+    return "", err[-1][-200:] if err else "未开播或所有取流方法失败"
 
 
+def probe_tiktok(target: str, timeout: int = 150) -> str:
+    """切源前先验流：拿不到地址就抛错，调用方保持现状不动。"""
+    url = probe_target(target, timeout)[0]
+    if not url:
+        raise ValueError(f"@{target} 当前未开播或抓不到流（已保持原推流不动）")
+    return url
+
+
+# ---- 固定目标开播监测 ----
+# 目标只认 live.env 的 TARGET（管理页填一次即固定，之后每轮自动接管）；
+# 监测线程独立于 push.sh 轮询：ffmpeg 在推时不再打 TikTok，省掉重复抓流。
+_monitor_lock = threading.Lock()
+_monitor_state: dict[str, object] = {
+    "target": "",     # 当前固定目标（每轮从 live.env 重读，改目标立即生效）
+    "live": None,     # True 开播 / False 未开播 / None 未知
+    "detail": "等待首次检测",
+    "source": "",     # push=ffmpeg 在推（不额外探测）/ probe=探测结果
+    "ts": 0.0,        # 上次检测完成的 monotonic
+    "next": 0.0,      # 下次检测的 monotonic
+    "wall": 0.0,      # 上次检测完成的墙钟时间（给 UI 显示）
+    "streak": 0,      # 连续未开播次数
+}
+
+
+def _record(live: bool | None, detail: str, source: str, streak: int | None = None) -> None:
+    with _monitor_lock:
+        _monitor_state["live"] = live
+        _monitor_state["detail"] = detail
+        _monitor_state["source"] = source
+        now = time.monotonic()
+        _monitor_state["ts"] = now
+        _monitor_state["next"] = now + TARGET_POLL_INTERVAL
+        _monitor_state["wall"] = time.time()
+        if streak is not None:
+            _monitor_state["streak"] = streak
+
+
+def auto_armed() -> bool:
+    """值守开关：只有管理页启动过直播推流（或已在值守）才允许监测线程接管。
+
+    「停止全部推流」「停播」会关掉它，之后主播开播也不再自动起流——否则用户
+    明确停掉的东西会被后台悄悄拉回来。
+    """
+    return _read_env(AUTO_ENV, "AUTO").strip().lower() in TRUE_WORDS
+
+
+def _set_armed(armed: bool) -> None:
+    _write_env(AUTO_ENV, [f"AUTO={1 if armed else 0}"])
+
+
+def target_status() -> dict[str, object]:
+    """固定目标的开播状态快照（供 /api/status 展示）。"""
+    with _monitor_lock:
+        state = dict(_monitor_state)
+    now = time.monotonic()
+    return {
+        "target": state["target"],
+        "live": state["live"],
+        "detail": state["detail"],
+        "source": state["source"],
+        "checked": time.strftime("%H:%M:%S", time.localtime(state["wall"])) if state["wall"] else "",
+        "age": round(now - state["ts"], 1) if state["ts"] else None,
+        "next": max(0, round(state["next"] - now)) if state["next"] else None,
+        "streak": state["streak"],
+        "armed": auto_armed(),
+    }
+
+
+def _auto_control(action) -> bool:
+    """监测线程执行控制动作：拿不到用户操作锁就让路，本轮跳过、下轮再来。"""
+    if not CONTROL_LOCK.acquire(blocking=False):
+        return False
+    try:
+        action()
+        return True
+    except (ValueError, RuntimeError, OSError, subprocess.SubprocessError) as exc:
+        print(f"开播监测自动接管失败：{exc}", flush=True)
+        return False
+    finally:
+        CONTROL_LOCK.release()
+
+
+def _start_live_unit(target: str) -> None:
+    """开播自动起推流：先保证房间在播，再拉起直播推流单元（同 set_mode 的路径）。"""
+    ensure_room_live()
+    _write_env(LIVE_ENV, [f"TARGET={target}"])
+    run([*SYSTEMCTL, "reset-failed", LIVE_UNIT], check=False)
+    _ctl("enable", LIVE_UNIT)
+    _ctl("restart", LIVE_UNIT)
+
+
+def monitor_cycle() -> None:
+    """一轮监测：读固定目标 → 判断在播 → 必要时自动启停推流。可独立测试。"""
+    target = _read_env(LIVE_ENV, "TARGET").strip()
+    with _monitor_lock:
+        # 换人就清零连续失败计数：新目标的第一次失败不该继承旧目标的账
+        if _monitor_state["target"] != target:
+            _monitor_state["streak"] = 0
+        _monitor_state["target"] = target
+    if not TARGET_RE.fullmatch(target or ""):
+        _record(None, "未设置目标主播（管理页填一次即固定）", "")
+        return
+
+    units = _show_many(LIVE_UNIT, REPLAY_UNIT)
+    live, replay = units[LIVE_UNIT], units[REPLAY_UNIT]
+    if replay["active"] == "active":
+        # 两种模式互斥是本 WebUI 的硬约束：轮播单元在跑时不抢，只报状态。
+        # 判 active 而不是判 ffmpeg：轮播卡死（ffmpeg 已退）时抢单元会变成双推流。
+        _record(None, "文件轮播运行中，暂不接管", "")
+        return
+    # 一次遍历 /proc 同时回答两个 MainPID，直播与轮播共用（省一次全量扫描）
+    pushing = _pushing([live["pid"], replay["pid"]])
+    if live["active"] == "active" and pushing.get(live["pid"], False):
+        # ffmpeg 有流在推就等于开播，不必再打一次 TikTok
+        _record(True, "推流中（ffmpeg 已连上源）", "push", 0)
+        return
+
+    stream, detail = probe_target(target)
+    if stream:
+        _record(True, detail, "probe", 0)
+        if live["active"] != "active" and auto_armed():
+            if _auto_control(lambda: _start_live_unit(target)):
+                _record(True, "开播 → 已自动起推流", "probe", 0)
+        return
+
+    with _monitor_lock:
+        streak = int(_monitor_state["streak"]) + 1
+    _record(False, detail, "probe", streak)
+    # 关播自动停推流：单次失败可能是网络抖动，连续两次才动手。
+    if streak >= OFFLINE_STREAK_TO_STOP and live["active"] == "active" and auto_armed():
+        _auto_control(lambda: _ctl("disable", "--now", LIVE_UNIT))
+
+
+def monitor_loop(stop: threading.Event) -> None:
+    while not stop.is_set():
+        try:
+            monitor_cycle()
+        except Exception as exc:  # noqa: BLE001 — 后台线程不能因未知异常退出
+            _record(None, f"检测异常：{exc}", "")
+        stop.wait(TARGET_POLL_INTERVAL)
 
 
 def status() -> dict[str, object]:
@@ -325,7 +484,8 @@ def status() -> dict[str, object]:
         mode = "replay"
     else:
         mode = "idle"
-    return {"mode": mode, "live": live, "replay": replay, "room": room_status()}
+    return {"mode": mode, "live": live, "replay": replay, "room": room_status(),
+            "target": target_status()}
 
 
 @exclusive
@@ -346,6 +506,9 @@ def set_mode(data: dict) -> dict[str, object]:
         run([*SYSTEMCTL, "reset-failed", LIVE_UNIT], check=False)
         _ctl("enable", LIVE_UNIT)
         _ctl("restart", LIVE_UNIT)  # 新 TARGET 只在新进程生效
+        _set_armed(True)   # 值守：之后开播/关播由监测线程自动接管
+        with _monitor_lock:
+            _monitor_state["streak"] = 0
     elif mode == "replay":
         paths = data.get("paths", [])
         if not isinstance(paths, list) or not paths or len(paths) > 32:
@@ -381,15 +544,27 @@ def set_mode(data: dict) -> dict[str, object]:
         run([*SYSTEMCTL, "reset-failed", REPLAY_UNIT], check=False)
         _ctl("enable", REPLAY_UNIT)
         _ctl("restart", REPLAY_UNIT)  # 新 REPLAY_ARGS 只在新进程生效
+        _set_armed(False)  # 轮播不接管开播：两种模式互斥是硬约束
     else:
         raise ValueError('mode 只能是 "live" 或 "replay"')
     return status()
 
 
 @exclusive
+def arm_auto(data: dict) -> dict[str, object]:
+    """值守开关：只交出/收回「自动接管」权，不立刻改变当前推流状态。"""
+    enabled = bool(data.get("enabled", True))
+    _set_armed(enabled)
+    return {"ok": True, "armed": enabled, "status": status()}
+
+
+@exclusive
 def stop_all() -> dict[str, object]:
     _ctl("disable", "--now", LIVE_UNIT)
     _ctl("disable", "--now", REPLAY_UNIT)
+    # 明确停掉的东西不能被后台悄悄拉回来：关值守，主播再开播也不自动起流
+    _set_armed(False)
+    _record(None, "已停止全部推流，值守关闭", "")
     return status()
 
 
@@ -424,6 +599,8 @@ def room(data: dict) -> dict[str, object]:
             raise RuntimeError((r.stdout + r.stderr).strip()[-2000:] or "停播失败")
         _ctl("disable", "--now", LIVE_UNIT)
         _ctl("disable", "--now", REPLAY_UNIT)
+        _set_armed(False)  # 停播即这场直播结束，不再自动接管
+        _record(None, "已停播，值守关闭", "")
         return {"ok": True, "output": r.stdout.strip()[-1000:], "status": status()}
     if action == "update":
         invalidate_room()
@@ -556,6 +733,12 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(HTTPStatus.OK, set_mode(data))
             elif self.path == "/api/stop":
                 self.send_json(HTTPStatus.OK, stop_all())
+            elif self.path == "/api/arm":
+                self.send_json(HTTPStatus.OK, arm_auto(data))
+            elif self.path == "/api/probe":
+                # 手动立刻跑一轮检测（不等 60 秒节奏），结果仍写进同一份快照
+                monitor_cycle()
+                self.send_json(HTTPStatus.OK, {"target": target_status(), "status": status()})
             elif self.path == "/api/room":
                 self.send_json(HTTPStatus.OK, room(data))
             else:
@@ -576,12 +759,17 @@ def main() -> None:
     host = os.environ.get("BILI_WEBUI_HOST", "127.0.0.1")
     port = int(os.environ.get("BILI_WEBUI_PORT", "8767"))
     server = ThreadingHTTPServer((host, port), Handler)
+    # 开播监测常驻：WebUI 关掉页面不影响值守（systemd 拉起即恢复）
+    stop_monitor = threading.Event()
+    threading.Thread(target=monitor_loop, args=(stop_monitor,),
+                     name="live-monitor", daemon=True).start()
     print(f"Bili Push WebUI: http://{host}:{port}", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
+        stop_monitor.set()
         server.server_close()
 
 

@@ -12,7 +12,7 @@
 | `accounts.py` | 多账号登录态档案：存哪、选谁、被 `live.py`/`upload.py`/`webui/app.py` 共用 |
 | `push.sh` | 直播推流：TikTok 直播源 → Bilibili。未开播时每 60 秒轮询，开播自动转推 |
 | `replay.sh` | 文件轮播：本地 `.mp4` 按序循环 → Bilibili（默认 `-c copy`，`--encode` 重编码） |
-| `watch.sh` | 轮播值守：先播本地文件，每 60 秒探测 TikTok，一开播就停轮播切转推 |
+| `watch.sh` | 轮播值守：先播本地文件，每 60 秒探测 TikTok，一开播就停轮播切转推（管理页已内置同类值守，见「WebUI」） |
 | `soop.sh` | 直播推流：SOOP 直播间 → Bilibili |
 | `upload.py` | 稿件投稿：本地 `.mp4` 投成 B 站普通稿件（`push` 只传文件，`post` 提交稿件） |
 | `webui/app.py` | 推流管理页后端（标准库 only），见下 |
@@ -114,10 +114,34 @@ bash systemd/install.sh   # 装 3 个 user unit，bili-webui 直接 enable --now
 - 本地：`http://127.0.0.1:8767`（仅回环，无应用层认证）
 - 公网：`https://bili.20070809.xyz`（Caddy 反代 + basicauth，与站群同凭证）
 
-管理页可做：启停两种模式、看 unit 状态与 ffmpeg 是否在推、看 journal 日志、开播/停播/改标题。开播后自动把新推流码保存到 `~/.config/bili/push.env`（权限 600）。手动等价操作：`systemctl --user enable --now bili-live.service`（先停另一个）。
+管理页可做：启停两种模式、看 unit 状态与 ffmpeg 是否在推、看 journal 日志、开播/停播/改标题。看板还显示**固定目标**的开播状态（开播中 / 未开播 / 待检测 + 上次与下次检测时间）。开播后自动把新推流码保存到 `~/.config/bili/push.env`（权限 600）。手动等价操作：`systemctl --user enable --now bili-live.service`（先停另一个）。
+
+### 固定目标 + 值守（开播自动转推）
+
+直播推流的目标是**固定的一个** TikTok 主播，写在 `~/.config/bili/live.env` 的
+`TARGET`（管理页「固定目标主播」填一次即固定，之后每轮自动接管）。
+
+`bili-webui.service` 内常驻一个监测线程，每 60 秒跑一轮：
+
+| 轮询所见 | 动作 |
+|---|---|
+| ffmpeg 正在推流 | 直接判为开播，**不重复打 TikTok** |
+| 验流成功 + 推流单元未跑 | 自动 `ensure_room_live` → `enable` + `restart bili-live` |
+| 验流成功 + 已在推 | 只更新状态 |
+| 验流失败 1 次 | 只更新状态（网络抖动/WAF 不误停） |
+| 验流失败 ≥2 次 | `disable --now bili-live`（关播自动收工） |
+| 文件轮播在推 | 只报状态，**不抢单元**（两种模式互斥是硬约束） |
+
+值守开关在 `~/.config/bili/auto.env` 的 `AUTO`（管理页勾选框 / `POST /api/arm`）。
+「停止全部推流」和「停播」都会把它关掉——用户明确停掉的东西不会被后台悄悄拉回来。
+`push.sh` 自己的 60 秒重试仍在，两层互为兜底：`bili-webui` 挂了不影响已在跑的推流恢复。
+
+自动接管只在探测到**真实流地址**后发生，因此 TikTok 抓不到流（机房 IP 被 WAF 拦、
+主播需登录态）时不会空起推流；此时看板上写的是失败原因而不是「未开播」。
 
 API（JSON）：`GET /api/health|status|logs?which=live|replay|webui&tail=`，
 `POST /api/mode {mode,target|paths,encode}`、`POST /api/stop`、
+`POST /api/arm {enabled}`、`POST /api/probe`（立刻跑一轮检测，不等 60 秒）、
 `POST /api/room {action:start|stop|update, area?, title?}`。
 
 ## 推流密钥来源
@@ -230,6 +254,9 @@ ffmpeg -hide_banner -v error -i <file> -f null - 2>&1 | grep -c "concealing"
 - unit 起不来、`203/EXEC`：脚本缺可执行位（`chmod +x`），`systemd-analyze verify` 校验。
 - 双推流冲突：同一房间同时只能一路流；`status` 报 `conflict` 时停掉一路。
   旧 hub 托管进程与 systemd 不互通，迁移时先停旧进程（`hub stop <name>`）。
+- 固定目标开播后没自动起流：看板「固定目标开播状态」写的是抓流失败原因还是「未开播」——
+  前者多为机房 IP 被 TikTok WAF 拦或主播需登录态（见上），此时按设计不会空起推流。
+  值守是否开着看 `~/.config/bili/auto.env`（`AUTO=0` 表示已关）。
 - 看日志：管理页日志区，或 `journalctl --user -u bili-live.service`。
 - 投稿报 `-101`/`-111`：`live.py login` 会话过期或 csrf 不匹配，重新登录。
 - 投稿报 `601`：连续提交过多，等十几分钟；确认没有在拆成大量独立稿件。

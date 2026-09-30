@@ -39,6 +39,23 @@ yt-dlp --update-to nightly
 单元（`bili-live` / `bili-replay` / `bili-webui`）与推流码管理（`~/.config/bili/`）。
 安装：`bash bili/systemd/install.sh`。
 
+`~/.config/bili/` 下由管理页维护的配置（均 600）：
+
+| 文件 | 键 | 含义 |
+|---|---|---|
+| `live.env` | `TARGET` | **固定的**推流目标 TikTok 主播 |
+| `replay.env` | `REPLAY_ARGS` | 文件轮播的路径与 `--encode` |
+| `auto.env` | `AUTO` | 值守：开播自动起推流、关播自动停推流（1 开 / 0 关） |
+| `push.env` | `BILIBILI_PUSH_URL` / `BILIBILI_PUSH_CODE` | 当前推流码，每次开播刷新 |
+
+手动等价操作（会绕过管理页的值守判断）：
+
+```bash
+echo 'TARGET=some_user' > ~/.config/bili/live.env   # 换固定目标
+systemctl --user restart bili-live.service          # 让 push.sh 读到新目标
+echo 'AUTO=1' > ~/.config/bili/auto.env             # 手动开值守
+```
+
 
 ## WebUI
 
