@@ -1,6 +1,8 @@
 <template>
   <nav class="nav" aria-label="主导航">
-    <button v-for="item in items" :key="item.path" class="nav-item" :class="{ active: isActive(item), primary: item.name === 'new' }" type="button" :aria-current="isActive(item) ? 'page' : undefined" @click="navigate(item.path)"><AppIcon :name="item.icon" /><span>{{ item.label }}</span></button>
+    <p class="nav-label">工作空间</p>
+    <button v-for="item in items" :key="item.path" class="nav-item" :class="{ active: isActive(item), primary: item.name === 'new' }" type="button" :aria-current="isActive(item) ? 'page' : undefined" @click="navigate(item.path)"><AppIcon :name="item.icon" /><span>{{ item.label }}</span><span v-if="isActive(item)" class="nav-indicator" aria-hidden="true"></span></button>
+    <div class="nav-note"><AppIcon name="record" /><span>跨平台录制<br><small>统一管理每一场直播</small></span></div>
   </nav>
 </template>
 <script setup>

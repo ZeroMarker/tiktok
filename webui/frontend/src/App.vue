@@ -1,11 +1,17 @@
 <template>
-  <main class="shell" :class="{ offline: appState.offline, degraded: appState.degraded }">
+  <div class="shell" :class="{ offline: appState.offline, degraded: appState.degraded }">
     <AppHeader />
-    <AppNav />
-    <ConnectionBanner />
-    <component :is="viewComponent" :key="viewKey" :unit="route.unit" />
+    <a class="skip-link" href="#page-content" @click.prevent="focusContent">跳转到页面内容</a>
+    <div class="workspace">
+      <AppNav />
+      <main id="page-content" class="page-content" tabindex="-1">
+        <ConnectionBanner />
+        <div v-if="appState.busy && !appState.loadedOnce" class="loading-state" role="status">正在同步直播任务与录制文件…</div>
+        <component v-else :is="viewComponent" :key="viewKey" :unit="route.unit" />
+      </main>
+    </div>
     <GlobalFeedback />
-  </main>
+  </div>
 </template>
 <script setup>
 import { computed } from "vue";
@@ -20,6 +26,8 @@ import ConnectionBanner from "./features/app/ConnectionBanner.vue";
 import GlobalFeedback from "./features/app/GlobalFeedback.vue";
 import { appState } from "./stores/appStore.js";
 import { route } from "./router.js";
+
+function focusContent() { document.getElementById("page-content")?.focus(); }
 
 const views = { overview: Overview, tasks: Tasks, task: TaskDetail, library: Library, new: NewTask };
 const viewComponent = computed(() => views[route.value.name] || Overview);
