@@ -86,6 +86,7 @@ WebUI 同时提供 PWA 支持：可安装到桌面/主屏幕，断网时仍可�
 - [项目结构](docs/structure.md)
 - [配置](docs/configuration.md)
 - [使用说明](docs/usage.md)
+- [WebUI 设计规范](docs/webui-design-spec.md)
 - [排障](docs/troubleshooting.md)
 - [Bilibili 推流与投稿](bili/README.md)
 - [Bilibili 投稿接口细节](bili/docs/bilibili-upload-api.md)
