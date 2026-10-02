@@ -9,7 +9,7 @@
 - Kick：本地分段录制
 - YouTube：本地分段录制、转推 Bilibili
 - CHZZK：本地分段录制
-- Twitch：转推 Bilibili
+- Twitch：本地分段录制、转推 Bilibili
 
 ## 快速开始
 
@@ -43,12 +43,13 @@ bash platforms/tiktok/record.sh <tiktok_username>
 bash platforms/soop/record.sh <soop_username|SOOP直播链接>
 ```
 
-录制 Kick、YouTube 或 CHZZK：
+录制 Kick、YouTube、CHZZK 或 Twitch：
 
 ```bash
 bash platforms/kick/record.sh <Kick用户名|直播URL>
 bash platforms/youtube/record.sh <YouTube handle|直播URL>
 bash platforms/chzzk/record.sh <CHZZK频道ID|直播URL>
+bash platforms/twitch/record.sh <Twitch用户名|频道URL>
 ```
 
 转推 Bilibili（开播、推流、轮播）见本仓库 [`bili/`](bili/README.md)（含开播/停播/改标题、直播推流、文件轮播、轮播值守与管理页；管理页把推流目标固定成一个 TikTok 主播并实时监测开播状态，开播自动转推、关播自动停推）；把录制文件投成 B 站稿件用同目录的 `bili/upload.py`。

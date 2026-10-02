@@ -14,7 +14,7 @@ scripts/
     ├── engine.py          # 统一录制循环：输出布局、检测、ffmpeg 分段、优雅停止、断流重试
     └── adapters/
         ├── base.py        # 适配器接口 + 频道标识提取
-        ├── ytdlp.py       # youtube / kick / chzzk / soop（yt-dlp 通用，含 impersonate 兜底）
+        ├── ytdlp.py       # youtube / kick / chzzk / soop / twitch（yt-dlp 通用，含 impersonate 兜底）
         ├── youtube_nsig.py  # YouTube HLS `n` 校验：走 yt-dlp 的 EJS provider（依赖 Node + yt-dlp-ejs）
         ├── youtube_browser.mjs  # YouTube 浏览器兜底（配合 youtube_nsig 解出可访问的 HLS）
         ├── tiktok.py      # TikTok：轻量检测每轮先行（带 Cookie），升级轮才跑 yt-dlp 与浏览器
@@ -31,8 +31,8 @@ exec python3 "${SCRIPT_DIR}/../../scripts/dlr.py" <platform> "$@"
 `yt-dlp` 能找到 `~/.local` 的 `curl_cffi`，以及在未显式指定时自动附带项目根
 `cookies.txt`（见下文「登录 Cookie」）。
 
-支持平台：`youtube kick chzzk soop tiktok`（`twitch` 不走本引擎，见
-`platforms/twitch/twitch.sh`）
+支持平台：`youtube kick chzzk soop tiktok twitch`。Twitch 本地录制使用
+`platforms/twitch/record.sh`，转推 Bilibili 使用 `platforms/twitch/twitch.sh`。
 
 ## 平台目录
 
@@ -45,7 +45,7 @@ exec python3 "${SCRIPT_DIR}/../../scripts/dlr.py" <platform> "$@"
 │   ├── youtube/            # record.sh 入口
 │   ├── kick/               # record.sh 入口
 │   ├── chzzk/              # record.sh 入口
-│   └── twitch/             # Twitch -> Bilibili 脚本
+│   └── twitch/             # record.sh 本地录制入口 + twitch.sh 转推 Bilibili
 ├── bili/                  # Bilibili 推流 + 稿件投稿（开播/推流/轮播/值守/upload.py + 独立 WebUI 与 user 单元，见 bili/README.md）
 ├── scripts/               # 统一录制引擎（见上）
 ├── systemd/               # WebUI/browserd systemd unit 与安装脚本

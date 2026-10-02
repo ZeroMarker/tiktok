@@ -97,7 +97,7 @@ class ExtractSegmentTest(unittest.TestCase):
 
 class AdapterDispatchTest(unittest.TestCase):
     def test_ytdlp_platforms(self):
-        for platform in ("youtube", "kick", "chzzk", "soop"):
+        for platform in ("youtube", "kick", "chzzk", "soop", "twitch"):
             adapter = load_adapter(platform, "some_channel")
             self.assertEqual(adapter.platform, platform)
             self.assertEqual(adapter.identifier, "some_channel")
@@ -118,6 +118,46 @@ class AdapterDispatchTest(unittest.TestCase):
 
 
 class LiveURLTest(unittest.TestCase):
+    def test_twitch_channel_inputs_resolve_to_live_channel(self):
+        for target in (
+            "Shroud", " @Shroud ", "https://www.twitch.tv/Shroud/?ref=home",
+            "https://twitch.tv/shroud", "https://m.twitch.tv/shroud/about",
+            "https://www.twitch.tv/shroud/videos",
+        ):
+            with self.subTest(target=target):
+                adapter = load_adapter("twitch", target)
+                self.assertEqual(adapter.identifier, "shroud")
+                self.assertEqual(adapter.live_url, "https://www.twitch.tv/shroud")
+                engine = Engine("twitch", target, "/tmp/rec")
+                self.assertEqual(engine.output_dir(None), Path("/tmp/rec/twitch/shroud"))
+
+    def test_twitch_rejects_vods_clips_and_invalid_channels(self):
+        for target in (
+            "", "https://www.twitch.tv/", "https://www.twitch.tv/videos/123456",
+            "https://www.twitch.tv/shroud/clip/SomeClip", "https://clips.twitch.tv/SomeClip",
+            "https://example.com/shroud", "https://twitch.tv.evil.test/shroud",
+            "https://www.twitch.tv/directory", "name with spaces",
+        ):
+            with self.subTest(target=target), self.assertRaises(ValueError):
+                load_adapter("twitch", target)
+
+    def test_twitch_quality_cookies_and_hls_source(self):
+        adapter = load_adapter("twitch", "Shroud", cookies="/tmp/session.txt", quality="720p")
+        with mock.patch.object(adapter, "_run", return_value=(0, "https://cdn.example/live.m3u8\n", "")) as run:
+            self.assertEqual(adapter.detect_stream_url(), "https://cdn.example/live.m3u8")
+        cmd = run.call_args.args[0]
+        self.assertEqual(cmd[-1], "https://www.twitch.tv/shroud")
+        self.assertIn("best[height<=720]", cmd)
+        self.assertEqual(cmd[cmd.index("--cookies") + 1], "/tmp/session.txt")
+        self.assertTrue(adapter.bsf_aac)
+        self.assertEqual(adapter.referer, "https://www.twitch.tv/")
+
+    def test_twitch_offline_returns_no_source_with_reason(self):
+        adapter = load_adapter("twitch", "shroud")
+        with mock.patch.object(adapter, "_run", return_value=(1, "", "ERROR: [twitch:stream] shroud: The channel is not currently live")):
+            self.assertIsNone(adapter.detect_stream_url())
+        self.assertEqual(adapter.last_detect_error, "The channel is not currently live")
+
     def test_youtube_builds_live_url(self):
         adapter = load_adapter("youtube", "SomeHandle")
         self.assertEqual(adapter.live_url, "https://www.youtube.com/@SomeHandle/live")

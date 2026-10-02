@@ -7,7 +7,7 @@
     python3 scripts/dlr.py <platform> <target> [选项]
 
 平台：
-    youtube kick chzzk soop tiktok
+    youtube kick chzzk soop tiktok twitch
 
 选项：
     --cookies FILE       Netscape 格式 Cookie 文件（部分主播需登录的平台）
@@ -27,7 +27,7 @@ import sys
 
 from dlr.engine import Engine
 
-PLATFORMS = ("youtube", "kick", "chzzk", "soop", "tiktok")
+PLATFORMS = ("youtube", "kick", "chzzk", "soop", "tiktok", "twitch")
 
 
 def build_parser() -> argparse.ArgumentParser:

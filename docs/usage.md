@@ -86,9 +86,29 @@ bash platforms/chzzk/record.sh <channel_id>
 bash platforms/chzzk/record.sh https://chzzk.naver.com/live/<channel_id>
 ```
 
+### Twitch
+
+可在 WebUI「新建任务」选择 Twitch，输入用户名或频道地址，也可使用命令行：
+
+```bash
+bash platforms/twitch/record.sh shroud
+bash platforms/twitch/record.sh https://www.twitch.tv/shroud --quality 720p
+```
+
+支持等待开播、断流重试和默认每 10 分钟分段保存 MP4，输出到
+`recordings/twitch/<频道>[_昵称]/`。用户名大小写、`@用户名` 与频道地址统一到
+小写频道标识；WebUI 同一频道只允许一个任务，已暂停任务请使用「继续」。
+只录制直播频道，不接受点播视频或剪辑地址。
+
+取流使用 [yt-dlp 的 Twitch 适配器](https://github.com/yt-dlp/yt-dlp/blob/master/yt_dlp/extractor/twitch.py)。
+需要登录或订阅权限时，可通过 `--cookies /secure/twitch-cookies.txt` 传入有权限账号
+导出的 Netscape Cookie 文件；WebUI API 可用 `cookie_file` 指定服务器上的文件。
+画质选项复用现有引擎：优先选择不超过指定分辨率的流，无匹配时回退到可用画质。
+同目录的 `twitch.sh` 仍用于转推 Bilibili。
+
 ### 输出目录
 
-所有录制入口（TikTok / SOOP / Kick / YouTube / CHZZK）默认把分段写入 `./recordings/`，
+所有录制入口（TikTok / SOOP / Kick / YouTube / CHZZK / Twitch）默认把分段写入 `./recordings/`，
 可通过 `RECORDINGS_DIR` 修改根目录：
 
 ```bash

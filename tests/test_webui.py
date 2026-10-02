@@ -247,6 +247,36 @@ class WebUIHelpersTest(unittest.TestCase):
             unit = app.start_job({"platform": "tiktok", "target": "@user", "quality": "720p"})
         self.assertEqual(self.rec.get_spec(unit)["quality"], "720p")
 
+    def test_twitch_task_normalizes_target_and_rejects_duplicate_channel(self):
+        with patch.object(app_recorder, "build_engine", side_effect=_fake_build()):
+            unit = app.start_job({"platform": "twitch", "target": "https://www.twitch.tv/Shroud/?ref=home", "quality": "720p"})
+            self.assertEqual(self.rec.get_spec(unit)["target"], "shroud")
+            self.assertEqual(self.rec.get_spec(unit)["quality"], "720p")
+            self.assertEqual(app_jobs._load_catalog()[unit]["platform"], "twitch")
+            with self.assertRaisesRegex(ValueError, "已存在"):
+                app.start_job({"platform": "twitch", "target": "@SHROUD"})
+            app.pause_job(unit)
+            with self.assertRaisesRegex(ValueError, "处于暂停"):
+                app.start_job({"platform": "twitch", "target": "https://twitch.tv/shroud"})
+            app.resume_job(unit)
+            self.assertTrue(self.rec.is_running(unit))
+            app.delete_job(unit)
+            self.assertNotIn(unit, app_jobs._load_catalog())
+
+    def test_twitch_vod_rejected_before_engine_start(self):
+        with patch.object(app_recorder, "build_engine", side_effect=AssertionError("不应启动")):
+            with self.assertRaises(ValueError):
+                app.start_job({"platform": "twitch", "target": "https://www.twitch.tv/videos/12345"})
+
+    def test_twitch_recorder_builds_unified_engine(self):
+        unit = app.unit_name("twitch", "shroud")
+        engine = app_recorder.build_engine(unit, {
+            "platform": "twitch", "target": "shroud", "quality": "480p", "cookie_file": "/tmp/twitch-session.txt",
+        })
+        self.assertEqual(engine.adapter.live_url, "https://www.twitch.tv/shroud")
+        self.assertEqual(engine.adapter.quality_height, 480)
+        self.assertEqual(engine.adapter.cookies, "/tmp/twitch-session.txt")
+
     def test_start_job_defaults_to_best_quality(self):
         with patch.object(app_jobs, "list_jobs", return_value=[]), \
                 patch.object(app_recorder, "build_engine", side_effect=_fake_build()):

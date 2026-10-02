@@ -37,12 +37,13 @@ import AppIcon from "../features/app/AppIcon.vue";
 import FileBrowser from "../features/recordings/FileBrowser.vue";
 import { recordingState, refreshRecordings, loadMoreRecordings } from "../stores/recordingStore.js";
 import { PLATFORM_ZH } from "../utils.js";
+import { PLATFORM_KEYS } from "../config/platforms.js";
 import { askDeleteRecording } from "../features/recordings/recordingActions.js";
 
 const platformFilter = ref("all");
 const fileQuery = ref("");
 
-const platforms = ["tiktok", "soop", "kick", "youtube", "chzzk"];
+const platforms = PLATFORM_KEYS;
 const countText = computed(() => (visibleFiles.value.length ? `${visibleTotal.value} 个` : "无文件"));
 
 // 平台过滤在客户端按顶层目录（recordings/<platform>/…）判定：

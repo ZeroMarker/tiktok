@@ -21,6 +21,7 @@ PLATFORMS = {
     "kick": ("platforms/kick/record.sh",),
     "youtube": ("platforms/youtube/record.sh",),
     "chzzk": ("platforms/chzzk/record.sh",),
+    "twitch": ("platforms/twitch/record.sh",),
 }
 QUALITY_CHOICES = {"best", "1080p", "720p", "480p"}
 

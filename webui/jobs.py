@@ -19,6 +19,7 @@ import re
 import threading
 
 from webui import config, recorder
+from dlr.adapters.base import normalize_twitch_target
 
 _CATALOG_LOCK = threading.Lock()
 _recorder = recorder.Recorder()
@@ -65,6 +66,8 @@ def _validate_spec(spec: dict[str, object]) -> None:
         raise ValueError("不支持的平台")
     if not target or len(target) > 500 or "\x00" in target:
         raise ValueError("频道或直播 URL 无效")
+    if platform == "twitch":
+        normalize_twitch_target(target)
     if str(spec.get("quality", "best")).lower() not in config.QUALITY_CHOICES:
         raise ValueError("不支持的录制画质")
 
@@ -106,6 +109,8 @@ def start_job(data: dict) -> str:
         "cookie_file": str(data.get("cookie_file", "")).strip(),
     }
     _validate_spec(spec)
+    if spec["platform"] == "twitch":
+        spec["target"] = normalize_twitch_target(str(spec["target"]))
     # 校验重复：同一平台下相同频道（忽略大小写）不允许重复添加
     normalized = str(spec["target"]).casefold()
     with _CATALOG_LOCK:

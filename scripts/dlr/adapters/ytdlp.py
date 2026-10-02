@@ -1,4 +1,4 @@
-"""yt-dlp 通用适配器：youtube / kick / chzzk / soop。
+"""yt-dlp 通用适配器：youtube / kick / chzzk / soop / twitch。
 
 这些平台走同一套 yt-dlp 解析流程，差异只在直播页 URL 与请求头。
 
@@ -13,10 +13,16 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from dlr.adapters.base import BaseAdapter, extract_last_segment
+from dlr.adapters.base import BaseAdapter, extract_last_segment, normalize_twitch_target
 
 # 每平台配置：live_url 构造、referer、是否加 aac_adtstoasc
 CONFIG: dict[str, dict] = {
+    "twitch": {
+        "referer": "https://www.twitch.tv/",
+        "bsf_aac": True,
+        "live_url": lambda t: f"https://www.twitch.tv/{normalize_twitch_target(t)}",
+        "formats": ["best"],
+    },
     "youtube": {
         "referer": "https://www.youtube.com/",
         "bsf_aac": False,
@@ -89,6 +95,8 @@ class YTDLPAdapter(BaseAdapter):
         super().__init__(target, cookies=cookies, cookie_header=cookie_header, quality=quality)
 
     def _extract_identifier(self) -> str:
+        if self.platform == "twitch":
+            return normalize_twitch_target(self.target)
         return extract_last_segment(self.target)
 
     @property

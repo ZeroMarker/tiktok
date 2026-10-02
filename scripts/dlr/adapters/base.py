@@ -5,9 +5,32 @@ from __future__ import annotations
 import abc
 import re
 from pathlib import Path
+from urllib.parse import urlsplit
 
 # 项目根目录（scripts/dlr/adapters/base.py -> 项目根）
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+
+
+def normalize_twitch_target(raw: str) -> str:
+    """用户名或频道页 → 小写频道标识；拒绝点播、剪辑及站外 URL。"""
+    target = raw.strip()
+    if target.startswith(("http://", "https://")):
+        parsed = urlsplit(target)
+        if parsed.hostname not in {"twitch.tv", "www.twitch.tv", "m.twitch.tv", "go.twitch.tv"}:
+            raise ValueError("请输入 Twitch 用户名或 twitch.tv 频道地址")
+        parts = parsed.path.strip("/").split("/")
+        if len(parts) > 2 or (len(parts) == 2 and parts[1] not in {"about", "videos", "schedule", "clips"}):
+            raise ValueError("请输入 Twitch 直播频道地址，不支持点播或剪辑地址")
+        target = parts[0]
+    else:
+        target = target.lstrip("@").rstrip("/")
+    channel = target.lower()
+    if not re.fullmatch(r"[a-z0-9_]+", channel) or channel in {
+        "videos", "directory", "downloads", "search", "settings", "subscriptions",
+        "inventory", "drops", "wallet", "prime", "turbo", "login", "signup", "p",
+    }:
+        raise ValueError("请输入有效的 Twitch 直播频道用户名")
+    return channel
 
 
 def extract_last_segment(raw: str) -> str:
