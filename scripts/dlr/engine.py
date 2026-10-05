@@ -89,6 +89,8 @@ class Engine:
         self.phase = "idle"
         # 日志出口：单进程宿主按频道分流（log_sink）；缺省原样 print 到 stdio。
         self.log_sink = log_sink
+        if hasattr(self.adapter, "diagnostic_log"):
+            self.adapter.diagnostic_log = lambda line: self.log(line, flush=True)
         self.nickname: str | None = None
         self.out_dir: Path | None = None
 

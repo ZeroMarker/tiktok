@@ -34,6 +34,41 @@ import time
 from dlr.adapters.base import pick_flv_url, quality_height
 
 
+class DetectionDiagnostics:
+    """每轮独立的诊断；仅输出固定阶段/结果和整数、布尔字段。"""
+
+    def __init__(self, log=None):
+        self.log = log or (lambda line: print(line, file=sys.stderr, flush=True))
+        self.offline = False
+        self.uncertain = False
+        self.live = False
+
+    def event(self, stage: str, result: str, **fields) -> None:
+        # 响应内容、异常文本、URL 和 Cookie 都不进入诊断字段。
+        safe = " ".join(
+            f"{key}={value}" for key, value in fields.items()
+            if key in {"http_status", "business_status", "live_status", "room_id_present", "attempt", "returncode"}
+            and type(value) in {int, bool}
+        )
+        self.log(f"[tiktok_detect] stage={stage} result={result}" + (f" {safe}" if safe else ""))
+        if result == "offline":
+            self.offline = True
+        if result in {"network_error", "http_error", "invalid_json", "invalid_payload", "page_unrecognized", "business_error", "no_stream", "unknown_status", "dependency_missing"}:
+            self.uncertain = True
+        if fields.get("live_status") == 2:
+            self.live = True
+
+    @property
+    def confirmed_offline(self) -> bool:
+        return self.offline and not self.uncertain and not self.live
+
+    @property
+    def failure_reason(self) -> str:
+        if self.confirmed_offline:
+            return "确认未开播（页面/API 明确返回离线状态）"
+        return "检测/提取失败（未确认离线，请查看分阶段日志）"
+
+
 def _request_with_retry(
     session,
     url: str,
@@ -60,11 +95,11 @@ def _request_with_retry(
                 impersonate=impersonate,
                 timeout=timeout,
             )
-        except (curl_requests.exceptions.RequestException, OSError) as exc:
+        except (curl_requests.exceptions.RequestException, OSError):
             if attempt + 1 < attempts:
                 delay = min(base_delay * (2 ** attempt), max_delay)
                 print(
-                    f"[tiktok_extract] 请求失败({type(exc).__name__}) {url}，"
+                    "[tiktok_extract] 请求失败（网络错误），"
                     f"{delay:g}s 后重试（{attempt + 1}/{attempts}）",
                     file=sys.stderr,
                 )
@@ -152,53 +187,61 @@ def get_room_id_from_universal(text: str) -> str | None:
 
 
 def check_live_via_webcast_api(
-    session, room_id: str, max_height: int | None = None
+    session, room_id: str, max_height: int | None = None,
+    *, diagnostics: DetectionDiagnostics | None = None,
 ) -> str | None:
-    """直接调用 webcast API 检查直播状态，返回流 URL（如果有）。
-
-    max_height 为 None 时返回最高可用清晰度（原画档），否则返回不超过上限的清晰度。
-    """
-    params = {"room_id": room_id, "aid": "1988"}
+    """调用 webcast API；只记录状态码，不输出响应体或房间标识。"""
+    diag = diagnostics or DetectionDiagnostics()
     r = _request_with_retry(
-        session,
-        "https://webcast.tiktok.com/webcast/room/info/",
-        params=params,
-        impersonate="chrome131",
-        timeout=15,
+        session, "https://webcast.tiktok.com/webcast/room/info/",
+        params={"room_id": room_id, "aid": "1988"},
+        impersonate="chrome131", timeout=15,
     )
     if r is None:
+        diag.event("webcast", "network_error")
         return None
-
+    http_status = getattr(r, "status_code", 200)
+    diag.event("webcast", "response", http_status=http_status)
+    if http_status != 200:
+        diag.event("webcast", "http_error")
+        return None
     try:
         data = r.json()
     except Exception:
+        diag.event("webcast", "invalid_json")
         return None
-
-    status_code = data.get("status_code")
-    if status_code != 0:
+    if not isinstance(data, dict):
+        diag.event("webcast", "invalid_payload")
         return None
-
-    room_info = data.get("data", {})
-    if room_info.get("status") == 2:
-        # 提取流 URL：stream_url 可能是一个包含各清晰度/协议的字典
-        stream_url = room_info.get("stream_url") or {}
-        if isinstance(stream_url, dict):
-            # 优先 FLV 按清晰度挑选，其次 rtmp/hls
-            flv = stream_url.get("flv_pull_url") or {}
-            url = pick_flv_url(flv, max_height)
-            if url:
-                return url
-            for key in ("rtmp_pull_url", "hls_pull_url", "liveUrl"):
-                url = stream_url.get(key)
-                if isinstance(url, str) and url.startswith("http"):
-                    return url
-        elif isinstance(stream_url, str) and stream_url.startswith("http"):
-            return stream_url
-        # 直接挂在 data 上的 rtmp/hls
-        for key in ("rtmp_pull_url", "hls_pull_url", "liveUrl"):
-            url = room_info.get(key)
-            if isinstance(url, str) and url.startswith("http"):
-                return url
+    business_status = data.get("status_code")
+    diag.event("webcast", "business_status", business_status=business_status)
+    if business_status != 0:
+        diag.event("webcast", "business_error")
+        return None
+    room_info = data.get("data")
+    if not isinstance(room_info, dict):
+        diag.event("webcast", "invalid_payload")
+        return None
+    status = room_info.get("status")
+    diag.event("webcast", "room_status", live_status=status)
+    if status != 2:
+        diag.event("webcast", "offline" if status == 4 else "unknown_status")
+        return None
+    stream_url = room_info.get("stream_url") or {}
+    if isinstance(stream_url, dict):
+        url = pick_flv_url(stream_url.get("flv_pull_url"), max_height)
+        if url:
+            diag.event("webcast", "success")
+            return url
+        sources = [stream_url.get(key) for key in ("rtmp_pull_url", "hls_pull_url", "liveUrl")]
+    else:
+        sources = [stream_url]
+    sources += [room_info.get(key) for key in ("rtmp_pull_url", "hls_pull_url", "liveUrl")]
+    for url in sources:
+        if isinstance(url, str) and url.startswith("http"):
+            diag.event("webcast", "success")
+            return url
+    diag.event("webcast", "no_stream")
     return None
 
 
@@ -263,7 +306,9 @@ def _stream_url_from_sigi(text: str) -> str | None:
 
 
 
-def _get_stream_url_with_browser(username: str, timeout: int = 25) -> str | None:
+def _get_stream_url_with_browser(
+    username: str, timeout: int = 25, *, diagnostics: DetectionDiagnostics | None = None,
+) -> str | None:
     """经共享渲染服务（scripts/dlr/browserd.py）渲染直播页并抽取 FLV。
 
     服务不可用/超时返回 None：本轮放弃浏览器兜底，不影响轻量检测路径。
@@ -288,16 +333,26 @@ def _get_stream_url_with_browser(username: str, timeout: int = 25) -> str | None
     html = render_document(
         f"https://www.tiktok.com/@{username}/live", timeout=timeout, wait_js=wait_js
     )
+    diag = diagnostics or DetectionDiagnostics()
     if not html:
+        diag.event("browser", "unavailable")
         return None
+    room_id, status = get_room_id_from_sigi(html)
+    diag.event("browser", "parsed", live_status=status, room_id_present=bool(room_id))
+    if status == 4:
+        diag.event("browser", "offline")
     stream_url = _stream_url_from_sigi(html)
-    if stream_url:
-        print("[tiktok_extract] 浏览器渲染通过 WAF，已从页面取得 FLV", file=sys.stderr)
+    if not stream_url and status != 4:
+        diag.event("browser", "no_stream" if status == 2 else "page_unrecognized")
     return stream_url
 
 
-def _try_ytdlp_fallback(username: str, max_height: int | None = None) -> str | None:
+def _try_ytdlp_fallback(
+    username: str, max_height: int | None = None,
+    *, diagnostics: DetectionDiagnostics | None = None,
+) -> str | None:
     """兜底：用 yt-dlp 再试一次，带不同参数。"""
+    diag = diagnostics or DetectionDiagnostics()
     urls_to_try = [
         f"https://www.tiktok.com/@{username}/live",
         f"https://m.tiktok.com/@{username}/live",
@@ -320,6 +375,7 @@ def _try_ytdlp_fallback(username: str, max_height: int | None = None) -> str | N
                 + fmt_flag
                 + [url, "--get-url"]
             )
+            diag.event("ytdlp", "started")
             try:
                 result = subprocess.run(
                     cmd,
@@ -328,9 +384,16 @@ def _try_ytdlp_fallback(username: str, max_height: int | None = None) -> str | N
                     timeout=30,
                 )
                 if result.returncode == 0 and result.stdout.strip():
+                    diag.event("ytdlp", "success", returncode=result.returncode)
                     return result.stdout.strip().split("\n")[0]
-            except Exception:
-                continue
+                diag.event(
+                    "ytdlp", "process_error" if result.returncode else "empty_output",
+                    returncode=result.returncode,
+                )
+            except subprocess.TimeoutExpired:
+                diag.event("ytdlp", "timeout")
+            except OSError:
+                diag.event("ytdlp", "execution_error")
     return None
 
 
@@ -473,6 +536,7 @@ def get_stream_url(
     try_ytdlp: bool = True,
     allow_browser: bool = True,
     cookies: str | None = None,
+    diagnostics: DetectionDiagnostics | None = None,
 ) -> str | None:
     """兜底取流主入口：成功返回一行流 URL，失败返回 None。
 
@@ -480,83 +544,86 @@ def get_stream_url(
     cookies 为 Netscape 格式文件路径：登录态频道的页面与 webcast API 检测
     需要 Cookie 才能看到直播（此前只有 yt-dlp 路径带 Cookie）。
     """
+    diag = diagnostics or DetectionDiagnostics()
     max_height = quality_height(quality)
     try:
         from curl_cffi import requests
     except ImportError:
-        print("缺少 curl_cffi：pip install curl_cffi", file=sys.stderr)
+        diag.event("page", "dependency_missing")
         return None
-
-    live_url = f"https://www.tiktok.com/@{username}/live"
 
     session = requests.Session()
     _request_with_retry(session, "https://www.tiktok.com", attempts=1)
     _load_netscape_cookies(session, cookies)
 
-    print(f"[tiktok_extract] 检查 @{username} ...", file=sys.stderr)
-
-    # 独立诊断入口保留 yt-dlp 兜底；适配器已经探测过时可跳过，避免重复子进程。
     if try_ytdlp:
-        stream_url = _try_ytdlp_fallback(username, max_height)
-        if stream_url:
-            return stream_url
-
-    # ---- 步骤2：用 curl_cffi 解析页面 ----
-    # 轻量检测每轮都在进程内完成；yt-dlp/浏览器是升级轮才用的兜底。
-    print("[tiktok_extract] 轻量检测中（页面 + webcast API）...", file=sys.stderr)
-
-    r = _request_with_retry(session, live_url, impersonate="chrome131", timeout=20)
-    if r is None:
-        print("[tiktok_extract] 多次重试仍无法访问直播页，本次放弃", file=sys.stderr)
-        return None
-
-    if allow_browser and (
-        "slardar" in r.text.lower() or "please wait" in r.text.lower()
-    ):
-        stream_url = _get_stream_url_with_browser(username)
-        if stream_url:
-            return stream_url
-
-    # 方法A：SIGI_STATE 检测
-    room_id, status = get_room_id_from_sigi(r.text)
-    if status == 2 and room_id:
-        print(f"[tiktok_extract] SIGI_STATE status=2, roomId={room_id}", file=sys.stderr)
-        stream_url = check_live_via_webcast_api(session, room_id, max_height)
-        if stream_url:
-            return stream_url
-
-    # 方法B：Universal Data 检测
-    ud_room_id = get_room_id_from_universal(r.text)
-    if ud_room_id:
-        print(
-            f"[tiktok_extract] universal data roomId={ud_room_id}",
-            file=sys.stderr,
-        )
-        stream_url = check_live_via_webcast_api(session, ud_room_id, max_height)
-        if stream_url:
-            return stream_url
-
-    # ---- 步骤3：在页面中搜索 roomId 再试 ----
-    all_room_ids = re.findall(r'"roomId":"(\d+)"', r.text)
-    for rid in set(all_room_ids):
-        if rid and rid != "0":
-            print(f"[tiktok_extract] 尝试 roomId={rid} ...", file=sys.stderr)
-            stream_url = check_live_via_webcast_api(session, rid, max_height)
-            if stream_url:
-                return stream_url
-
-    # Some accounts expose streamData in the rendered page while room/info is unavailable.
-    if allow_browser:
-        stream_url = _get_stream_url_with_browser(username)
+        diag.event("ytdlp", "started")
+        stream_url = _try_ytdlp_fallback(username, max_height, diagnostics=diag)
+        diag.event("ytdlp", "success" if stream_url else "failed")
         if stream_url:
             return stream_url
     else:
-        print(
-            "[tiktok_extract] 轻量检测无流，本轮跳过 Chromium 兜底",
-            file=sys.stderr,
-        )
+        diag.event("ytdlp", "deferred" if allow_browser else "skipped")
 
-    print("[tiktok_extract] 所有 API 检测均未发现直播", file=sys.stderr)
+    r = _request_with_retry(
+        session, f"https://www.tiktok.com/@{username}/live",
+        impersonate="chrome131", timeout=20,
+    )
+    browser_attempted = False
+
+    def browser():
+        nonlocal browser_attempted
+        browser_attempted = True
+        diag.event("browser", "started")
+        try:
+            stream = _get_stream_url_with_browser(username, diagnostics=diag)
+        except Exception:
+            # Never stringify browser exceptions: they may contain page/URL data.
+            diag.event("browser", "error")
+            return None
+        diag.event("browser", "success" if stream else "unavailable_or_no_stream")
+        return stream
+
+    if r is None:
+        diag.event("page", "network_error")
+    else:
+        http_status = getattr(r, "status_code", 200)
+        diag.event("page", "response", http_status=http_status)
+        if http_status != 200:
+            diag.event("page", "http_error")
+        else:
+            text = r.text
+            if allow_browser and ("slardar" in text.lower() or "please wait" in text.lower()):
+                stream = browser()
+                if stream:
+                    return stream
+            room_id, status = get_room_id_from_sigi(text)
+            ud_room_id = get_room_id_from_universal(text)
+            diag.event("page", "parsed", live_status=status, room_id_present=bool(room_id or ud_room_id))
+            if status == 4:
+                diag.event("page", "offline")
+            elif status != 2 and not ud_room_id:
+                diag.event("page", "page_unrecognized")
+            # Keep the existing candidate paths, but query each room only once.
+            candidates = ([room_id] if status == 2 and room_id else [])
+            if ud_room_id:
+                candidates.append(ud_room_id)
+            candidates.extend(re.findall(r'"roomId":"(\d+)"', text))
+            for rid in dict.fromkeys(candidates):
+                if not rid or rid == "0":
+                    continue
+                stream = check_live_via_webcast_api(session, rid, max_height, diagnostics=diag)
+                if stream:
+                    return stream
+            if status == 2 and not candidates:
+                diag.event("page", "no_stream")
+
+    if allow_browser and not browser_attempted:
+        stream = browser()
+        if stream:
+            return stream
+    elif not allow_browser:
+        diag.event("browser", "skipped")
     return None
 
 

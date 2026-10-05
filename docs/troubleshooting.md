@@ -180,14 +180,15 @@ journalctl -u livestream-webui -n 200 --no-pager | grep tiktok
 
 重点区分以下两种情况：
 
-- `所有 API 检测均未发现直播`：通常是未开播，也可能是地区/IP、登录态或反爬限制。
-- `浏览器兜底失败 ... timed out`：TikTok 页面或 WAF 在规定时间内没有返回；如果主播
+- `stage=round result=offline`：页面/API 明确返回离线状态，没有相反证据。
+- `stage=round result=detection_failed`：未确认离线，查看之前的页面/API/兜底阶段日志。
+  `stage=browser result=unavailable` 表示渲染服务不可用或请求超时；如果主播
   确实正在直播，再单独验证 `yt-dlp`、Cookie 和网络出口。
 
 **检测顺序**（`scripts/dlr/adapters/tiktok.py`）：每轮必跑一次进程内轻量检测
 （`curl_cffi` 页面 + webcast API，带 Cookie）；连续 3 次轻量检测均未发现直播才进入
-「升级轮」，此时跑一次带 Cookie 的 `yt-dlp` 主域探测（日志出现
-`[tiktok] 升级轮：yt-dlp 主域兜底探测 ...`）并调用一次浏览器兜底。这样避免每轮冷启动
+「升级轮」，轻量检测未取得流时允许一次浏览器兜底；仍未取得流再跑一次带 Cookie 的
+`yt-dlp` 主域探测（日志出现 `[tiktok_detect] stage=ytdlp result=started`）。这样避免每轮冷启动
 一个 `yt-dlp` 进程（曾达 ~425 次/小时）。
 
 **浏览器兜底走共享常驻服务**，不是每轮冷启动一个浏览器：TikTok 渲染统一由
@@ -219,6 +220,35 @@ ls ~/.cache/tiktok-browserd/profile             # 常驻 profile，正常应有�
 ps -eo pid,ppid,user,etime,args | grep -E 'dlr.py tiktok|chromium.*headless' | grep -v grep
 pgrep -af 'browserd|webui/app.py'   # 共享渲染服务与录制主进程（单进程模型，无按频道单元）
 ```
+
+### 案例：`mitsuri_nagahama` 间歇性未取到流（2026-10-04）
+
+**现象**：WebUI 任务已启动并能读取主播昵称，但起初没有录像文件。引擎日志连续两轮
+输出「直播未开启 / 抓取失败」，随后继续轮询；第三轮之后成功获取直播源并启动 ffmpeg
+录制。检查时 ffmpeg 仍在运行、录制段文件持续增长。
+
+**结论**：这是暂时的取流检测 miss，之后自动恢复；不是 Caddy 代理问题（ffmpeg 直接访问
+TikTok CDN），也没有证据表明是该账号配置错误。昵称读取成功只能证明部分主页资料可读，
+不能证明直播状态检测或流地址提取成功。
+
+**原因未能从现有日志确定**：当前失败文案把“确实未开播”和“页面/API/解析/网络取流失败”
+合并为同一结果。故不能仅凭这两次记录断言主播当时离线，也不能确认是否由 TikTok WAF、
+API 响应或其他临时提取问题引起。重现时先查看后续轮询是否恢复及 ffmpeg 是否启动；不要
+记录 Cookie、完整签名流 URL 或其他凭证。
+
+**已完成的诊断改进**：
+
+- [x] 改进 TikTok 检测日志：对每轮记录脱敏后的阶段/结果（主页请求状态、页面解析到的
+  live status/roomId 是否存在、webcast API 状态码/业务状态、yt-dlp/浏览器兜底是否执行及
+  失败类别），区分“确认未开播”与“检测/提取失败”；绝不记录 Cookie、签名 URL 或敏感响应体。
+- [x] 为上述日志增加测试，覆盖未开播、页面/WAF 异常、API 返回无流、兜底成功/失败等路径；
+  确认正常失败仍继续轮询且日志不会泄露凭证。
+
+每轮日志以 `stage=round result=started attempt=N` 开始，最终结果为 `success`、
+`offline` 或 `detection_failed`。页面/API 只有明确返回离线状态 `4`，且没有直播中
+或检测异常的相反证据，才显示“确认未开播”；没有流地址、WAF 页面、HTTP 错误等
+显示“检测/提取失败”。日志只输出阶段、固定结果类别、数字状态码和 roomId 是否存在，
+不输出 roomId 原值、Cookie、响应体、命令参数或完整流地址。WebUI 按频道日志可直接查看。
 
 ## WebUI 无法启动
 

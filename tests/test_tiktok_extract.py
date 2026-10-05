@@ -360,5 +360,159 @@ class GetStreamUrlRobustnessTest(unittest.TestCase):
         browser.assert_not_called()
 
 
+
+
+class DetectionLogTest(unittest.TestCase):
+    def test_only_numeric_and_boolean_response_fields_are_logged(self):
+        lines = []
+        diag = mod.DetectionDiagnostics(lines.append)
+        diag.event("page", "parsed", live_status="SECRET", room_id_present=True,
+                   http_status=403, room_id="SECRET", cookie="SECRET", url="SECRET")
+        self.assertNotIn("SECRET", "\n".join(lines))
+        self.assertIn("http_status=403", lines[0])
+        self.assertIn("room_id_present=True", lines[0])
+
+    def test_uncertain_or_live_evidence_overrides_offline(self):
+        for result, fields in [("no_stream", {}), ("room_status", {"live_status": 2})]:
+            diag = mod.DetectionDiagnostics(lambda line: None)
+            diag.event("page", "offline")
+            diag.event("webcast", result, **fields)
+            self.assertIn("检测/提取失败", diag.failure_reason)
+
+
+@unittest.skipUnless(HAS_CURL_CFFI, "curl_cffi 未安装")
+class DetectionFlowLogTest(unittest.TestCase):
+    def detect(self, response, *, browser=False, rendered=None, api=None):
+        from dlr.adapters.tiktok import TikTokAdapter
+        adapter = TikTokAdapter("example", cookies="SECRET_COOKIE_PATH")
+        if browser:
+            adapter._lightweight_misses = 2
+        lines = []
+        adapter.diagnostic_log = lines.append
+        adapter.run_capture = mock.Mock(return_value=None)
+        with mock.patch.object(mod, "_request_with_retry", side_effect=[None, response] + (api or [])), \
+             mock.patch.object(mod, "_load_netscape_cookies"), \
+             mock.patch.object(mod, "_get_stream_url_with_browser", return_value=rendered) as render:
+            stream = adapter.detect_stream_url()
+        return stream, adapter, "\n".join(lines), render
+
+    def page(self, text, status=200):
+        return mock.Mock(text=text, status_code=status)
+
+    def api(self, data):
+        response = _FakeResponse(data)
+        response.status_code = 200
+        return response
+
+    def test_confirmed_offline_and_skipped_fallbacks(self):
+        stream, adapter, logs, render = self.detect(self.page(sigi_page(live_sigi(status=4))),
+            api=[self.api({"status_code": 0, "data": {"status": 4}})])
+        self.assertIsNone(stream)
+        self.assertIn("确认未开播", adapter.last_detect_error)
+        self.assertIn("stage=browser result=skipped", logs)
+        self.assertIn("stage=ytdlp result=skipped", logs)
+        self.assertIn("stage=round result=offline", logs)
+        render.assert_not_called()
+
+    def test_waf_http_and_network_failures_are_not_offline(self):
+        for page, expected in [(self.page("please wait SECRET_RESPONSE"), "page_unrecognized"),
+                               (self.page("SECRET_RESPONSE", 403), "http_error"),
+                               (None, "network_error"),
+                               (self.page(sigi_page("{SECRET_RESPONSE")), "page_unrecognized")]:
+            with self.subTest(expected=expected):
+                stream, adapter, logs, _ = self.detect(page)
+                self.assertIsNone(stream)
+                self.assertIn("检测/提取失败", adapter.last_detect_error)
+                self.assertIn(f"result={expected}", logs)
+                self.assertNotIn("SECRET", logs)
+
+    def test_api_no_stream_business_error_and_invalid_payload(self):
+        cases = [({"status_code": 0, "data": {"status": 2}}, "no_stream"),
+                 ({"status_code": 10006, "message": "SECRET"}, "business_error"),
+                 (["SECRET"], "invalid_payload"),
+                 ({"status_code": 0, "data": "SECRET"}, "invalid_payload")]
+        for payload, result in cases:
+            with self.subTest(result=result):
+                stream, adapter, logs, _ = self.detect(self.page(sigi_page(live_sigi())), api=[self.api(payload)])
+                self.assertIsNone(stream)
+                self.assertIn("检测/提取失败", adapter.last_detect_error)
+                self.assertIn(f"stage=webcast result={result}", logs)
+                self.assertNotIn("SECRET", logs)
+                self.assertNotIn("7123456789", logs)
+
+    def test_browser_success_and_failure(self):
+        for url in ["https://cdn/live.flv?signature=SECRET", None]:
+            with self.subTest(success=bool(url)):
+                stream, adapter, logs, render = self.detect(self.page("please wait SECRET"), browser=True, rendered=url)
+                self.assertEqual(stream, url)
+                self.assertEqual(render.call_count, 1)
+                self.assertIn("stage=browser result=started", logs)
+                self.assertIn("stage=round result=success" if url else "stage=round result=detection_failed", logs)
+                self.assertNotIn("SECRET", logs)
+                if url:
+                    self.assertIsNone(adapter.last_detect_error)
+
+    def test_api_success_never_logs_signed_url_or_response(self):
+        url = "https://cdn/live.flv?signature=SECRET"
+        stream, adapter, logs, _ = self.detect(self.page(sigi_page(live_sigi())), api=[self.api({
+            "status_code": 0, "data": {"status": 2, "stream_url": url}, "cookie": "SECRET"})])
+        self.assertEqual(stream, url)
+        self.assertIsNone(adapter.last_detect_error)
+        self.assertIn("stage=webcast result=success", logs)
+        self.assertNotIn("SECRET", logs)
+
+
+class YtdlpLogTest(unittest.TestCase):
+    def test_failure_categories_and_success_are_safe(self):
+        import subprocess
+        from dlr.adapters.tiktok import TikTokAdapter
+        results = [
+            (subprocess.TimeoutExpired(["SECRET"], 1, stderr="SECRET"), "timeout"),
+            (OSError("SECRET"), "execution_error"),
+            (subprocess.CompletedProcess([], 1, "SECRET", "SECRET"), "process_error"),
+            (subprocess.CompletedProcess([], 0, "", "SECRET"), "empty_output"),
+            (subprocess.CompletedProcess([], 0, "https://cdn/live?token=SECRET\n", "SECRET"), "success"),
+        ]
+        for result, expected in results:
+            with self.subTest(expected=expected):
+                lines = []
+                diag = mod.DetectionDiagnostics(lines.append)
+                kwargs = {"side_effect": result} if isinstance(result, Exception) else {"return_value": result}
+                with mock.patch("dlr.adapters.tiktok.subprocess.run", **kwargs):
+                    url = TikTokAdapter("example").run_capture(["SECRET"], diagnostics=diag)
+                self.assertEqual(bool(url), expected == "success")
+                self.assertIn(f"result={expected}", "\n".join(lines))
+                self.assertNotIn("SECRET", "\n".join(lines))
+
+
+@unittest.skipUnless(HAS_CURL_CFFI, "curl_cffi 未安装")
+class AdditionalDetectionFailureTest(unittest.TestCase):
+    def test_api_http_invalid_json_and_network_categories(self):
+        response = mock.Mock(status_code=503, text="SECRET_RESPONSE")
+        bad_json = _FakeResponse(bad_json=True)
+        bad_json.status_code = 200
+        for response, expected in [(response, "http_error"), (bad_json, "invalid_json"), (None, "network_error")]:
+            with self.subTest(expected=expected):
+                lines = []
+                diag = mod.DetectionDiagnostics(lines.append)
+                with mock.patch.object(mod, "_request_with_retry", return_value=response):
+                    self.assertIsNone(check_live_via_webcast_api(None, "SECRET_ROOM", diagnostics=diag))
+                self.assertIn(f"result={expected}", "\n".join(lines))
+                self.assertNotIn("SECRET", "\n".join(lines))
+
+    def test_browser_response_and_exception_are_not_logged(self):
+        lines = []
+        diag = mod.DetectionDiagnostics(lines.append)
+        with mock.patch("dlr.browserd.render_document", return_value="SECRET_RESPONSE"):
+            self.assertIsNone(mod._get_stream_url_with_browser("example", diagnostics=diag))
+        self.assertIn("result=page_unrecognized", "\n".join(lines))
+        response = mock.Mock(status_code=200, text="please wait SECRET_RESPONSE")
+        with mock.patch.object(mod, "_request_with_retry", side_effect=[None, response]), \
+             mock.patch.object(mod, "_get_stream_url_with_browser", side_effect=RuntimeError("SECRET_EXCEPTION")):
+            self.assertIsNone(mod.get_stream_url("example", try_ytdlp=False, diagnostics=diag))
+        self.assertIn("stage=browser result=error", "\n".join(lines))
+        self.assertNotIn("SECRET", "\n".join(lines))
+
+
 if __name__ == "__main__":
     unittest.main()

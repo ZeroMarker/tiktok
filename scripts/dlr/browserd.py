@@ -414,8 +414,8 @@ def render_document(url: str, timeout: float = 20.0, wait_js: str | None = None)
     try:
         with urllib.request.urlopen(request, timeout=timeout + 10) as response:
             return response.read().decode("utf-8", "replace")
-    except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        print(f"[browserd] 渲染服务不可用：{exc}", file=sys.stderr, flush=True)
+    except (urllib.error.URLError, TimeoutError, OSError):
+        print("[browserd] 渲染服务不可用（网络错误或超时）", file=sys.stderr, flush=True)
         return None
 
 

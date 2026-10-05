@@ -1088,3 +1088,32 @@ class ThreadedEngineTest(unittest.TestCase):
         engine.log("hello", "world")
         self.assertEqual(sink, ["hello world"])
         self.assertFalse(engine.is_recording)
+
+
+class TikTokDiagnosticPollingTest(unittest.TestCase):
+    def test_failed_detection_logs_to_engine_and_continues_polling(self):
+        with tempfile.TemporaryDirectory() as root:
+            lines = []
+            engine = Engine("tiktok", "example", root, detect_interval=1,
+                            nickname_attempts=1, log_sink=lines.append)
+            engine.adapter.get_nickname = lambda: None
+
+            def fail(*args, **kwargs):
+                diag = kwargs["diagnostics"]
+                diag.event("page", "http_error", http_status=403)
+                return None
+
+            waits = []
+            def wait(delay):
+                waits.append(delay)
+                if len(waits) == 2:
+                    engine.request_stop()
+
+            engine._wait = wait
+            with mock.patch.object(tiktok_mod, "get_stream_url", side_effect=fail):
+                engine.run()
+            self.assertEqual(waits, [1, 1])
+            self.assertEqual(sum("stage=round result=started" in line for line in lines), 2)
+            self.assertEqual(sum("未获取到直播源：检测/提取失败" in line for line in lines), 2)
+            self.assertTrue(any("http_status=403" in line for line in lines))
+            self.assertFalse(engine.is_recording)
