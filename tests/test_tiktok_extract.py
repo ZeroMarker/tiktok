@@ -379,12 +379,25 @@ class DetectionLogTest(unittest.TestCase):
             diag.event("webcast", result, **fields)
             self.assertIn("检测/提取失败", diag.failure_reason)
 
+    def test_browser_offline_overrides_page_failure_in_either_order(self):
+        for browser_first in [False, True]:
+            diag = mod.DetectionDiagnostics(lambda line: None)
+            events = [("page", "page_unrecognized"), ("browser", "offline")]
+            if browser_first:
+                events.reverse()
+            for stage, result in events:
+                diag.event(stage, result)
+            self.assertTrue(diag.confirmed_offline)
+            diag.event("webcast", "room_status", live_status=2)
+            self.assertFalse(diag.confirmed_offline)
+
 
 @unittest.skipUnless(HAS_CURL_CFFI, "curl_cffi 未安装")
 class DetectionFlowLogTest(unittest.TestCase):
     def detect(self, response, *, browser=False, rendered=None, api=None):
         from dlr.adapters.tiktok import TikTokAdapter
         adapter = TikTokAdapter("example", cookies="SECRET_COOKIE_PATH")
+        adapter._detect_round = 1  # 默认模拟首轮之后的轻量轮
         if browser:
             adapter._lightweight_misses = 2
         lines = []
@@ -451,6 +464,35 @@ class DetectionFlowLogTest(unittest.TestCase):
                 self.assertNotIn("SECRET", logs)
                 if url:
                     self.assertIsNone(adapter.last_detect_error)
+
+    def test_first_round_browser_confirms_offline_without_ytdlp(self):
+        from dlr.adapters.tiktok import TikTokAdapter
+        adapter = TikTokAdapter("example")
+        lines = []
+        adapter.diagnostic_log = lines.append
+        adapter.run_capture = mock.Mock(return_value=None)
+        with (
+            mock.patch.object(mod, "_request_with_retry", side_effect=[None, self.page("please wait")]),
+            mock.patch("dlr.browserd.render_document", return_value=sigi_page(live_sigi(status=4))),
+        ):
+            self.assertIsNone(adapter.detect_stream_url())
+        self.assertIn("确认未开播", adapter.last_detect_error)
+        self.assertIn("stage=round result=offline", "\n".join(lines))
+        adapter.run_capture.assert_not_called()
+
+    def test_first_round_browser_can_start_recording(self):
+        from dlr.adapters.tiktok import TikTokAdapter
+        adapter = TikTokAdapter("example")
+        adapter.diagnostic_log = lambda line: None
+        adapter.run_capture = mock.Mock(return_value=None)
+        url = "https://cdn.example/live.flv"
+        with (
+            mock.patch.object(mod, "_request_with_retry", side_effect=[None, self.page("please wait")]),
+            mock.patch.object(mod, "_get_stream_url_with_browser", return_value=url) as browser,
+        ):
+            self.assertEqual(adapter.detect_stream_url(), url)
+        browser.assert_called_once()
+        adapter.run_capture.assert_not_called()
 
     def test_api_success_never_logs_signed_url_or_response(self):
         url = "https://cdn/live.flv?signature=SECRET"

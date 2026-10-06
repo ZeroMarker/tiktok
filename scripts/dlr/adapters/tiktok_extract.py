@@ -40,6 +40,7 @@ class DetectionDiagnostics:
     def __init__(self, log=None):
         self.log = log or (lambda line: print(line, file=sys.stderr, flush=True))
         self.offline = False
+        self.browser_offline = False
         self.uncertain = False
         self.live = False
 
@@ -53,6 +54,8 @@ class DetectionDiagnostics:
         self.log(f"[tiktok_detect] stage={stage} result={result}" + (f" {safe}" if safe else ""))
         if result == "offline":
             self.offline = True
+            if stage == "browser":
+                self.browser_offline = True
         if result in {"network_error", "http_error", "invalid_json", "invalid_payload", "page_unrecognized", "business_error", "no_stream", "unknown_status", "dependency_missing"}:
             self.uncertain = True
         if fields.get("live_status") == 2:
@@ -60,12 +63,14 @@ class DetectionDiagnostics:
 
     @property
     def confirmed_offline(self) -> bool:
-        return self.offline and not self.uncertain and not self.live
+        # 浏览器渲染后的明确离线状态可覆盖轻量请求/解析失败；
+        # 本轮任何已开播证据仍优先，避免把取流失败误报为离线。
+        return self.offline and (self.browser_offline or not self.uncertain) and not self.live
 
     @property
     def failure_reason(self) -> str:
         if self.confirmed_offline:
-            return "确认未开播（页面/API 明确返回离线状态）"
+            return "确认未开播（页面/API/浏览器明确返回离线状态）"
         return "检测/提取失败（未确认离线，请查看分阶段日志）"
 
 

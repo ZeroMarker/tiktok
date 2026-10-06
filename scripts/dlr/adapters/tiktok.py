@@ -2,8 +2,8 @@
 
 yt-dlp 对 TikTok 有风控误判风险且每轮启动开销大，检测顺序：
     1) 进程内轻量检测（curl_cffi 页面 + webcast API，带 Cookie）——每轮必跑
-    2) 连续 miss 到第 3 次（升级轮）才跑一次带 Cookie 的 yt-dlp 主域探测
-    3) 同一升级轮允许 Chromium 兜底渲染
+    2) 首轮及之后每 3 次连续 miss 的升级轮允许 Chromium 兜底渲染
+    3) 升级轮仍未取流且未确认离线时跑带 Cookie 的 yt-dlp 主域探测
 """
 
 from __future__ import annotations
@@ -57,14 +57,13 @@ class TikTokAdapter(BaseAdapter):
         return []
 
     def detect_stream_url(self) -> str | None:
-        # 方法1：进程内轻量检测（curl_cffi 页面 + webcast API），Cookie 让登录态
-        # 频道首轮即命中；只有它连败到升级轮才动用子进程。
+        # 轻量检测每轮先行；首轮立即允许完整兜底，避免新任务等待两轮。
         self.last_detect_error = None
         self._detect_round += 1
         diag = DetectionDiagnostics(self.diagnostic_log)
         diag.event("round", "started", attempt=self._detect_round)
         miss_index = self._lightweight_misses + 1
-        allow_browser = miss_index >= self.browser_fallback_every
+        allow_browser = self._detect_round == 1 or miss_index >= self.browser_fallback_every
         stream = get_stream_url(
             self.identifier,
             quality=self.quality,
@@ -78,9 +77,8 @@ class TikTokAdapter(BaseAdapter):
             diag.event("round", "success")
             return stream
 
-        # 方法2：升级轮（每 3 次连败一次）才跑 yt-dlp 主域探测，避免每轮
-        # 冷启动一个 yt-dlp 进程（曾达 ~425 次/小时）。
-        if allow_browser:
+        # 首轮及升级轮才跑 yt-dlp，明确离线时无需继续取流。
+        if allow_browser and not diag.confirmed_offline:
             url = f"https://www.tiktok.com/@{self.identifier}/live"
             if self.quality_height:
                 h = self.quality_height

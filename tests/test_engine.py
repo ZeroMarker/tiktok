@@ -643,25 +643,26 @@ class TikTokNicknameSourceTest(unittest.TestCase):
 
 
 class TikTokDetectionStrategyTest(unittest.TestCase):
-    def test_browser_fallback_runs_only_every_third_miss(self):
+    def test_browser_fallback_runs_first_then_every_third_miss(self):
         adapter = TikTokAdapter("example")
         adapter.run_capture = mock.Mock(return_value=None)
         with mock.patch.object(tiktok_mod, "get_stream_url", return_value=None) as get_url:
-            for _ in range(3):
+            for _ in range(7):
                 self.assertIsNone(adapter.detect_stream_url())
 
         self.assertEqual(
             [call.kwargs["allow_browser"] for call in get_url.call_args_list],
-            [False, False, True],
+            [True, False, False, True, False, False, True],
         )
         self.assertTrue(all(call.kwargs["try_ytdlp"] is False for call in get_url.call_args_list))
-        # 轻量检测（含 Cookie 透传）每轮都跑；yt-dlp 只在升级轮冷启动一次
-        self.assertEqual(len(get_url.call_args_list), 3)
+        # 轻量检测每轮都跑；yt-dlp 只在首轮和之后的升级轮启动。
+        self.assertEqual(len(get_url.call_args_list), 7)
         self.assertTrue(all("cookies" in call.kwargs for call in get_url.call_args_list))
-        self.assertEqual(adapter.run_capture.call_count, 1)
+        self.assertEqual(adapter.run_capture.call_count, 3)
 
     def test_success_resets_browser_fallback_counter(self):
         adapter = TikTokAdapter("example")
+        adapter._detect_round = 1
         adapter._lightweight_misses = 2  # 下一轮即升级轮
         adapter.run_capture = mock.Mock(return_value="https://cdn.example/live.flv")
         with mock.patch.object(tiktok_mod, "get_stream_url", return_value=None) as get_url:
@@ -669,7 +670,7 @@ class TikTokDetectionStrategyTest(unittest.TestCase):
                 adapter.detect_stream_url(), "https://cdn.example/live.flv"
             )
         self.assertEqual(adapter._lightweight_misses, 0)
-        # 顺序契约：轻量检测每轮先行，yt-dlp 仅在升级轮兜底
+        # 顺序契约：轻量检测每轮先行，yt-dlp 在升级轮兜底。
         get_url.assert_called_once()
 
 
