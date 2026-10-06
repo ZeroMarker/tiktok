@@ -1,6 +1,7 @@
 # 待办
 
-- [ ] 等待无直播录制时部署并重启 WebUI，使 TikTok 首轮兜底和离线状态修复（`ec9fbed`）生效。
+- [x] 等待无直播录制时部署并重启 WebUI，使 TikTok 首轮兜底和离线状态修复（`ec9fbed`）生效。
   - 执行前确认所有任务均未处于录制状态，且 `livestream-webui.service` 下没有运行中的 ffmpeg 录制进程；有录制时继续等待。
   - 确认本机 `main` 已包含修复提交，执行 `sudo systemctl restart livestream-webui.service`。
   - 重启后检查服务状态与任务日志，确认首轮兜底正常、浏览器确认离线时显示“未开播”，再勾选完成。
+  - 已于 2026-10-06 16:49:58 UTC 完成：重启前 38 个任务均未录制且没有 ffmpeg 录制进程；重启后服务 active、健康检查通过，`morihinachan` 首轮启用浏览器兜底并正确显示“确认未开播”。
