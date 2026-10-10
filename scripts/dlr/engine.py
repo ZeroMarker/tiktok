@@ -5,12 +5,15 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import random
 import re
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.error
@@ -323,12 +326,59 @@ class Engine:
             self.log(f"获取昵称失败：{exc}", file=sys.stderr, flush=True)
             return None
 
+    def _nickname_cache_path(self) -> Path:
+        # 使用完整平台/频道标识，避免路径清洗或截断后不同频道发生冲突。
+        key = json.dumps([self.platform, self.identifier], ensure_ascii=False)
+        filename = hashlib.sha256(key.encode("utf-8")).hexdigest() + ".json"
+        return self.recordings_root / ".nicknames" / filename
+
+    def _load_cached_nickname(self) -> str | None:
+        try:
+            data = json.loads(self._nickname_cache_path().read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                return None
+            if data.get("platform") != self.platform or data.get("identifier") != self.identifier:
+                return None
+            nickname = data.get("nickname")
+            if isinstance(nickname, str) and nickname.strip():
+                return nickname.strip()
+        except FileNotFoundError:
+            pass
+        except (OSError, ValueError) as exc:
+            self.log(f"读取昵称缓存失败，将重新获取：{exc}", file=sys.stderr, flush=True)
+        return None
+
+    def _save_cached_nickname(self, nickname: str) -> None:
+        path = self._nickname_cache_path()
+        temporary_path = None
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            # 每频道独立文件 + 原子替换，避免多频道并发写入互相覆盖或读到半个文件。
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=path.parent, delete=False
+            ) as stream:
+                temporary_path = Path(stream.name)
+                json.dump(
+                    {"platform": self.platform, "identifier": self.identifier, "nickname": nickname},
+                    stream, ensure_ascii=False,
+                )
+            os.replace(temporary_path, path)
+        except OSError as exc:
+            self.log(f"保存昵称缓存失败：{exc}", file=sys.stderr, flush=True)
+        finally:
+            if temporary_path is not None:
+                try:
+                    temporary_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+
     def _refresh_nickname(self) -> None:
         """补取主播昵称：只更新 self.nickname，不创建/切换目录。
 
         目录统一在 run() 开播确认后创建（此时昵称已定），避免轮询期间先建
         无昵称目录、补取后再建昵称目录的双目录残留。
 
+        优先读取本地缓存，网络获取成功后持久化，供重启后复用。
         昵称直接决定目录名，一次抓取失败就会让同一频道分裂成
         `<slug>` 和 `<slug>_<昵称>` 两个目录，所以这里按 nickname_attempts
         重试（间隔 nickname_retry_delay 秒）；单轮全部失败也不放弃——目录未定
@@ -336,10 +386,17 @@ class Engine:
         """
         if self.nickname:
             return
+        cached = self._load_cached_nickname()
+        if cached:
+            self.nickname = cached
+            self.log(f"使用本地主播昵称：{cached}", flush=True)
+            return
         for attempt in range(1, self.nickname_attempts + 1):
             nickname = self._safe_nickname()
-            if nickname:
+            if isinstance(nickname, str) and nickname.strip():
+                nickname = nickname.strip()
                 self.nickname = nickname
+                self._save_cached_nickname(nickname)
                 self.log(f"获取到主播昵称：{nickname}", flush=True)
                 return
             if attempt < self.nickname_attempts:

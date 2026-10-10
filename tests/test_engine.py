@@ -205,6 +205,11 @@ class LiveURLTest(unittest.TestCase):
 
 
 class OutputDirTest(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.recordings_dir = directory.name
+
     def test_output_dir_layout(self):
         engine = Engine("tiktok", "emiri.okazaki", "/tmp/rec", detect_interval=1, break_seconds=1)
         self.assertEqual(engine.output_dir(None), Path("/tmp/rec/tiktok/emiri.okazaki"))
@@ -239,7 +244,7 @@ class OutputDirTest(unittest.TestCase):
         )
 
     def test_refresh_nickname_sets_nickname_once(self):
-        engine = Engine("soop", "player", "/tmp/rec", detect_interval=1, break_seconds=1)
+        engine = Engine("soop", "player", self.recordings_dir, detect_interval=1, break_seconds=1)
         engine.nickname = None
         engine.adapter.get_nickname = lambda: "Nice"
         engine._refresh_nickname()
@@ -253,7 +258,7 @@ class OutputDirTest(unittest.TestCase):
         engine = Engine(
             "soop",
             "player",
-            "/tmp/rec",
+            self.recordings_dir,
             detect_interval=1,
             break_seconds=1,
             nickname_attempts=2,
@@ -279,7 +284,7 @@ class OutputDirTest(unittest.TestCase):
         engine = Engine(
             "soop",
             "player",
-            "/tmp/rec",
+            self.recordings_dir,
             detect_interval=1,
             break_seconds=1,
             nickname_attempts=3,
@@ -296,6 +301,105 @@ class OutputDirTest(unittest.TestCase):
         engine._refresh_nickname()
         self.assertEqual(engine.nickname, "Nic Name")
         self.assertEqual(calls["n"], 3)
+
+
+class NicknameCacheTest(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.root = Path(directory.name) / "recordings"
+
+    def engine(self, platform="tiktok", target="emiri"):
+        return Engine(platform, target, str(self.root), nickname_attempts=1,
+                      nickname_retry_delay=0, log_sink=lambda line: None)
+
+    def test_restart_uses_saved_nickname_without_network(self):
+        first = self.engine()
+        first.adapter.get_nickname = mock.Mock(return_value="エミリ 🎀")
+        first._refresh_nickname()
+        data = json.loads(first._nickname_cache_path().read_text(encoding="utf-8"))
+        self.assertEqual(data["nickname"], "エミリ 🎀")
+        self.assertFalse(first.output_dir(first.nickname).exists())
+
+        restarted = self.engine(target="https://www.tiktok.com/@emiri/live")
+        restarted.adapter.get_nickname = mock.Mock(side_effect=AssertionError("unexpected request"))
+        restarted._refresh_nickname()
+        self.assertEqual(restarted.nickname, "エミリ 🎀")
+        self.assertEqual(restarted.output_dir(restarted.nickname), first.output_dir(first.nickname))
+        restarted.adapter.get_nickname.assert_not_called()
+
+    def test_channels_and_platforms_have_independent_cache(self):
+        for platform, target, nickname in (
+            ("tiktok", "emiri", "エミリ"),
+            ("soop", "emiri", "另一个平台"),
+            ("tiktok", "other", "另一个频道"),
+        ):
+            engine = self.engine(platform, target)
+            engine.adapter.get_nickname = mock.Mock(return_value=nickname)
+            engine._refresh_nickname()
+        for platform, target, nickname in (
+            ("tiktok", "emiri", "エミリ"),
+            ("soop", "emiri", "另一个平台"),
+            ("tiktok", "other", "另一个频道"),
+        ):
+            engine = self.engine(platform, target)
+            engine.adapter.get_nickname = mock.Mock()
+            engine._refresh_nickname()
+            self.assertEqual(engine.nickname, nickname)
+            engine.adapter.get_nickname.assert_not_called()
+
+    def test_invalid_cache_falls_back_and_is_replaced(self):
+        engine = self.engine()
+        path = engine._nickname_cache_path()
+        path.parent.mkdir(parents=True)
+        for content in (
+            "{broken", "[]", '{"nickname": "wrong channel"}',
+            json.dumps({"platform": "tiktok", "identifier": "emiri", "nickname": 123}),
+            json.dumps({"platform": "tiktok", "identifier": "emiri", "nickname": "  "}),
+        ):
+            with self.subTest(content=content):
+                path.write_text(content, encoding="utf-8")
+                engine.nickname = None
+                engine.adapter.get_nickname = mock.Mock(return_value="Fresh")
+                engine._refresh_nickname()
+                engine.adapter.get_nickname.assert_called_once()
+                self.assertEqual(engine.nickname, "Fresh")
+                self.assertEqual(engine._load_cached_nickname(), "Fresh")
+
+    def test_read_failure_does_not_block_fetch(self):
+        engine = self.engine()
+        engine.adapter.get_nickname = mock.Mock(return_value="Fresh")
+        with mock.patch.object(Path, "read_text", side_effect=PermissionError("denied")):
+            engine._refresh_nickname()
+        self.assertEqual(engine.nickname, "Fresh")
+        engine.adapter.get_nickname.assert_called_once()
+
+    def test_write_failure_keeps_nickname_and_cleans_temporary_file(self):
+        engine = self.engine()
+        engine.adapter.get_nickname = mock.Mock(return_value="Fresh")
+        with mock.patch.object(engine_mod.os, "replace", side_effect=OSError("disk full")):
+            engine._refresh_nickname()
+        self.assertEqual(engine.nickname, "Fresh")
+        self.assertEqual(list(engine._nickname_cache_path().parent.iterdir()), [])
+
+    def test_failed_fetch_does_not_cache_empty_nickname(self):
+        for nickname in (None, "", "   "):
+            with self.subTest(nickname=nickname):
+                engine = self.engine()
+                engine.adapter.get_nickname = mock.Mock(return_value=nickname)
+                engine._refresh_nickname()
+                self.assertIsNone(engine.nickname)
+                self.assertFalse(engine._nickname_cache_path().exists())
+
+    def test_nickname_equal_identifier_is_cached(self):
+        engine = self.engine()
+        engine.adapter.get_nickname = mock.Mock(return_value="emiri")
+        engine._refresh_nickname()
+        restarted = self.engine()
+        restarted.adapter.get_nickname = mock.Mock()
+        restarted._refresh_nickname()
+        self.assertEqual(restarted.nickname, "emiri")
+        restarted.adapter.get_nickname.assert_not_called()
 
 
 class StreamValidationTest(unittest.TestCase):
@@ -824,6 +928,11 @@ class DetectDelayTest(unittest.TestCase):
 class NicknameGuardTest(unittest.TestCase):
     """引擎侧昵称接受逻辑：昵称等于 handle 不阻塞补获取，也不过度拒绝。"""
 
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.recordings_dir = directory.name
+
     def test_find_nickname_nested(self):
         scope = {"webapp.user-detail": {"userInfo": {"user": {"nickname": "丘咲エミリ 本人"}}}}
         self.assertEqual(_find_nickname(scope), "丘咲エミリ 本人")
@@ -862,7 +971,7 @@ class NicknameGuardTest(unittest.TestCase):
 
     def test_refresh_accepts_nickname_equal_slug(self):
         """昵称=slug（如 emma_kusunoki）是合法昵称，应接受并终止补获取（不再每轮重试）。"""
-        engine = Engine("tiktok", "emma_kusunoki", "/tmp/rec", detect_interval=1, break_seconds=1)
+        engine = Engine("tiktok", "emma_kusunoki", self.recordings_dir, detect_interval=1, break_seconds=1)
         engine.nickname = None
         engine.out_dir = engine.output_dir(None)
         engine.adapter.get_nickname = lambda: "emma_kusunoki"
@@ -874,7 +983,7 @@ class NicknameGuardTest(unittest.TestCase):
         self.assertEqual(engine.nickname, "emma_kusunoki")
 
     def test_refresh_accepts_real_nickname(self):
-        engine = Engine("tiktok", "act.jp_official", "/tmp/rec", detect_interval=1, break_seconds=1)
+        engine = Engine("tiktok", "act.jp_official", self.recordings_dir, detect_interval=1, break_seconds=1)
         engine.nickname = None
         engine.out_dir = engine.output_dir(None)
         engine.adapter.get_nickname = lambda: "ACT女子"

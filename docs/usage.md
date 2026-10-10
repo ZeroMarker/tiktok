@@ -118,6 +118,11 @@ RECORDINGS_DIR=/data/live bash platforms/kick/record.sh xqc
 目录布局与自愈行为见 [结构](structure.md#运行产物)；WebUI 创建的任务同样统一使用
 `RECORDINGS_DIR`，修改后需重启服务。
 
+昵称获取优先读取录制根目录下的 `.nicknames/` 本地缓存；没有有效缓存时才请求平台，
+获取成功后按平台和频道分别保存，任务或服务重启后继续复用。缓存读写失败不影响录制。
+如需重新获取某个频道的昵称，可停止该任务，删除缓存中对应平台和频道的 JSON 文件后再启动；
+删除整个 `.nicknames/` 目录会让所有频道重新获取昵称。
+
 ### Cookie
 
 所有平台的 `record.sh` 都接受 `--cookies FILE`（Netscape 格式）显式指定登录态；
