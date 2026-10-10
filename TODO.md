@@ -1,5 +1,10 @@
 # 待办
 
+- [ ] 将昵称缓存改为直接 K/V 映射，替代当前按哈希命名的独立 JSON 文件。
+  - Key 使用「平台:频道标识」，Value 使用昵称，保留本地优先、获取成功后保存的策略。
+  - 兼容迁移现有 `.nicknames/` 缓存，并处理多频道并发写入，避免数据覆盖。
+  - 暂不实施，现有代码与服务保持不变。
+
 - [x] 等待无直播录制时部署并重启 WebUI，使 TikTok 首轮兜底和离线状态修复（`ec9fbed`）生效。
   - 执行前确认所有任务均未处于录制状态，且 `livestream-webui.service` 下没有运行中的 ffmpeg 录制进程；有录制时继续等待。
   - 确认本机 `main` 已包含修复提交，执行 `sudo systemctl restart livestream-webui.service`。
