@@ -207,6 +207,30 @@ def check_live_via_webcast_api(
     return None
 
 
+# pull_data.stream_data 的清晰度 key，按画质从高到低。origin 是主播上行原画
+# （常见为 1080p H.265），其余是 TikTok 转码档；ao 为纯音频，不参与挑选。
+SIGI_QUALITY_ORDER = ("origin", "uhd", "hd", "sd", "ld")
+
+
+def _best_flv_from_stream_data(live_room: dict) -> str | None:
+    """按 SIGI_QUALITY_ORDER 从 streamData/hevcStreamData 中挑最高清晰度的 FLV。"""
+    by_quality: dict[str, str] = {}
+    # H.264 优先占位：同档两种编码都有时取兼容性更好的 H.264
+    for field in ("streamData", "hevcStreamData"):
+        raw = (live_room.get(field) or {}).get("pull_data", {}).get("stream_data")
+        try:
+            data = json.loads(raw).get("data", {}) if isinstance(raw, str) else {}
+        except (TypeError, ValueError, AttributeError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        for quality, entry in data.items():
+            url = ((entry or {}).get("main") or {}).get("flv") if isinstance(entry, dict) else None
+            if is_stream_url(url) and "only_audio=1" not in url:
+                by_quality.setdefault(quality, url)
+    return next((by_quality[q] for q in SIGI_QUALITY_ORDER if q in by_quality), None)
+
+
 def _stream_url_from_sigi(text: str) -> str | None:
     """Extract a playable FLV/HLS URL embedded in the rendered SIGI_STATE."""
     match = re.search(r'<script id="SIGI_STATE"[^>]*>(.*?)</script>', text, re.DOTALL)
@@ -242,6 +266,9 @@ def _stream_url_from_sigi(text: str) -> str | None:
     status = live_room.get("status")
     if status is not None and status != 2:
         return None
+    best = _best_flv_from_stream_data(live_room)
+    if best:
+        return best
     walk(live_room.get("streamData", {}))
     walk(live_room.get("hevcStreamData", {}))
     # FLV is more stable for long-running relay than HLS.

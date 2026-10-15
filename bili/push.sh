@@ -100,6 +100,8 @@ while true; do
     # - ultrafast → veryfast：恢复 CABAC/B 帧/去块，同码率画质明显提升
     # - fps=30 → fps=25：与源一致，避免每 5 帧复制 1 帧的抖动和码率浪费；-g 50 保持 2s GOP
     # - maxrate 2500k → 3000k：给运动场景留峰值余量
+    # - 取流改拉 origin 原画（常为 1080p H.265），宽度缩到 ≤720 再编码：
+    #   比 TikTok 自己转码的 hd 档清晰，CPU 也比直接编 1080p 省
     # 另：输入去掉 igndts（FLV 无 PTS，igndts 会让 B 帧 PTS=DTS 而打乱显示
     # 顺序，fps 滤镜依赖真实时间戳）；输出加 first_pts=0 把音频起点也钉到 0
     # （同 twitch.sh）。
@@ -110,7 +112,7 @@ while true; do
         -analyzeduration 5M -probesize 5M \
         -reconnect 1 -reconnect_at_eof 1 -reconnect_streamed 1 -reconnect_on_network_error 1 -reconnect_delay_max 5 \
         -i "$STREAM_URL" \
-        -vf "fps=25" \
+        -vf "fps=25,scale='min(720,iw)':-2:flags=lanczos" \
         -c:v libx264 -preset veryfast -tune zerolatency -b:v 2500k -maxrate 3000k -bufsize 5000k -g 50 -keyint_min 25 -profile:v high -pix_fmt yuv420p \
         -c:a aac -b:a 128k -ar 48000 -ac 2 \
         -af "aresample=async=1:first_pts=0" \

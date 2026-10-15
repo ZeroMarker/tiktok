@@ -61,6 +61,28 @@ class StreamProtocolTest(unittest.TestCase):
             "https://cdn.example/video.flv",
         )
 
+    def test_rendered_sigi_prefers_origin_quality(self):
+        import json
+        def sd(data):
+            return {"pull_data": {"stream_data": json.dumps({"data": {
+                q: {"main": {"flv": url}} for q, url in data.items()}})}}
+        live_room = {
+            "status": 2,
+            "streamData": sd({"hd": "https://cdn.example/s_hd.flv",
+                              "ao": "https://cdn.example/s.flv?only_audio=1"}),
+            "hevcStreamData": sd({"ld": "https://cdn.example/s_ld5.flv",
+                                  "hd": "https://cdn.example/s_hd5.flv",
+                                  "origin": "https://cdn.example/s.flv"}),
+        }
+        html = '<script id="SIGI_STATE">' + json.dumps(
+            {"LiveRoom": {"liveRoomUserInfo": {"liveRoom": live_room}}}) + "</script>"
+        self.assertEqual(tiktok_fallback._stream_url_from_sigi(html), "https://cdn.example/s.flv")
+        # 没有 origin 时退到 hd，且同档优先 H.264
+        del live_room["hevcStreamData"]
+        html = '<script id="SIGI_STATE">' + json.dumps(
+            {"LiveRoom": {"liveRoomUserInfo": {"liveRoom": live_room}}}) + "</script>"
+        self.assertEqual(tiktok_fallback._stream_url_from_sigi(html), "https://cdn.example/s_hd.flv")
+
     def test_stale_stream_data_rejected_unless_live(self):
         """离线页（status=4）残留的陈旧 streamData 必须拒绝；直播（status=2）放行。
 
