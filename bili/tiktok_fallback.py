@@ -207,27 +207,33 @@ def check_live_via_webcast_api(
     return None
 
 
-# pull_data.stream_data 的清晰度 key，按画质从高到低。origin 是主播上行原画
-# （常见为 1080p H.265），其余是 TikTok 转码档；ao 为纯音频，不参与挑选。
+# pull_data.stream_data 的清晰度 key，按画质从高到低；ao 为纯音频，不参与挑选。
 SIGI_QUALITY_ORDER = ("origin", "uhd", "hd", "sd", "ld")
 
 
 def _best_flv_from_stream_data(live_room: dict) -> str | None:
-    """按 SIGI_QUALITY_ORDER 从 streamData/hevcStreamData 中挑最高清晰度的 FLV。"""
+    """从 streamData 中按 SIGI_QUALITY_ORDER 挑最高清晰度的 H.264 FLV。
+
+    只看 H.264：TikTok 的 H.265 档（hevcStreamData，含常见的 origin）在 FLV 里
+    用私有 codec id 12，ffmpeg 6.1 无法解码（2026-10-15 实测只剩音频）。
+    """
+    raw = (live_room.get("streamData") or {}).get("pull_data", {}).get("stream_data")
+    try:
+        data = json.loads(raw).get("data", {}) if isinstance(raw, str) else {}
+    except (TypeError, ValueError, AttributeError):
+        return None
+    if not isinstance(data, dict):
+        return None
     by_quality: dict[str, str] = {}
-    # H.264 优先占位：同档两种编码都有时取兼容性更好的 H.264
-    for field in ("streamData", "hevcStreamData"):
-        raw = (live_room.get(field) or {}).get("pull_data", {}).get("stream_data")
+    for quality, entry in data.items():
+        main = (entry or {}).get("main") or {} if isinstance(entry, dict) else {}
+        url = main.get("flv")
         try:
-            data = json.loads(raw).get("data", {}) if isinstance(raw, str) else {}
+            codec = str(json.loads(main.get("sdk_params") or "{}").get("VCodec", "h264"))
         except (TypeError, ValueError, AttributeError):
-            continue
-        if not isinstance(data, dict):
-            continue
-        for quality, entry in data.items():
-            url = ((entry or {}).get("main") or {}).get("flv") if isinstance(entry, dict) else None
-            if is_stream_url(url) and "only_audio=1" not in url:
-                by_quality.setdefault(quality, url)
+            codec = "h264"
+        if is_stream_url(url) and "only_audio=1" not in url and codec.lower() == "h264":
+            by_quality[quality] = url
     return next((by_quality[q] for q in SIGI_QUALITY_ORDER if q in by_quality), None)
 
 
@@ -270,7 +276,6 @@ def _stream_url_from_sigi(text: str) -> str | None:
     if best:
         return best
     walk(live_room.get("streamData", {}))
-    walk(live_room.get("hevcStreamData", {}))
     # FLV is more stable for long-running relay than HLS.
     return next((url for url in urls if ".flv" in url), None) or (urls[0] if urls else None)
 

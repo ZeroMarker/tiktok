@@ -100,8 +100,8 @@ while true; do
     # - ultrafast → veryfast：恢复 CABAC/B 帧/去块，同码率画质明显提升
     # - fps=30 → fps=25：与源一致，避免每 5 帧复制 1 帧的抖动和码率浪费；-g 50 保持 2s GOP
     # - maxrate 2500k → 3000k：给运动场景留峰值余量
-    # - 取流改拉 origin 原画（常为 1080p H.265），宽度缩到 ≤720 再编码：
-    #   比 TikTok 自己转码的 hd 档清晰，CPU 也比直接编 1080p 省
+    # - 宽度缩到 ≤720 再编码：取流按清晰度挑最高的 H.264 档，若拿到 1080p 原画
+    #   缩一次比直接编 1080p 省 CPU。H.265 档（FLV codec id 12）ffmpeg 6.1 解不了，取流侧已跳过
     # 另：输入去掉 igndts（FLV 无 PTS，igndts 会让 B 帧 PTS=DTS 而打乱显示
     # 顺序，fps 滤镜依赖真实时间戳）；输出加 first_pts=0 把音频起点也钉到 0
     # （同 twitch.sh）。
