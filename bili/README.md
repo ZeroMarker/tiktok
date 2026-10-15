@@ -171,6 +171,10 @@ bash watch.sh <tiktok_username> [replay.sh 参数...]   # 轮播值守
   `--encode`（x264 veryfast + aac，640x1280 约占半核）；`--dry-run` 只打印
   ffmpeg 命令（推流码打码）。日志 `./logs/ffmpeg_replay_*.log`，断线 5 秒重推。
 - `push.sh`/`soop.sh`：断线 10 秒重抓；日志 `./logs/ffmpeg_{tiktok,soop}_*.log`。
+- `push.sh` 拉原画：TikTok 原画档多为 H.265，放在 FLV 里用私有 codec id 12，系统 ffmpeg 6.1 解不了。
+  把新版 ffmpeg 解压到 `~/.local/opt/ffmpeg`（如 BtbN `ffmpeg-master-latest-linuxarm64-gpl`）后，
+  `push.sh` 自动改用它并放开 H.265 原画档；没有时只拉 H.264 档（通常是 TikTok 转码的 hd）。
+  也可用 `BILI_FFMPEG` 指定 ffmpeg 路径（此时不放开 H.265）。
 
 ## 稿件投稿（upload.py）
 
