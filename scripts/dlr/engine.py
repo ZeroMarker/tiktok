@@ -23,6 +23,7 @@ from datetime import datetime
 from pathlib import Path
 
 from dlr.adapters import load_adapter
+from dlr.adapters.base import ffmpeg_bin
 
 FFMPEG_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -474,7 +475,7 @@ class Engine:
             return
 
         cmd = [
-            "ffmpeg",
+            ffmpeg_bin(),
             "-nostdin",
             "-fflags", "+discardcorrupt",
             "-headers",

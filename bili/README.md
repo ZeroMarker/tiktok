@@ -11,7 +11,7 @@
 | `live.py` | 开播/停播/改标题/查状态 + 扫码登录（`accounts`/`use` 管多账号）。移植自 [obs-bilibili-stream](https://github.com/Zarosmm/obs-bilibili-stream)，标准库 + 同目录 vendored Nayuki 二维码库，无新增依赖；来源与许可证见文件头部（上游 GPL-2.0 衍生） |
 | `accounts.py` | 多账号登录态档案：存哪、选谁、被 `live.py`/`upload.py`/`webui/app.py` 共用 |
 | `push.sh` | 直播推流：TikTok 直播源 → Bilibili。未开播时每 60 秒轮询，开播自动转推 |
-| `replay.sh` | 文件轮播：本地 `.mp4` 按序循环 → Bilibili（默认 `-c copy`，`--encode` 重编码） |
+| `replay.sh` | 文件轮播：本地 `.mp4` 按序循环 → Bilibili（默认 `-c copy`，`--encode` 重编码；有 H.265 文件时自动重编码） |
 | `watch.sh` | 轮播值守：先播本地文件，每 60 秒探测 TikTok，一开播就停轮播切转推（管理页已内置同类值守，见「WebUI」） |
 | `soop.sh` | 直播推流：SOOP 直播间 → Bilibili |
 | `upload.py` | 稿件投稿：本地 `.mp4` 投成 B 站普通稿件（`push` 只传文件，`post` 提交稿件） |
@@ -175,6 +175,8 @@ bash watch.sh <tiktok_username> [replay.sh 参数...]   # 轮播值守
   把新版 ffmpeg 解压到 `~/.local/opt/ffmpeg`（如 BtbN `ffmpeg-master-latest-linuxarm64-gpl`）后，
   `push.sh` 自动改用它并放开 H.265 原画档；没有时只拉 H.264 档（通常是 TikTok 转码的 hd）。
   也可用 `BILI_FFMPEG` 指定 ffmpeg 路径（此时不放开 H.265）。
+  安装步骤与实测数据见 [docs/configuration.md](../docs/configuration.md#新版-ffmpegtiktok-原画可选)。
+- `replay.sh`：默认 `-c copy`；列表里有 H.265 等非 H.264 文件（新版 ffmpeg 录的 TikTok 原画）时自动改用 `--encode`。
 
 ## 稿件投稿（upload.py）
 

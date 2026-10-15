@@ -135,6 +135,22 @@ ffprobe -v error -select_streams a -show_entries packet=pts_time -of csv=p=0 out
 完整定位过程与离线对照实验见
 [归档：B 站推流音画不同步](archive/bili-push-av-sync.md)。
 
+## TikTok 画质低 / 没拉到原画
+
+- 系统 ffmpeg 6.1 解不了 TikTok 的 H.265 FLV，只能拉 H.264 档（多为 hd 720p 约 1 Mbps）。
+  装新版 ffmpeg 见[配置：新版 ffmpeg](configuration.md#新版-ffmpegtiktok-原画可选)。
+- 装了仍是 hd：确认 `~/.local/opt/ffmpeg/bin/ffmpeg` 可执行，且录制/推流进程是安装后重启的；
+  设了 `DLR_FFMPEG` / `BILI_FFMPEG` 时不会放开 H.265。
+- 看实际拉的是哪档：原画 URL 形如 `stream-<id>.flv`，转码档带后缀（`_hd.flv`、`_sd.flv` 等）；
+  转推日志 `bili/logs/ffmpeg_tiktok_*.log` 开头的输入流应为 `Video: hevc`。
+- 录制画质设置为 720p/480p 时会按上限挑档，不会拉 1080p 原画。
+
+## 录制文件只有声音 / 推流只有声音
+
+多半是用系统 ffmpeg 6.1 打开了 TikTok 的 H.265 FLV（日志里有 `unknown codec`、
+`Could not find codec parameters ... [12][0][0][0]`）。正常情况下取流已在没有新版 ffmpeg 时
+跳过 H.265 档；如果仍出现，装新版 ffmpeg，或检查是否设了 `DLR_FFMPEG`/`BILI_FFMPEG` 指向旧版。
+
 ## 录制文件没有生成
 
 检查项：

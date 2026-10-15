@@ -33,6 +33,42 @@ python --version
 yt-dlp --update-to nightly
 ```
 
+## 新版 ffmpeg（TikTok 原画，可选）
+
+TikTok 原画档（origin）通常只有 H.265，放在 FLV 里用的是私有 codec id 12。
+系统自带的 ffmpeg 6.1 解不了它（只剩音频），所以默认只拉 H.264 档——多是 TikTok
+自己转码的 hd 档（720p 约 1 Mbps）。装一份新版 ffmpeg 即可拉原画：
+
+```bash
+mkdir -p ~/.local/opt && cd /tmp
+curl -LO https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linuxarm64-gpl.tar.xz
+tar xf ffmpeg-master-latest-linuxarm64-gpl.tar.xz
+rm -rf ~/.local/opt/ffmpeg && mv ffmpeg-master-latest-linuxarm64-gpl ~/.local/opt/ffmpeg
+~/.local/opt/ffmpeg/bin/ffmpeg -version | head -1
+```
+
+x86_64 机器把 `linuxarm64` 换成 `linux64`。系统 ffmpeg 不受影响。
+
+`~/.local/opt/ffmpeg/bin/ffmpeg` 存在时自动生效，无需改配置（新起的录制/推流进程才会用上，
+已在跑的需重启）：
+
+| 链路 | 变化 |
+|---|---|
+| 本地录制（`scripts/dlr/`） | 改用新版 ffmpeg；TikTok 按 origin → uhd → hd → sd → ld 挑档（受画质设置上限约束），yt-dlp 挪到取流链最后（它常只给 hd 档） |
+| B 站转推（`bili/push.sh`） | 改用新版 ffmpeg 拉原画，缩到 ≤720 宽后编码推流 |
+| 文件轮播（`bili/replay.sh`） | 列表里有 H.265 文件时自动改为 `--encode`（FLV 推流只收 H.264） |
+
+实测（2026-10-15，720p 原画约 2.7 Mbps H.265）：
+
+- 录制文件按源码率原样保存，每小时约 1.2 GB（hd 档约 0.48 GB）。
+- 转推比拉 hd 档 PSNR 高约 2.4 dB；ffmpeg 约占 70% 单核（hd 档约 50%）。
+- 录出的 MP4 视频为 H.265（`hev1`）。部分浏览器/播放器不支持 H.265，预览没画面时用 VLC/mpv。
+
+覆盖路径：录制用 `DLR_FFMPEG`，转推用 `BILI_FFMPEG`。显式指定时**不会**放开 H.265 档
+（无法确认该 ffmpeg 能解），仍只拉 H.264。
+
+新版是 master 每日构建，不会自动更新；想更新时重复上面的安装步骤。
+
 ## Bilibili 推流
 
 见本仓库 [`bili/README.md`](../bili/README.md)：命令行开播/推流/轮播、systemd user

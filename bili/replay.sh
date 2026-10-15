@@ -9,7 +9,8 @@
 #
 # 说明：
 #   - 目录按文件名排序展开其中的 *.mp4；多个输入按给定顺序连播，播完从头循环。
-#   - 默认 -c copy（录制文件已是 h264+aac，与 FLV 兼容，几乎不占 CPU）。
+#   - 默认 -c copy（h264+aac 录制文件与 FLV 兼容，几乎不占 CPU）；
+#     列表里有 H.265 等非 H.264 文件时自动改为重编码。
 #   - 分段分辨率/参数不一致导致卡顿时改用 --encode 重编码。
 #   - 先用 `python3 live.py start --area ID` 开播，再跑本脚本推流。
 
@@ -39,7 +40,7 @@ for arg in "$@"; do
         --encode) ENCODE=1 ;;
         --dry-run) DRY_RUN=1 ;;
         -h|--help)
-            sed -n '2,14p' "$0" | sed 's/^# \?//'
+            sed -n '2,15p' "$0" | sed 's/^# \?//'
             exit 0
             ;;
         -*)
@@ -97,6 +98,19 @@ done
 
 echo "播放列表（${#FILES[@]} 个，循环）："
 printf '  %s\n' "${FILES[@]}"
+
+# 录制端装了新版 ffmpeg 后会录 TikTok H.265 原画；FLV 推流只收 H.264，
+# 列表里有非 H.264 视频就自动改为重编码（-c copy 会直接推流失败）。
+if [ "$ENCODE" -eq 0 ] && command -v ffprobe >/dev/null 2>&1; then
+    for f in "${FILES[@]}"; do
+        codec=$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of csv=p=0 "$f" 2>/dev/null)
+        if [ -n "$codec" ] && [ "$codec" != "h264" ]; then
+            echo "检测到非 H.264 视频（$codec）：$f，自动改用 --encode 重编码"
+            ENCODE=1
+            break
+        fi
+    done
+fi
 
 FFMPEG_ARGS=(-re -stream_loop -1 -f concat -safe 0 -i "$LIST_FILE")
 if [ "$ENCODE" -eq 1 ]; then

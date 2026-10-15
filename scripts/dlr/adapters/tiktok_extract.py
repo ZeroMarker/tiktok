@@ -31,7 +31,7 @@ import subprocess
 import sys
 import time
 
-from dlr.adapters.base import pick_flv_url, quality_height
+from dlr.adapters.base import hevc_flv_supported, pick_flv_url, quality_height
 
 
 class DetectionDiagnostics:
@@ -250,7 +250,53 @@ def check_live_via_webcast_api(
     return None
 
 
-def _stream_url_from_sigi(text: str) -> str | None:
+# pull_data.stream_data 的清晰度 key，按画质从高到低；ao 为纯音频，不参与挑选。
+SIGI_QUALITY_ORDER = ("origin", "uhd", "hd", "sd", "ld")
+
+
+def _best_flv_from_stream_data(live_room: dict, max_height: int | None = None) -> str | None:
+    """按 SIGI_QUALITY_ORDER 挑不超过 max_height 的最高清晰度 FLV；同档优先 H.264。
+
+    H.265 档（hevcStreamData 及 VCodec 非 h264 的条目）仅在 hevc_flv_supported() 时参与。
+    都超过 max_height 时退回最低可用档，保证可录（同 pick_flv_url）。
+    """
+    hevc_ok = hevc_flv_supported()
+    fields = ("streamData", "hevcStreamData") if hevc_ok else ("streamData",)
+    by_quality: dict[str, tuple[int | None, str]] = {}
+    for field in fields:
+        raw = (live_room.get(field) or {}).get("pull_data", {}).get("stream_data")
+        try:
+            data = json.loads(raw).get("data", {}) if isinstance(raw, str) else {}
+        except (TypeError, ValueError, AttributeError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        for quality, entry in data.items():
+            main = ((entry or {}).get("main") or {}) if isinstance(entry, dict) else {}
+            url = main.get("flv")
+            try:
+                params = json.loads(main.get("sdk_params") or "{}")
+            except (TypeError, ValueError):
+                params = {}
+            params = params if isinstance(params, dict) else {}
+            if not isinstance(url, str) or not url.startswith(("http://", "https://")):
+                continue
+            if "only_audio=1" in url:
+                continue
+            if str(params.get("VCodec", "h264")).lower() != "h264" and not hevc_ok:
+                continue
+            # resolution 形如 "720x1280"（竖屏），取短边当作清晰度高度
+            dims = [int(n) for n in re.findall(r"\d+", str(params.get("resolution", "")))[:2]]
+            height = min(dims) if len(dims) == 2 else None
+            by_quality.setdefault(quality, (height, url))
+    candidates = [by_quality[q] for q in SIGI_QUALITY_ORDER if q in by_quality]
+    for height, url in candidates:
+        if max_height is None or height is None or height <= max_height:
+            return url
+    return candidates[-1][1] if candidates else None
+
+
+def _stream_url_from_sigi(text: str, max_height: int | None = None) -> str | None:
     """Extract a playable FLV/HLS URL from rendered TikTok SIGI_STATE."""
     match = re.search(r'<script id="SIGI_STATE"[^>]*>(.*?)</script>', text, re.DOTALL)
     if not match:
@@ -285,8 +331,12 @@ def _stream_url_from_sigi(text: str) -> str | None:
     status = live_room.get("status")
     if status is not None and status != 2:
         return None
+    best = _best_flv_from_stream_data(live_room, max_height)
+    if best:
+        return best
     walk(live_room.get("streamData", {}))
-    walk(live_room.get("hevcStreamData", {}))
+    if hevc_flv_supported():
+        walk(live_room.get("hevcStreamData", {}))
     return next((url for url in urls if ".flv" in url), None) or (urls[0] if urls else None)
 
 
@@ -312,7 +362,8 @@ def _stream_url_from_sigi(text: str) -> str | None:
 
 
 def _get_stream_url_with_browser(
-    username: str, timeout: int = 25, *, diagnostics: DetectionDiagnostics | None = None,
+    username: str, timeout: int = 25, *, max_height: int | None = None,
+    diagnostics: DetectionDiagnostics | None = None,
 ) -> str | None:
     """经共享渲染服务（scripts/dlr/browserd.py）渲染直播页并抽取 FLV。
 
@@ -346,7 +397,7 @@ def _get_stream_url_with_browser(
     diag.event("browser", "parsed", live_status=status, room_id_present=bool(room_id))
     if status == 4:
         diag.event("browser", "offline")
-    stream_url = _stream_url_from_sigi(html)
+    stream_url = _stream_url_from_sigi(html, max_height)
     if not stream_url and status != 4:
         diag.event("browser", "no_stream" if status == 2 else "page_unrecognized")
     return stream_url
@@ -561,13 +612,20 @@ def get_stream_url(
     _request_with_retry(session, "https://www.tiktok.com", attempts=1)
     _load_netscape_cookies(session, cookies)
 
-    if try_ytdlp:
+    def ytdlp() -> str | None:
         diag.event("ytdlp", "started")
         stream_url = _try_ytdlp_fallback(username, max_height, diagnostics=diag)
         diag.event("ytdlp", "success" if stream_url else "failed")
+        return stream_url
+
+    # 能解 H.265 FLV 时 yt-dlp 挪到最后：它在 TikTok 上常只给 hd 档（多为 HLS），
+    # 页面/webcast/浏览器链才拿得到原画档。
+    ytdlp_last = try_ytdlp and hevc_flv_supported()
+    if try_ytdlp and not ytdlp_last:
+        stream_url = ytdlp()
         if stream_url:
             return stream_url
-    else:
+    elif not try_ytdlp:
         diag.event("ytdlp", "deferred" if allow_browser else "skipped")
 
     r = _request_with_retry(
@@ -581,7 +639,9 @@ def get_stream_url(
         browser_attempted = True
         diag.event("browser", "started")
         try:
-            stream = _get_stream_url_with_browser(username, diagnostics=diag)
+            stream = _get_stream_url_with_browser(
+                username, max_height=max_height, diagnostics=diag
+            )
         except Exception:
             # Never stringify browser exceptions: they may contain page/URL data.
             diag.event("browser", "error")
@@ -629,6 +689,8 @@ def get_stream_url(
             return stream
     elif not allow_browser:
         diag.event("browser", "skipped")
+    if ytdlp_last:
+        return ytdlp()
     return None
 
 

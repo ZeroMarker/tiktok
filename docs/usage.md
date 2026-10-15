@@ -13,6 +13,9 @@ bash platforms/tiktok/record.sh <tiktok_username>
 这是日常录制的正式入口，会持续轮询直播源（轻量检测每轮先行，连续 3 次未命中才在升级轮
 跑一次 yt-dlp 与浏览器兜底），断流后自动重新获取。
 
+默认录 H.264 档（多为 TikTok 转码的 hd 720p）。想录原画（通常是 H.265）需另装新版 ffmpeg，
+见[配置：新版 ffmpeg](configuration.md#新版-ffmpegtiktok-原画可选)。
+
 #### TikTok 登录 Cookie（部分主播需要）
 
 TikTok 对部分主播（登录限流、风控、或直播需要登录才能看）在无登录 Cookie 时不会返回

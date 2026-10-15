@@ -3,12 +3,30 @@
 from __future__ import annotations
 
 import abc
+import os
 import re
 from pathlib import Path
 from urllib.parse import urlsplit
 
 # 项目根目录（scripts/dlr/adapters/base.py -> 项目根）
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+
+# 本机另装的新版 ffmpeg（BtbN master 构建）。它能解 TikTok FLV 里的 H.265
+# （私有 codec id 12，系统 ffmpeg 6.1 解不了，只剩音频），装了就放开 H.265 原画档。
+LOCAL_FFMPEG = Path.home() / ".local" / "opt" / "ffmpeg" / "bin" / "ffmpeg"
+
+
+def ffmpeg_bin() -> str:
+    """录制用的 ffmpeg：DLR_FFMPEG 显式指定 > 本机新版 > 系统 ffmpeg。"""
+    explicit = os.environ.get("DLR_FFMPEG", "").strip()
+    if explicit:
+        return explicit
+    return str(LOCAL_FFMPEG) if os.access(LOCAL_FFMPEG, os.X_OK) else "ffmpeg"
+
+
+def hevc_flv_supported() -> bool:
+    """当前录制用的 ffmpeg 能否解 TikTok 的 H.265 FLV（只认本机新版）。"""
+    return ffmpeg_bin() == str(LOCAL_FFMPEG)
 
 
 def normalize_twitch_target(raw: str) -> str:

@@ -47,6 +47,36 @@ class TikTokRenderedStreamTest(unittest.TestCase):
         html = '<script id="SIGI_STATE">' + __import__("json").dumps(sigi) + "</script>"
         self.assertEqual(_stream_url_from_sigi(html), "https://cdn.example/video.flv")
 
+    def _sigi_with_qualities(self):
+        import json
+        def sd(data):
+            return {"pull_data": {"stream_data": json.dumps({"data": {
+                q: {"main": {"flv": url, "sdk_params": json.dumps({"VCodec": c, "resolution": r})}}
+                for q, (url, c, r) in data.items()}})}}
+        live_room = {
+            "status": 2,
+            "streamData": sd({
+                "ao": ("https://cdn.example/s.flv?only_audio=1", "h264", ""),
+                "sd": ("https://cdn.example/s_sd.flv", "h264", "480x854"),
+                "hd": ("https://cdn.example/s_hd.flv", "h264", "720x1280"),
+            }),
+            "hevcStreamData": sd({
+                "origin": ("https://cdn.example/s.flv", "h265", "1080x1920"),
+            }),
+        }
+        return '<script id="SIGI_STATE">' + json.dumps(
+            {"LiveRoom": {"liveRoomUserInfo": {"liveRoom": live_room}}}) + "</script>"
+
+    def test_sigi_picks_highest_quality_by_codec_support(self):
+        html = self._sigi_with_qualities()
+        with mock.patch.object(tiktok_extract_mod, "hevc_flv_supported", return_value=False):
+            self.assertEqual(_stream_url_from_sigi(html), "https://cdn.example/s_hd.flv")
+        with mock.patch.object(tiktok_extract_mod, "hevc_flv_supported", return_value=True):
+            self.assertEqual(_stream_url_from_sigi(html), "https://cdn.example/s.flv")
+            # 画质上限 720p：跳过 1080p 原画
+            self.assertEqual(_stream_url_from_sigi(html, 720), "https://cdn.example/s_hd.flv")
+            self.assertEqual(_stream_url_from_sigi(html, 480), "https://cdn.example/s_sd.flv")
+
     def test_stale_stream_data_rejected_unless_live(self):
         """离线页（status=4）残留的陈旧 streamData 必须拒绝；直播（status=2）放行。
 
@@ -1139,6 +1169,21 @@ class SignalStopTest(unittest.TestCase):
         proc.send_signal(signal.SIGTERM)
         self._assert_exited(proc)
         self.assertEqual(marker.read_text(), "finalized")
+
+
+class FfmpegBinTest(unittest.TestCase):
+    def test_prefers_explicit_then_local_then_system(self):
+        import dlr.adapters.base as base_mod
+        with mock.patch.dict("os.environ", {"DLR_FFMPEG": "/opt/x/ffmpeg"}):
+            self.assertEqual(base_mod.ffmpeg_bin(), "/opt/x/ffmpeg")
+            self.assertFalse(base_mod.hevc_flv_supported())
+        with mock.patch.dict("os.environ", {"DLR_FFMPEG": ""}):
+            with mock.patch.object(base_mod.os, "access", return_value=True):
+                self.assertEqual(base_mod.ffmpeg_bin(), str(base_mod.LOCAL_FFMPEG))
+                self.assertTrue(base_mod.hevc_flv_supported())
+            with mock.patch.object(base_mod.os, "access", return_value=False):
+                self.assertEqual(base_mod.ffmpeg_bin(), "ffmpeg")
+                self.assertFalse(base_mod.hevc_flv_supported())
 
 
 if __name__ == "__main__":
