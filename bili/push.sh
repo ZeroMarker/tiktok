@@ -78,7 +78,7 @@ while true; do
     # v4 修复点（2026-09-08 实测：TikTok 源 EOF 重连后 ffmpeg 假死 8 分钟不退不报错）：
     # - 输入加 -rw_timeout：源端断流 15s 直接报错退出，外层重抓（此前无限挂起）
     # - 加日志看门狗：ffmpeg 日志 60s 无输出即 kill 重推（此前只管退出不管卡死）
-    # - 输出 30fps：-g 60 保持 2s GOP
+    # - 输出 30fps：-g 60 保持 2s GOP（v6 改为 25fps / -g 50）
     # - 加 -pix_fmt yuv420p：源为 yuvj420p 全范围，转限范围防偏色（同 replay.sh）
     # - 加 -reconnect_at_eof/-reconnect_on_network_error：EOF/TLS 错误也自动重连
     #
@@ -96,6 +96,10 @@ while true; do
     # 改为 `-vf fps=30`：按输入真实时间戳做 CFR 转换（丢/补帧到 30fps），
     # 保留真实时长，滤镜图重初始化也不会回卷。同一条源复测漂移 +0.25s
     # （≈源自身尾部误差，全程锁定）。
+    # v6 画质（2026-10-15：日志 q 长期 27–33，二次压缩糊）：
+    # - ultrafast → veryfast：恢复 CABAC/B 帧/去块，同码率画质明显提升
+    # - fps=30 → fps=25：与源一致，避免每 5 帧复制 1 帧的抖动和码率浪费；-g 50 保持 2s GOP
+    # - maxrate 2500k → 3000k：给运动场景留峰值余量
     # 另：输入去掉 igndts（FLV 无 PTS，igndts 会让 B 帧 PTS=DTS 而打乱显示
     # 顺序，fps 滤镜依赖真实时间戳）；输出加 first_pts=0 把音频起点也钉到 0
     # （同 twitch.sh）。
@@ -106,8 +110,8 @@ while true; do
         -analyzeduration 5M -probesize 5M \
         -reconnect 1 -reconnect_at_eof 1 -reconnect_streamed 1 -reconnect_on_network_error 1 -reconnect_delay_max 5 \
         -i "$STREAM_URL" \
-        -vf "fps=30" \
-        -c:v libx264 -preset ultrafast -tune zerolatency -b:v 2500k -maxrate 2500k -bufsize 5000k -g 60 -pix_fmt yuv420p \
+        -vf "fps=25" \
+        -c:v libx264 -preset veryfast -tune zerolatency -b:v 2500k -maxrate 3000k -bufsize 5000k -g 50 -keyint_min 25 -profile:v high -pix_fmt yuv420p \
         -c:a aac -b:a 128k -ar 48000 -ac 2 \
         -af "aresample=async=1:first_pts=0" \
         -f flv \

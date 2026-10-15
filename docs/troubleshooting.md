@@ -115,7 +115,7 @@ yt-dlp --no-warnings -f best --get-url "https://play.sooplive.co.kr/<频道id>"
 所以两条时间轴一旦分开就只会越差越远。
 
 修复：改用 `-vf fps=N`（按输入真实时间戳做 CFR 转换，保留真实时长，滤镜图
-重初始化也不会回卷），音频侧补 `first_pts=0` 把起点钉到 0。`bili/push.sh`（`fps=30`）、
+重初始化也不会回卷），音频侧补 `first_pts=0` 把起点钉到 0。`bili/push.sh`（`fps=25`）、
 `bili/replay.sh`（`fps=25`）、`platforms/twitch/twitch.sh`（`fps=30`）均已修正。
 
 自查方法——比较推流产物里两条流的时间轴终点，差值就是当前音画偏差：
