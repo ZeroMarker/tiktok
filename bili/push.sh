@@ -11,7 +11,17 @@ if [ -z "$USERNAME" ]; then
     exit 1
 fi
 
-for cmd in yt-dlp ffmpeg python3; do
+# ffmpeg：优先用本机另装的新版（~/.local/opt/ffmpeg，BtbN master 构建），它能解
+# TikTok FLV 里的 H.265（私有 codec id 12），据此放开取流侧挑 H.265 原画档；
+# 系统自带 6.1 解不了，只能用 H.264 档。可用 BILI_FFMPEG 显式指定。
+FFMPEG="${BILI_FFMPEG:-}"
+if [ -z "$FFMPEG" ] && [ -x "$HOME/.local/opt/ffmpeg/bin/ffmpeg" ]; then
+    FFMPEG="$HOME/.local/opt/ffmpeg/bin/ffmpeg"
+    export TIKTOK_HEVC_FLV=1
+fi
+FFMPEG="${FFMPEG:-ffmpeg}"
+
+for cmd in yt-dlp "$FFMPEG" python3; do
     if ! command -v "$cmd" >/dev/null 2>&1; then
         echo "错误：缺少依赖 $cmd"
         exit 1
@@ -105,7 +115,7 @@ while true; do
     # 另：输入去掉 igndts（FLV 无 PTS，igndts 会让 B 帧 PTS=DTS 而打乱显示
     # 顺序，fps 滤镜依赖真实时间戳）；输出加 first_pts=0 把音频起点也钉到 0
     # （同 twitch.sh）。
-    ffmpeg -re \
+    "$FFMPEG" -re \
         -headers "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"$'\r\n'"Referer: https://www.tiktok.com/"$'\r\n' \
         -fflags +discardcorrupt \
         -rw_timeout "$RW_TIMEOUT_US" \

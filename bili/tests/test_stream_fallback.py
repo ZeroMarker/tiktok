@@ -63,6 +63,8 @@ class StreamProtocolTest(unittest.TestCase):
 
     def test_rendered_sigi_prefers_highest_h264_quality(self):
         import json
+        import os
+        os.environ.pop("TIKTOK_HEVC_FLV", None)
         def sd(data):
             return {"pull_data": {"stream_data": json.dumps({"data": {
                 q: {"main": {"flv": url, "sdk_params": json.dumps({"VCodec": c})}}
@@ -82,6 +84,29 @@ class StreamProtocolTest(unittest.TestCase):
         live_room["streamData"] = sd({"origin": ("https://cdn.example/o.flv", "h265"),
                                      "hd": ("https://cdn.example/s_hd.flv", "h264")})
         self.assertEqual(tiktok_fallback._stream_url_from_sigi(html()), "https://cdn.example/s_hd.flv")
+
+    def test_rendered_sigi_picks_hevc_origin_when_allowed(self):
+        import json
+        from unittest import mock
+        def sd(data):
+            return {"pull_data": {"stream_data": json.dumps({"data": {
+                q: {"main": {"flv": url, "sdk_params": json.dumps({"VCodec": c})}}
+                for q, (url, c) in data.items()}})}}
+        live_room = {
+            "status": 2,
+            "streamData": sd({"hd": ("https://cdn.example/s_hd.flv", "h264")}),
+            "hevcStreamData": sd({"hd": ("https://cdn.example/s_hd5.flv", "h265"),
+                                  "origin": ("https://cdn.example/s.flv", "h265")}),
+        }
+        html = '<script id="SIGI_STATE">' + json.dumps(
+            {"LiveRoom": {"liveRoomUserInfo": {"liveRoom": live_room}}}) + "</script>"
+        with mock.patch.dict("os.environ", {"TIKTOK_HEVC_FLV": "1"}):
+            self.assertEqual(tiktok_fallback._stream_url_from_sigi(html), "https://cdn.example/s.flv")
+            # 同档优先 H.264
+            live_room["hevcStreamData"] = sd({"hd": ("https://cdn.example/s_hd5.flv", "h265")})
+            html = '<script id="SIGI_STATE">' + json.dumps(
+                {"LiveRoom": {"liveRoomUserInfo": {"liveRoom": live_room}}}) + "</script>"
+            self.assertEqual(tiktok_fallback._stream_url_from_sigi(html), "https://cdn.example/s_hd.flv")
 
     def test_stale_stream_data_rejected_unless_live(self):
         """离线页（status=4）残留的陈旧 streamData 必须拒绝；直播（status=2）放行。

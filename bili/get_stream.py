@@ -71,6 +71,12 @@ def fetch(username: str, cookies: str, timeout: int) -> str | None:
         f"https://www.tiktok.com/@{username}/live",
         f"https://m.tiktok.com/@{username}/live",
     )
+    # 新版 ffmpeg 能解 H.265 FLV 时（push.sh 导出 TIKTOK_HEVC_FLV=1），先走能挑
+    # 原画档的 webcast/浏览器链；yt-dlp 在 TikTok 上常只给 hd 档（多为 HLS）。
+    if os.environ.get("TIKTOK_HEVC_FLV") == "1":
+        stream = _method5(username)
+        if stream:
+            return stream
     # 先 FLV 优先（低延迟），再不设 -f 兜 HLS-only 列表（对齐上游 _try_ytdlp_fallback
     # 首变体默认格式行为），最后 webcast 直解。
     for fmt in ("b[ext=flv]/best", None):
@@ -85,7 +91,7 @@ def fetch(username: str, cookies: str, timeout: int) -> str | None:
                 )
                 if stream:
                     return stream
-    return _method5(username)
+    return None if os.environ.get("TIKTOK_HEVC_FLV") == "1" else _method5(username)
 
 
 def main(argv: list[str] | None = None) -> int:

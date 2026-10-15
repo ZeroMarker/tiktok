@@ -211,29 +211,39 @@ def check_live_via_webcast_api(
 SIGI_QUALITY_ORDER = ("origin", "uhd", "hd", "sd", "ld")
 
 
-def _best_flv_from_stream_data(live_room: dict) -> str | None:
-    """从 streamData 中按 SIGI_QUALITY_ORDER 挑最高清晰度的 H.264 FLV。
+def _hevc_flv_allowed() -> bool:
+    """TikTok 的 H.265 档在 FLV 里用私有 codec id 12，ffmpeg 6.1 解不了（只剩音频）；
+    新版 ffmpeg 可解。由 push.sh 在用上新版时导出 TIKTOK_HEVC_FLV=1 开启。"""
+    return os.environ.get("TIKTOK_HEVC_FLV") == "1"
 
-    只看 H.264：TikTok 的 H.265 档（hevcStreamData，含常见的 origin）在 FLV 里
-    用私有 codec id 12，ffmpeg 6.1 无法解码（2026-10-15 实测只剩音频）。
+
+def _best_flv_from_stream_data(live_room: dict) -> str | None:
+    """按 SIGI_QUALITY_ORDER 挑最高清晰度的 FLV；同档优先 H.264。
+
+    未开启 TIKTOK_HEVC_FLV 时跳过 H.265 档（hevcStreamData 及 VCodec 为 h265 的条目）。
     """
-    raw = (live_room.get("streamData") or {}).get("pull_data", {}).get("stream_data")
-    try:
-        data = json.loads(raw).get("data", {}) if isinstance(raw, str) else {}
-    except (TypeError, ValueError, AttributeError):
-        return None
-    if not isinstance(data, dict):
-        return None
+    fields = ("streamData", "hevcStreamData") if _hevc_flv_allowed() else ("streamData",)
     by_quality: dict[str, str] = {}
-    for quality, entry in data.items():
-        main = (entry or {}).get("main") or {} if isinstance(entry, dict) else {}
-        url = main.get("flv")
+    for field in fields:
+        raw = (live_room.get(field) or {}).get("pull_data", {}).get("stream_data")
         try:
-            codec = str(json.loads(main.get("sdk_params") or "{}").get("VCodec", "h264"))
+            data = json.loads(raw).get("data", {}) if isinstance(raw, str) else {}
         except (TypeError, ValueError, AttributeError):
-            codec = "h264"
-        if is_stream_url(url) and "only_audio=1" not in url and codec.lower() == "h264":
-            by_quality[quality] = url
+            continue
+        if not isinstance(data, dict):
+            continue
+        for quality, entry in data.items():
+            main = ((entry or {}).get("main") or {}) if isinstance(entry, dict) else {}
+            url = main.get("flv")
+            try:
+                codec = str(json.loads(main.get("sdk_params") or "{}").get("VCodec", "h264"))
+            except (TypeError, ValueError, AttributeError):
+                codec = "h264"
+            if not is_stream_url(url) or "only_audio=1" in url:
+                continue
+            if codec.lower() != "h264" and not _hevc_flv_allowed():
+                continue
+            by_quality.setdefault(quality, url)
     return next((by_quality[q] for q in SIGI_QUALITY_ORDER if q in by_quality), None)
 
 
