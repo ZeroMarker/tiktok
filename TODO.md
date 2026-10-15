@@ -10,3 +10,9 @@
   - 确认本机 `main` 已包含修复提交，执行 `sudo systemctl restart livestream-webui.service`。
   - 重启后检查服务状态与任务日志，确认首轮兜底正常、浏览器确认离线时显示“未开播”，再勾选完成。
   - 已于 2026-10-06 16:49:58 UTC 完成：重启前 38 个任务均未录制且没有 ffmpeg 录制进程；重启后服务 active、健康检查通过，`morihinachan` 首轮启用浏览器兜底并正确显示“确认未开播”。
+
+- [ ] 下次 TikTok 开播时验证原画录制与转推（`fff0e89`、`febd4d9`）。
+  - 已于 2026-10-15 05:02 UTC 在无录制时重启 `livestream-webui.service`，新代码已生效；`bili-live.service` 下次自动拉起即生效。
+  - 录制：新分段 `ffprobe` 应为 `hevc`（原画）；检查分段时长连续、无只有音频的分段，记录每小时文件大小。
+  - 转推：`bili/logs/ffmpeg_tiktok_*.log` 开头输入流应为 `Video: hevc`，`speed=1x` 稳定，CPU 余量充足。
+  - 文件轮播含 H.265 录制时应自动重编码（日志出现“检测到非 H.264 视频”）。
