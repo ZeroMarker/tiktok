@@ -31,6 +31,7 @@ if [ ! -e /etc/default/livestream-webui ]; then
       > /etc/default/livestream-webui
 fi
 
+bash "$PROJECT_ROOT/systemd/install-logrotate.sh"
 systemctl daemon-reload
 systemctl enable --now livestream-webui.service
 systemctl enable --now tiktok-browserd.service

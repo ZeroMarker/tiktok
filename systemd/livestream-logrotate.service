@@ -1,0 +1,8 @@
+[Unit]
+Description=Rotate Live Stream Toolkit logs
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/logrotate --state /var/lib/logrotate/livestream.status /etc/livestream-logrotate.conf
+Nice=10
+IOSchedulingClass=idle

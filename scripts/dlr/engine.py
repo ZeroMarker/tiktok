@@ -477,6 +477,9 @@ class Engine:
         cmd = [
             ffmpeg_bin(),
             "-nostdin",
+            "-hide_banner",
+            "-loglevel", "warning",
+            "-nostats",
             "-fflags", "+discardcorrupt",
             "-headers",
             f"User-Agent: {FFMPEG_UA}\r\nReferer: {self.adapter.referer}\r\n",

@@ -112,7 +112,7 @@ if [ "$ENCODE" -eq 0 ] && command -v ffprobe >/dev/null 2>&1; then
     done
 fi
 
-FFMPEG_ARGS=(-re -stream_loop -1 -f concat -safe 0 -i "$LIST_FILE")
+FFMPEG_ARGS=(-hide_banner -loglevel warning -nostats -re -stream_loop -1 -f concat -safe 0 -i "$LIST_FILE")
 if [ "$ENCODE" -eq 1 ]; then
     # 重编码：fps 滤镜按*输入真实时间戳*做 CFR 转换，跨分段（VFR/断流空洞）不断流；
     # 参数沿用 push.sh（x264 veryfast + aac）
@@ -162,7 +162,7 @@ trap cleanup SIGINT SIGTERM SIGQUIT
 echo "开始循环推流本地文件 -> Bilibili"
 
 while true; do
-    ffmpeg -hide_banner "${FFMPEG_ARGS[@]}" 2>> "$LOG_FILE" &
+    ffmpeg "${FFMPEG_ARGS[@]}" 2>> "$LOG_FILE" &
     FFMPEG_PID=$!
     wait "$FFMPEG_PID"
     EXIT_CODE=$?

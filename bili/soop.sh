@@ -68,7 +68,7 @@ while true; do
     LOG_FILE="${LOG_DIR}/ffmpeg_soop_$(echo "$SOOP_URL" | sed 's/[^a-zA-Z0-9]/_/g')_$(date +%Y%m%d).log"
 
     # 推流命令（优化参数）
-    ffmpeg -y \
+    ffmpeg -hide_banner -loglevel warning -nostats -y \
         -headers "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"$'\r\n'"Referer: ${SOOP_URL}"$'\r\n' \
         -rw_timeout 30000000 \
         -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 15 \

@@ -1,0 +1,10 @@
+[Unit]
+Description=Check Live Stream Toolkit log sizes hourly
+
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=5m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

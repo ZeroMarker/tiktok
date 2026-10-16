@@ -129,3 +129,22 @@ find . -name '*.sh' -type f -print \
 仓库已忽略日志、视频文件、Cookie 文件、`bili/upload-state*.json`（投稿凭证）和 `recordings/`。建议长期任务在仓库外或 `recordings/` 下运行，避免运行产物和源码混在一起。
 
 WebUI 创建的任务统一使用 `RECORDINGS_DIR`；概览页的磁盘容量与最近文件也以该目录为准。
+
+FFmpeg 录制和轮播默认仅记录 warning/error，关闭常规进度输出；TikTok 转推每
+10 秒保留一条进度心跳，供 60 秒假死看门狗使用。脚本在下次启动时应用这些参数；
+WebUI 内的录制引擎需要重启 WebUI 服务后生效，可等当前录制结束再重启。
+
+`systemd/install.sh` 同时安装日志轮转（需要系统已安装 `logrotate`）；已有部署可单独运行：
+
+```bash
+sudo bash systemd/install-logrotate.sh
+# 自定义录制目录需与 WebUI 配置一致：
+sudo RECORDINGS_DIR=/data/recordings bash systemd/install-logrotate.sh
+```
+
+每小时检查根目录 `logs/`、`bili/logs/` 和录制目录 `logs/<平台>/`，每天或单文件
+超过 20 MiB 时轮转，压缩并保留最多 7 份备份；在发生轮转时清理修改时间超过
+14 天的压缩备份。按日期命名且不再写入的日志也会被压缩，空的原文件不占用
+日志内容空间。`copytruncate` 兼容 FFmpeg 已打开的文件句柄，复制与截断之间
+可能丢失少量日志；20 MiB 为检查阈值，小时内可暂时超过。系统 journal 使用其
+自身的保留策略，本配置不清理 journal。安装过程不会立即轮转或清理其他日志。

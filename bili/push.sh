@@ -54,7 +54,7 @@ echo "开始无人值守推流 TikTok @$USERNAME -> Bilibili"
 
 # 输入无数据 N 秒则报错退出（微秒）；输出侧卡死由下面的看门狗兜底
 RW_TIMEOUT_US=15000000
-# ffmpeg 日志超过 N 秒无输出即判假死（正常推流时 progress 每秒多行）
+# ffmpeg 日志超过 N 秒无输出即判假死（每 10 秒输出一条 stats 心跳）
 STALL_TIMEOUT=60
 
 FFMPEG_PID=""
@@ -115,7 +115,8 @@ while true; do
     # 另：输入去掉 igndts（FLV 无 PTS，igndts 会让 B 帧 PTS=DTS 而打乱显示
     # 顺序，fps 滤镜依赖真实时间戳）；输出加 first_pts=0 把音频起点也钉到 0
     # （同 twitch.sh）。
-    "$FFMPEG" -re \
+    # 保留显式 stats 心跳供看门狗使用；warning 隐藏 HLS 标签等 info 噪声。
+    "$FFMPEG" -hide_banner -loglevel warning -stats -stats_period 10 -re \
         -headers "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"$'\r\n'"Referer: https://www.tiktok.com/"$'\r\n' \
         -fflags +discardcorrupt \
         -rw_timeout "$RW_TIMEOUT_US" \
