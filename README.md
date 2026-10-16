@@ -14,7 +14,8 @@
 ## 快速开始
 
 完整的依赖清单、Python 环境要求、Chromium 路径和验证步骤见
-[外部依赖](docs/configuration.md#外部依赖)。
+[外部依赖](docs/configuration.md#外部依赖)。本机 FFmpeg 已切换到 BtbN 9.0 稳定分支
+构建，版本、安装路径与选择规则见 [FFmpeg 配置](docs/configuration.md#新版-ffmpegtiktok-原画可选)。
 
 安装独立取流工具（后端直接导入的 Python 包还需按上述文档配置）：
 

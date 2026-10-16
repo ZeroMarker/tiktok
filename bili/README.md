@@ -172,7 +172,9 @@ bash watch.sh <tiktok_username> [replay.sh 参数...]   # 轮播值守
   ffmpeg 命令（推流码打码）。日志 `./logs/ffmpeg_replay_*.log`，断线 5 秒重推。
 - `push.sh`/`soop.sh`：断线 10 秒重抓；日志 `./logs/ffmpeg_{tiktok,soop}_*.log`。
 - `push.sh` 拉原画：TikTok 原画档多为 H.265，放在 FLV 里用私有 codec id 12，系统 ffmpeg 6.1 解不了。
-  把新版 ffmpeg 解压到 `~/.local/opt/ffmpeg`（如 BtbN `ffmpeg-n9.0-latest-linuxarm64-gpl-9.0`）后，
+  本机已使用 BtbN 9.0 稳定分支构建（2026-10-16 核对版本为
+  `n9.0.2-28-g669f5ab083-20261015`），安装在 `~/.local/opt/ffmpeg`
+  （安装包 `ffmpeg-n9.0-latest-linuxarm64-gpl-9.0`）；
   `push.sh` 自动改用它并放开 H.265 原画档；没有时只拉 H.264 档（通常是 TikTok 转码的 hd）。
   也可用 `BILI_FFMPEG` 指定 ffmpeg 路径（此时不放开 H.265）。
   安装步骤与实测数据见 [docs/configuration.md](../docs/configuration.md#新版-ffmpegtiktok-原画可选)。

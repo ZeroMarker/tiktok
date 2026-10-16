@@ -12,7 +12,7 @@ Bash 执行这些 `.sh` 文件。Python 主体、WebUI 后端及 Bilibili 登录
 |---|---|---|
 | Python 3 | 录制引擎、WebUI、Bilibili 接口 | 必需；CI 使用 Python 3.12，建议与之保持一致 |
 | Bash、常用 Linux 命令 | 平台入口、推流、服务安装 | 使用 Shell 脚本时需要；包括 `sed`、`grep`、`find`、`ps`、`pkill` 等 |
-| FFmpeg / ffprobe | 录制、分段、转推、轮播媒体检测 | 录制/推流需要 FFmpeg；ffprobe 用于轮播编码检测；TikTok H.265 要求见下一节 |
+| FFmpeg / ffprobe | 录制、分段、转推、轮播媒体检测 | 本机已使用 BtbN 9.0 稳定分支构建；ffprobe 用于轮播编码检测；路径与验证见下方 FFmpeg 一节 |
 | yt-dlp | 各平台直播源解析 | 录制/平台转推的核心依赖；安装 `default,curl-cffi` extras |
 | curl_cffi | TikTok 进程内检测、页面解析，以及 yt-dlp 的浏览器模拟请求 | TikTok 轻量检测需要；缺失时部分解析路径不可用 |
 | Chromium 或 Google Chrome | TikTok 共享浏览器渲染、YouTube 登录态取流 | 浏览器路径需要；不可用时相应路径失败并尝试其他可用检测方式 |
@@ -138,7 +138,12 @@ Bilibili 需要登录会话与推流凭据。具体操作见[使用说明](usage
 
 TikTok 原画档（origin）通常只有 H.265，放在 FLV 里用的是私有 codec id 12。
 系统自带的 ffmpeg 6.1 解不了它（只剩音频），所以默认只拉 H.264 档——多是 TikTok
-自己转码的 hd 档（720p 约 1 Mbps）。装一份新版 ffmpeg 即可拉原画：
+自己转码的 hd 档（720p 约 1 Mbps）。本机已切换到 BtbN 的 **9.0 稳定分支构建**，
+2026-10-16 核对版本为 `n9.0.2-28-g669f5ab083-20261015`，安装位置为
+`/home/ubuntu/.local/opt/ffmpeg/bin/ffmpeg`。旧 master 开发版已移除。
+
+以下命令安装同一稳定分支（`n9.0` 包）；下载地址中的 `latest` 表示该分支最新构建，
+具体版本可能随时间变化：
 
 ```bash
 mkdir -p ~/.local/opt && cd /tmp
@@ -150,8 +155,13 @@ rm -rf ~/.local/opt/ffmpeg && mv ffmpeg-n9.0-latest-linuxarm64-gpl-9.0 ~/.local/
 
 x86_64 机器把 `linuxarm64` 换成 `linux64`。系统 ffmpeg 不受影响。
 
-`~/.local/opt/ffmpeg/bin/ffmpeg` 存在时自动生效，无需改配置（新起的录制/推流进程才会用上，
-已在跑的需重启）：
+程序按路径选择 FFmpeg，不比较版本号：录制使用 `DLR_FFMPEG` → 本地固定路径
+`~/.local/opt/ffmpeg/bin/ffmpeg`（可执行时）→ `PATH` 中的 `ffmpeg`；TikTok 转推使用
+`BILI_FFMPEG` → 同一本地路径（可执行时）→ `PATH` 中的 `ffmpeg`。
+文件轮播、SOOP/Twitch 转推直接使用 `PATH` 中的 `ffmpeg`。系统 `/usr/bin/ffmpeg`
+仍可与本地稳定版共存；仅安装本地版本不会替换系统命令。
+
+本地版本用于新启动的 FFmpeg 进程，已经运行的进程需要重新启动才能使用替换后的文件：
 
 | 链路 | 变化 |
 |---|---|
@@ -165,8 +175,9 @@ x86_64 机器把 `linuxarm64` 换成 `linux64`。系统 ffmpeg 不受影响。
 - 转推比拉 hd 档 PSNR 高约 1.9–2.4 dB；ffmpeg 约占 70–105% 单核（视源分辨率与画面复杂度，hd 档约 50%）。
 - 录出的 MP4 视频为 H.265（`hev1`）。部分浏览器/播放器不支持 H.265，预览没画面时用 VLC/mpv。
 
-覆盖路径：录制用 `DLR_FFMPEG`，转推用 `BILI_FFMPEG`。显式指定时**不会**放开 H.265 档
-（无法确认该 ffmpeg 能解），仍只拉 H.264。
+H.265 开关也依赖路径：录制仅在最终选择的路径等于本地固定路径时启用；TikTok 转推
+仅在未设置 `BILI_FFMPEG`、自动选中本地版本时启用。显式指定其他路径，即使版本较新，
+也不会自动放开 H.265。
 
 用的是 9.0 稳定分支（2026-10-16 实测 9.0.2 可解 TikTok H.265 FLV，与 master 构建结果一致）。
 不会自动更新；想拿 9.0.x 修复版时重复上面的安装步骤。换大版本前先用 `ffprobe` 对一路在播的
