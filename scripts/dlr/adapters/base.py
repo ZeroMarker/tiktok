@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 # 项目根目录（scripts/dlr/adapters/base.py -> 项目根）
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
-# 本机另装的新版 ffmpeg（BtbN master 构建）。它能解 TikTok FLV 里的 H.265
+# 本机另装的新版 ffmpeg（BtbN 9.0 稳定版构建）。它能解 TikTok FLV 里的 H.265
 # （私有 codec id 12，系统 ffmpeg 6.1 解不了，只剩音频），装了就放开 H.265 原画档。
 LOCAL_FFMPEG = Path.home() / ".local" / "opt" / "ffmpeg" / "bin" / "ffmpeg"
 

@@ -11,7 +11,7 @@ if [ -z "$USERNAME" ]; then
     exit 1
 fi
 
-# ffmpeg：优先用本机另装的新版（~/.local/opt/ffmpeg，BtbN master 构建），它能解
+# ffmpeg：优先用本机另装的新版（~/.local/opt/ffmpeg，BtbN 9.0 稳定版构建），它能解
 # TikTok FLV 里的 H.265（私有 codec id 12），据此放开取流侧挑 H.265 原画档；
 # 系统自带 6.1 解不了，只能用 H.264 档。可用 BILI_FFMPEG 显式指定。
 FFMPEG="${BILI_FFMPEG:-}"

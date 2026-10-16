@@ -142,9 +142,9 @@ TikTok 原画档（origin）通常只有 H.265，放在 FLV 里用的是私有 c
 
 ```bash
 mkdir -p ~/.local/opt && cd /tmp
-curl -LO https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linuxarm64-gpl.tar.xz
-tar xf ffmpeg-master-latest-linuxarm64-gpl.tar.xz
-rm -rf ~/.local/opt/ffmpeg && mv ffmpeg-master-latest-linuxarm64-gpl ~/.local/opt/ffmpeg
+curl -LO https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n9.0-latest-linuxarm64-gpl-9.0.tar.xz
+tar xf ffmpeg-n9.0-latest-linuxarm64-gpl-9.0.tar.xz
+rm -rf ~/.local/opt/ffmpeg && mv ffmpeg-n9.0-latest-linuxarm64-gpl-9.0 ~/.local/opt/ffmpeg
 ~/.local/opt/ffmpeg/bin/ffmpeg -version | head -1
 ```
 
@@ -162,13 +162,15 @@ x86_64 机器把 `linuxarm64` 换成 `linux64`。系统 ffmpeg 不受影响。
 实测（2026-10-15，720p 原画约 2.7 Mbps H.265）：
 
 - 录制文件按源码率原样保存，每小时约 1.2 GB（hd 档约 0.48 GB）。
-- 转推比拉 hd 档 PSNR 高约 2.4 dB；ffmpeg 约占 70% 单核（hd 档约 50%）。
+- 转推比拉 hd 档 PSNR 高约 1.9–2.4 dB；ffmpeg 约占 70–105% 单核（视源分辨率与画面复杂度，hd 档约 50%）。
 - 录出的 MP4 视频为 H.265（`hev1`）。部分浏览器/播放器不支持 H.265，预览没画面时用 VLC/mpv。
 
 覆盖路径：录制用 `DLR_FFMPEG`，转推用 `BILI_FFMPEG`。显式指定时**不会**放开 H.265 档
 （无法确认该 ffmpeg 能解），仍只拉 H.264。
 
-新版是 master 每日构建，不会自动更新；想更新时重复上面的安装步骤。
+用的是 9.0 稳定分支（2026-10-16 实测 9.0.2 可解 TikTok H.265 FLV，与 master 构建结果一致）。
+不会自动更新；想拿 9.0.x 修复版时重复上面的安装步骤。换大版本前先用 `ffprobe` 对一路在播的
+原画 URL 确认仍能识别出 `hevc` 视频流。
 
 ## Bilibili 推流
 
