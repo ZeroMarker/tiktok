@@ -6,7 +6,12 @@
 Python 绑定，常驻模型）切句，送本地 llama-server 上的 Hy-MT2 翻译，再原子替换
 drawtext 的 textfile（reload=1 每帧重读）。
 
-字幕相对画面有约 1～3 秒滞后（ASR 提交 + 翻译耗时），画面不做延迟补偿。
+画面延迟：取流 ffmpeg 把音视频原样（-c copy）以 MPEG-TS 写进管道，本进程按到达时间
+缓冲 --delay 秒再喂给编码推流的第二个 ffmpeg；ASR 音频不延迟。字幕更新也按「出现
+时刻 + delay」排期，于是日文行与画面同步，中文行在该句说完、译好后出现。
+
+翻译带上文（最近两句原文，Hy-MT2「背景信息」模板）和术语表（livesub-glossary.tsv，
+命中的条目按官方「参考下面的翻译」模板注入）。ASR 不支持热词，术语表只作用于翻译。
 
 依赖（均在仓库外，见 ~/tube/docs/nemotron-asr-linux.md、hy-mt2-test.md）：
 - transcribe.cpp 共享库构建 build-shared/（TRANSCRIBE_BUILD_SHARED=ON）
@@ -17,6 +22,7 @@ drawtext 的 textfile（reload=1 每帧重读）。
   python3 livesub.py marumo_rea --out rtmp     # 推 push.env 里的 B 站地址
 """
 import argparse
+import heapq
 import json
 import os
 import queue
@@ -46,6 +52,8 @@ IDLE_FORCE_S = 3.5               # 不论长短，这么久没变化就断句
 CLEAR_AFTER_S = 6.0              # 字幕无更新这么久后清屏
 WRAP = 18                        # 每行字数（720 宽、字号 34）
 MT_PROMPT = "将以下文本翻译为中文，注意只需要输出翻译后的结果，不要额外解释：\n\n"
+MT_CONTEXT = 1                   # 带几句上文（多了更慢，也更容易把上文一起译出）
+GLOSSARY = Path(__file__).resolve().parent / "livesub-glossary.tsv"
 
 
 def log(*a):
@@ -72,7 +80,10 @@ class Overlay:
         self.zh = ""
         self.stamp = time.time()
         self.lock = threading.Lock()
+        self.due = []
+        self.seq = iter(range(1 << 62))
         self._write()
+        threading.Thread(target=self.run, daemon=True).start()
 
     def set(self, ja=None, zh=None):
         with self.lock:
@@ -84,6 +95,23 @@ class Overlay:
                 self.zh = zh
             self.stamp = time.time()
             self._write()
+
+    def set_at(self, when, **kw):
+        """到 when（time.time()）时再 set，用于对齐延迟后的画面。"""
+        with self.lock:
+            heapq.heappush(self.due, (when, next(self.seq), kw))
+
+    def run(self):
+        while True:
+            now = time.time()
+            ready = []
+            with self.lock:
+                while self.due and self.due[0][0] <= now:
+                    ready.append(heapq.heappop(self.due)[2])
+            for kw in ready:
+                self.set(**kw)
+            self.expire()
+            time.sleep(0.05)
 
     def expire(self):
         with self.lock:
@@ -99,34 +127,67 @@ class Overlay:
         os.replace(tmp, self.path)
 
 
-def translate(url, text):
-    body = {"messages": [{"role": "user", "content": MT_PROMPT + text}],
+def load_glossary(path=GLOSSARY):
+    """每行「原文[|别写…]<TAB>译文」，# 开头为注释。返回 [(别写元组, 原文, 译文)]。"""
+    terms = []
+    if path.is_file():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if line.strip() and not line.startswith("#") and "\t" in line:
+                src, dst = line.split("\t", 1)
+                forms = tuple(f for f in src.split("|") if f)
+                terms.append((forms, forms[0], dst.strip()))
+    return terms
+
+
+def build_prompt(text, context, terms):
+    hits = [(f, dst) for forms, _, dst in terms for f in forms if f in text]
+    head = ""
+    if hits:
+        head = "参考下面的翻译：\n" + "".join(f"{a} 翻译成 {b}\n" for a, b in hits) + "\n"
+    if not context:
+        return head + MT_PROMPT + text
+    return (f"{head}【背景信息】\n{''.join(context)}\n\n"
+            "请结合背景信息将以下文本翻译为中文，注意只需要输出翻译后的结果，不要额外解释。\n\n"
+            f"【待翻译文本】\n{text}")
+
+
+def translate(url, text, context=(), terms=()):
+    body = {"messages": [{"role": "user", "content": build_prompt(text, context, terms)}],
             "temperature": 0.7, "top_p": 0.6, "top_k": 20,
             "repeat_penalty": 1.05, "max_tokens": 128}
     req = urllib.request.Request(url, json.dumps(body).encode(),
                                  {"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=20) as r:
-        return json.load(r)["choices"][0]["message"]["content"].strip().replace("\n", " ")
+        zh = json.load(r)["choices"][0]["message"]["content"].strip().replace("\n", " ")
+    # 带上文时模型偶尔把上文也译出来，译文明显过长就去掉上文重译
+    if context and len(zh) > 1.6 * len(text) + 6:
+        return translate(url, text, (), terms)
+    return zh
 
 
-def mt_worker(q, overlay, url, transcript):
+def mt_worker(q, overlay, url, transcript, delay):
+    terms = load_glossary()
+    log(f"术语表 {len(terms)} 条")
+    context = []
     while True:
-        ja = q.get()
-        if ja is None:
+        item = q.get()
+        if item is None:
             return
+        ja, cut_at = item
         t = time.time()
         try:
-            zh = translate(url, ja)
+            zh = translate(url, ja, context[-MT_CONTEXT:], terms)
         except Exception as e:  # noqa: BLE001 翻译失败只跳过这一句
             log("翻译失败:", e)
             continue
         log(f"MT {time.time() - t:.1f}s | {ja} => {zh}")
         transcript.write(f"{time.strftime('%H:%M:%S')}\t{ja}\t{zh}\n")
         transcript.flush()
-        overlay.set(zh=zh)
+        context.append(ja + "。")
+        overlay.set_at(cut_at + delay, zh=zh)
 
 
-def asr_loop(pipe, overlay, mtq, threads, language):
+def asr_loop(pipe, overlay, mtq, threads, language, delay):
     sys.path.insert(0, str(ASR_HOME / "transcribe.cpp/bindings/python/src"))
     os.environ.setdefault("TRANSCRIBE_LIBRARY",
                           str(ASR_HOME / "transcribe.cpp/build-shared/src/libtranscribe.so"))
@@ -142,6 +203,7 @@ def asr_loop(pipe, overlay, mtq, threads, language):
         sent = 0
         full = ""
         last_change = time.time()
+        last_ja = ""
         while True:
             buf = pipe.read(nbytes)
             if not buf:
@@ -175,9 +237,11 @@ def asr_loop(pipe, overlay, mtq, threads, language):
                 seg = pending[:cut].strip("、。 ")
                 sent += cut
                 if seg:
-                    mtq.put(seg)
-            overlay.set(ja=full[sent:].lstrip("、。 "))
-            overlay.expire()
+                    mtq.put((seg, now))
+            ja = full[sent:].lstrip("、。 ")
+            if ja != last_ja:
+                overlay.set_at(now + delay, ja=ja)
+                last_ja = ja
 
 
 def main():
@@ -187,6 +251,7 @@ def main():
     ap.add_argument("--out", required=True, help="本地文件路径，或 rtmp（用 push.env）")
     ap.add_argument("--duration", type=float, help="只跑这么多秒")
     ap.add_argument("--language", default="ja-JP")
+    ap.add_argument("--delay", type=float, default=3.0, help="画面延迟秒数，用于对齐字幕")
     ap.add_argument("--asr-threads", type=int, default=2)
     ap.add_argument("--mt-url", default="http://127.0.0.1:18091/v1/chat/completions")
     ap.add_argument("--workdir", default="/tmp/livesub")
@@ -213,16 +278,23 @@ def main():
             "fontsize=34:fontcolor=white:line_spacing=8:borderw=2:bordercolor=black@0.8:"
             "box=1:boxcolor=black@0.35:boxborderw=10:"
             "x=(w-text_w)/2:y=h-text_h-120")
-    cmd = [ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "warning", "-re",
-           "-headers", f"User-Agent: {UA}\r\nReferer: https://www.tiktok.com/\r\n",
-           "-fflags", "+discardcorrupt", "-rw_timeout", "15000000",
-           "-analyzeduration", "5M", "-probesize", "5M",
-           "-reconnect", "1", "-reconnect_at_eof", "1", "-reconnect_streamed", "1",
-           "-reconnect_on_network_error", "1", "-reconnect_delay_max", "5",
-           *(["-t", str(args.duration)] if args.duration else []),
-           "-i", url]
-    # 输出 1：推流（参数同 push.sh v6，另加字幕）
-    cmd += ["-map", "0:v:0", "-map", "0:a:0",
+    # 取流：输出 1 原样转 MPEG-TS 进管道（待延迟），输出 2 为 ASR 音频
+    ts_r, ts_w = os.pipe()
+    pull = [ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "warning", "-re",
+            "-headers", f"User-Agent: {UA}\r\nReferer: https://www.tiktok.com/\r\n",
+            "-fflags", "+discardcorrupt", "-rw_timeout", "15000000",
+            "-analyzeduration", "5M", "-probesize", "5M",
+            "-reconnect", "1", "-reconnect_at_eof", "1", "-reconnect_streamed", "1",
+            "-reconnect_on_network_error", "1", "-reconnect_delay_max", "5",
+            *(["-t", str(args.duration)] if args.duration else []),
+            "-i", url,
+            "-map", "0:v:0", "-map", "0:a:0", "-c", "copy", "-f", "mpegts", f"pipe:{ts_w}",
+            "-map", "0:a:0", "-vn", "-ac", "1", "-ar", str(SR), "-f", "f32le", "pipe:1"]
+    # 推流：参数同 push.sh v6，另加字幕
+    push = [ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "warning",
+            "-fflags", "+discardcorrupt", "-analyzeduration", "5M", "-probesize", "5M",
+            "-f", "mpegts", "-i", "pipe:0",
+            "-map", "0:v:0", "-map", "0:a:0",
             "-vf", f"fps=25,scale='min(720,iw)':-2:flags=lanczos,{draw}",
             "-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency",
             "-b:v", "2500k", "-maxrate", "3000k", "-bufsize", "5000k",
@@ -231,23 +303,59 @@ def main():
             "-af", "aresample=async=1:first_pts=0",
             "-f", "flv", "-flvflags", "no_duration_filesize",
             "-max_muxing_queue_size", "9999", target]
-    # 输出 2：ASR 音频
-    cmd += ["-map", "0:a:0", "-vn", "-ac", "1", "-ar", str(SR), "-f", "f32le", "pipe:1"]
 
     mtq = queue.Queue()
-    threading.Thread(target=mt_worker, args=(mtq, overlay, args.mt_url, transcript),
+    threading.Thread(target=mt_worker, args=(mtq, overlay, args.mt_url, transcript, args.delay),
                      daemon=True).start()
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE)
-    log("ffmpeg 已启动 ->", "B 站 RTMP" if args.out == "rtmp" else target)
+    pusher = subprocess.Popen(push, stdin=subprocess.PIPE)
+    puller = subprocess.Popen(pull, stdout=subprocess.PIPE, pass_fds=(ts_w,))
+    os.close(ts_w)
+    threading.Thread(target=delay_pipe, args=(ts_r, pusher.stdin, args.delay),
+                     daemon=True).start()
+    log(f"ffmpeg 已启动，画面延迟 {args.delay}s ->", "B 站 RTMP" if args.out == "rtmp" else target)
     try:
-        asr_loop(proc.stdout, overlay, mtq, args.asr_threads, args.language)
+        asr_loop(puller.stdout, overlay, mtq, args.asr_threads, args.language, args.delay)
     except KeyboardInterrupt:
         pass
     finally:
-        proc.terminate()
-        proc.wait()
+        puller.terminate()
+        puller.wait()
         mtq.put(None)
-    log("结束，ffmpeg 退出码", proc.returncode)
+        try:
+            pusher.wait(args.delay + 15)  # 让缓冲里的画面推完
+        except subprocess.TimeoutExpired:
+            pusher.terminate()
+            pusher.wait()
+    log("结束，ffmpeg 退出码 取流", puller.returncode, "推流", pusher.returncode)
+
+
+def delay_pipe(src_fd, dst, delay):
+    """把 src_fd 读到的字节按到达时间延后 delay 秒写入 dst；src 结束后关闭 dst。"""
+    buf = queue.Queue()
+
+    def reader():
+        with os.fdopen(src_fd, "rb", buffering=0) as f:
+            while chunk := f.read(65536):
+                buf.put((time.time() + delay, chunk))
+        buf.put((0, None))
+
+    threading.Thread(target=reader, daemon=True).start()
+    try:
+        while True:
+            due, chunk = buf.get()
+            if chunk is None:
+                break
+            if (wait := due - time.time()) > 0:
+                time.sleep(wait)
+            dst.write(chunk)
+            dst.flush()
+    except BrokenPipeError:
+        log("推流 ffmpeg 已退出")
+    finally:
+        try:
+            dst.close()
+        except BrokenPipeError:
+            pass
 
 
 if __name__ == "__main__":
