@@ -14,6 +14,7 @@
 | `replay.sh` | 文件轮播：本地 `.mp4` 按序循环 → Bilibili（默认 `-c copy`，`--encode` 重编码；有 H.265 文件时自动重编码） |
 | `watch.sh` | 轮播值守：先播本地文件，每 60 秒探测 TikTok，一开播就停轮播切转推（管理页已内置同类值守，见「WebUI」） |
 | `soop.sh` | 直播推流：SOOP 直播间 → Bilibili |
+| `livesub.py` | 实验：TikTok 直播转推并实时烧录日→中字幕（Nemotron 流式 ASR + 本地 Hy-MT2，依赖 `~/tube` 文档中的仓库外部署；字幕滞后约 1～3 秒） |
 | `upload.py` | 稿件投稿：本地 `.mp4` 投成 B 站普通稿件（`push` 只传文件，`post` 提交稿件） |
 | `webui/app.py` | 推流管理页后端（标准库 only），见下 |
 | `systemd/` | `bili-live` / `bili-replay` / `bili-webui` 三个 user unit + `install.sh` |
