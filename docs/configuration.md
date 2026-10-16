@@ -1,37 +1,138 @@
 # 配置
 
-## 基础依赖
+## 外部依赖
 
-需要以下命令可用：
+### 依赖清单与适用范围
 
-- Bash 或 PowerShell
-- Python 3
-- `ffmpeg`
-- `yt-dlp`
-- `uv`
+当前脚本和 systemd 部署面向 Linux，Shell 入口需要 Bash；PowerShell 不能直接替代
+Bash 执行这些 `.sh` 文件。Python 主体、WebUI 后端及 Bilibili 登录/投稿接口使用
+标准库，没有数据库、Redis 或独立 Web 框架依赖。
 
-推荐初始化：
+| 依赖 | 使用场景 | 要求 |
+|---|---|---|
+| Python 3 | 录制引擎、WebUI、Bilibili 接口 | 必需；CI 使用 Python 3.12，建议与之保持一致 |
+| Bash、常用 Linux 命令 | 平台入口、推流、服务安装 | 使用 Shell 脚本时需要；包括 `sed`、`grep`、`find`、`ps`、`pkill` 等 |
+| FFmpeg / ffprobe | 录制、分段、转推、轮播媒体检测 | 录制/推流需要 FFmpeg；ffprobe 用于轮播编码检测；TikTok H.265 要求见下一节 |
+| yt-dlp | 各平台直播源解析 | 录制/平台转推的核心依赖；安装 `default,curl-cffi` extras |
+| curl_cffi | TikTok 进程内检测、页面解析，以及 yt-dlp 的浏览器模拟请求 | TikTok 轻量检测需要；缺失时部分解析路径不可用 |
+| Chromium 或 Google Chrome | TikTok 共享浏览器渲染、YouTube 登录态取流 | 浏览器路径需要；不可用时相应路径失败并尝试其他可用检测方式 |
+| Node.js 22+、yt-dlp-ejs | YouTube 浏览器取流和 HLS 地址的 `n` 校验值解算 | YouTube 浏览器路径需要；EJS 随 yt-dlp 的 `default` extra 安装，需与 yt-dlp 匹配 |
+| uv | 创建 Python 环境和安装依赖 | 安装工具，程序运行时不要求 uv 常驻 |
+| systemd、logrotate | 后台服务、日志轮转 | 使用 `systemd/install.sh` 部署时需要；安装脚本不代装运行依赖 |
+| Caddy | 公网反向代理与访问认证 | 可选，配置见下方 WebUI 部分 |
+| Node.js、npm、Vue / Vite | 修改并构建 WebUI 前端 | 仅前端开发需要；可统一使用 Node 22+，包版本由 `webui/frontend/package-lock.json` 锁定 |
+
+前端直接依赖 `vue`；构建依赖 `vite`、`@vitejs/plugin-vue`、`vite-plugin-singlefile`，
+详见 [`package.json`](../webui/frontend/package.json)。仓库已提交 `webui/index.html`
+单文件构建产物，运行 WebUI 无需安装 npm 包或启动 Vite。
+
+### Python 安装与环境一致性
+
+在项目根目录创建独立环境，并将 CLI 和可导入的包安装到同一个环境：
 
 ```bash
-uv venv
-uv tool install "yt-dlp[default,curl-cffi]"
+uv venv --python 3.12
+uv pip install --python .venv/bin/python "yt-dlp[default,curl-cffi]"
+source .venv/bin/activate
 ```
 
-确认依赖：
+另需通过系统包管理器或已有安装提供 Bash、FFmpeg、ffprobe，以及所需的 Chromium、
+Node.js、systemd、logrotate。上面的 Python 安装命令不会安装这些系统组件。
+
+README 中的 `uv tool install "yt-dlp[default,curl-cffi]"` 适合安装独立 CLI，
+但其依赖位于工具隔离环境，**不保证系统 `python3` 能导入 `curl_cffi`、`yt_dlp`
+及 `yt_dlp_ejs`**。仅执行 `uv venv` 也不会安装或激活依赖。
+TikTok 检测需要在后端 Python 中导入 `curl_cffi`，YouTube 浏览器路径还会通过
+`python3` 启动解算脚本并导入 yt-dlp。因此必须同时确认解释器和子进程 `PATH`。
+
+仓库默认 systemd 单元以 `ubuntu` 用户、`/usr/bin/python3` 运行；激活终端的虚拟环境
+不会改变服务环境。若使用上述虚拟环境，通过 `sudo systemctl edit livestream-webui`
+设置覆盖项（路径按实际项目位置修改）：
+
+```ini
+[Service]
+ExecStart=
+ExecStart=/home/ubuntu/tiktok/.venv/bin/python /home/ubuntu/tiktok/webui/app.py
+Environment=PATH=/home/ubuntu/tiktok/.venv/bin:/home/ubuntu/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+```
+
+随后执行 `sudo systemctl daemon-reload` 和 `sudo systemctl restart livestream-webui`。
+独立运行 Bilibili 推流脚本或 user 服务时，也需为其 `python3` 与 `yt-dlp` 设置同样的环境。
+共享浏览器服务本身只使用 Python 标准库，无需为它安装这些 Python 包。
+
+在激活后的环境中检查；对于 systemd 部署，应改用服务实际的解释器及 PATH 验证：
 
 ```bash
+command -v python3 yt-dlp ffmpeg ffprobe
+python3 --version
 yt-dlp --version
 ffmpeg -version
-python --version
+ffprobe -version
+python3 -c 'import sys, curl_cffi, yt_dlp; print(sys.executable); print(curl_cffi.__file__); print(yt_dlp.__file__)'
+# YouTube 浏览器路径另外检查：
+node --version
+node -e 'console.log(typeof fetch, typeof WebSocket)'  # 均应为 function
+python3 -c 'import yt_dlp_ejs; print(yt_dlp_ejs.__file__)'
 ```
 
-脚本启动时会检查对应依赖；缺少命令时会直接退出并给出错误，而不会进入无限重试。
-
-直播源抓取失败时，优先更新 `yt-dlp`：
+直播源抓取失败时，先在实际运行环境更新 yt-dlp 及匹配依赖：
 
 ```bash
-yt-dlp --update-to nightly
+uv pip install --python .venv/bin/python --upgrade "yt-dlp[default,curl-cffi]"
+# 若需要预发布版本，在上面的命令中增加 --pre。
 ```
+
+### Chromium 路径与浏览器服务
+
+TikTok 的 `scripts/dlr/browserd.py` 按以下顺序选择可执行文件：
+
+1. 环境变量 `TIKTOK_BROWSERD_CHROME`；设置后只使用该路径，路径不存在则失败，不再回退。
+2. 固定路径 `/opt/browser-desktop/chromium/chrome`。
+3. 在 `PATH` 中按顺序查找 `google-chrome`、`google-chrome-stable`、`chromium`、
+   `chromium-browser`；优先选择非 Snap 版本，只有 Snap 候选时仍尝试使用它。
+
+被选中的路径必须能由服务用户执行。代码只做路径存在性/候选查找，浏览器能否实际启动
+还取决于执行权限及系统共享库。`systemd/install.sh` 不负责下载或安装 Chromium。
+
+| 配置项 | 默认值 | 作用 |
+|---|---|---|
+| `TIKTOK_BROWSERD_CHROME` | 未设置，按上述顺序查找 | TikTok 共享服务使用的浏览器可执行文件 |
+| `TIKTOK_BROWSERD_URL` | `http://127.0.0.1:9555` | TikTok 渲染服务 HTTP 地址 |
+| `TIKTOK_BROWSERD_PROFILE` | `~/.cache/tiktok-browserd/profile` | 共享浏览器的常驻用户数据目录，`~` 属于服务运行用户 |
+| `YOUTUBE_BROWSER_CDP` | `http://127.0.0.1:9222` | YouTube 连接的已有浏览器 CDP 地址 |
+
+TikTok 服务通过 `--remote-debugging-pipe` 管理自己启动的浏览器；9555 是渲染服务
+HTTP 端口。YouTube 连接的是另一条 CDP 接口，需要事先运行开启远程调试、具有所需
+登录态的浏览器；它不会使用 `TIKTOK_BROWSERD_CHROME` 启动浏览器。
+
+自定义 TikTok 浏览器路径时，执行 `sudo systemctl edit tiktok-browserd`，填写：
+
+```ini
+[Service]
+Environment=TIKTOK_BROWSERD_CHROME=/absolute/path/to/chrome
+```
+
+再执行 `sudo systemctl daemon-reload` 和 `sudo systemctl restart tiktok-browserd`。
+该单元没有读取 `/etc/default/livestream-webui`，因此仅修改 WebUI 的环境文件不会
+改变 browserd 的浏览器路径。`YOUTUBE_BROWSER_CDP` 则应配置在 WebUI 或录制进程的环境中。
+
+验证浏览器及两个接口（第二个接口仅在使用 YouTube 浏览器路径时需要）：
+
+```bash
+/opt/browser-desktop/chromium/chrome --version  # 使用自定义路径时替换
+systemctl status tiktok-browserd --no-pager
+curl -fsS http://127.0.0.1:9555/health           # 期望输出 ok
+curl -fsS http://127.0.0.1:9222/json/version    # 期望输出浏览器 CDP 信息
+```
+
+### 外部平台与登录凭据
+
+录制依赖对应直播平台的网页/API 及其媒体 CDN 可访问；Bilibili 开播、投稿与转推
+还需要访问 Bilibili API、上传服务及 RTMP 推流端点。项目无需单独购买第三方解析 API。
+部分直播需要 Cookie 或登录态：TikTok 默认读取项目根 `cookies.txt`，其他平台可使用
+任务的 Cookie 文件；SOOP 还支持 `SOOP_USERNAME` / `SOOP_PASSWORD` 或 netrc。
+Bilibili 需要登录会话与推流凭据。具体操作见[使用说明](usage.md)和
+[Bilibili 文档](../bili/README.md)，凭据文件不要提交仓库。
 
 ## 新版 ffmpeg（TikTok 原画，可选）
 
@@ -103,9 +204,10 @@ LIVE_WEBUI_PORT=8766
 RECORDINGS_DIR=/home/ubuntu/tiktok/recordings
 ```
 
-服务以 `ubuntu` 运行（单进程模型：录制引擎线程与 WebUI 同进程），依赖
-（yt-dlp / curl_cffi）取自其 `~/.local`，单元内已显式补齐 `PATH`（旧版靠
-`record.sh` 包装桥接，包装仅保留给命令行）。
+默认服务以 `ubuntu`、`/usr/bin/python3` 运行（单进程模型：录制引擎线程与 WebUI
+同进程），单元内已将 `~/.local/bin` 加入 `PATH`；Python 包仍需由实际解释器可导入，
+使用虚拟环境时按上方「Python 安装与环境一致性」设置覆盖项（旧版 `record.sh`
+包装仅保留给命令行）。
 
 后端不校验令牌，因此必须保持监听回环地址，并仅在内网、VPN 或带访问控制的反向代理后使用。修改配置后执行：
 

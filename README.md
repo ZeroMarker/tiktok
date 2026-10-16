@@ -13,7 +13,10 @@
 
 ## 快速开始
 
-初始化依赖：
+完整的依赖清单、Python 环境要求、Chromium 路径和验证步骤见
+[外部依赖](docs/configuration.md#外部依赖)。
+
+安装独立取流工具（后端直接导入的 Python 包还需按上述文档配置）：
 
 ```bash
 uv venv
@@ -85,7 +88,7 @@ WebUI 同时提供 PWA 支持：可安装到桌面/主屏幕，断网时仍可�
 ## 常用文档
 
 - [项目结构](docs/structure.md)
-- [配置](docs/configuration.md)
+- [配置与外部依赖](docs/configuration.md)
 - [使用说明](docs/usage.md)
 - [WebUI 设计规范](docs/webui-design-spec.md)
 - [排障](docs/troubleshooting.md)
