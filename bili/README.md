@@ -113,7 +113,7 @@ bash systemd/install.sh   # 装 3 个 user unit，bili-webui 直接 enable --now
 ```
 
 - 本地：`http://127.0.0.1:8767`（仅回环，无应用层认证）
-- 公网：`https://bili.20070809.xyz`（Caddy 反代 + basicauth，与站群同凭证）
+- 公网：`https://bl.20070809.xyz`（Caddy 反代 + Authelia 登录，与站群同一会话）
 
 管理页可做：启停两种模式、看 unit 状态与 ffmpeg 是否在推、看 journal 日志、开播/停播/改标题。看板还显示**固定目标**的开播状态（开播中 / 未开播 / 待检测 + 上次与下次检测时间）。开播后自动把新推流码保存到 `~/.config/bili/push.env`（权限 600）。手动等价操作：`systemctl --user enable --now bili-live.service`（先停另一个）。
 
