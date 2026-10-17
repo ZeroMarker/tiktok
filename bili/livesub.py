@@ -26,6 +26,7 @@ import heapq
 import json
 import os
 import queue
+import re
 import subprocess
 import sys
 import textwrap
@@ -144,7 +145,7 @@ def build_prompt(text, context, terms):
     head = ""
     if hits:
         head = "参考下面的翻译：\n" + "".join(f"{a} 翻译成 {b}\n" for a, b in hits) + "\n"
-    if not context:
+    if not context or len(text) < 5:  # 太短的片段带上文时模型会回显模板标签
         return head + MT_PROMPT + text
     return (f"{head}【背景信息】\n{''.join(context)}\n\n"
             "请结合背景信息将以下文本翻译为中文，注意只需要输出翻译后的结果，不要额外解释。\n\n"
@@ -158,7 +159,8 @@ def translate(url, text, context=(), terms=()):
     req = urllib.request.Request(url, json.dumps(body).encode(),
                                  {"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=20) as r:
-        zh = json.load(r)["choices"][0]["message"]["content"].strip().replace("\n", " ")
+        zh = json.load(r)["choices"][0]["message"]["content"].replace("\n", " ")
+    zh = re.sub(r"【(待翻译文本|背景信息)】", "", zh).strip()
     # 带上文时模型偶尔把上文也译出来，译文明显过长就去掉上文重译
     if context and len(zh) > 1.6 * len(text) + 6:
         return translate(url, text, (), terms)
@@ -174,6 +176,8 @@ def mt_worker(q, overlay, url, transcript, delay):
         if item is None:
             return
         ja, cut_at = item
+        if len(ja) <= 2:  # 「は」「かな」之类的碎片不值得占一条字幕
+            continue
         t = time.time()
         try:
             zh = translate(url, ja, context[-MT_CONTEXT:], terms)
@@ -252,7 +256,8 @@ def main():
     ap.add_argument("--source", help="跳过取流，直接用这个 URL 或本地文件（测试用）")
     ap.add_argument("--duration", type=float, help="只跑这么多秒")
     ap.add_argument("--language", default="ja-JP")
-    ap.add_argument("--delay", type=float, default=3.0, help="画面延迟秒数，用于对齐字幕")
+    ap.add_argument("--delay", type=float, default=10.0,
+                    help="画面延迟秒数，需大于翻译耗时（实测 3 秒常不够，10 秒无超时）")
     ap.add_argument("--asr-threads", type=int, default=2)
     ap.add_argument("--mt-url", default="http://127.0.0.1:18091/v1/chat/completions")
     ap.add_argument("--workdir", default="/tmp/livesub")
