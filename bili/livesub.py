@@ -249,6 +249,7 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("username")
     ap.add_argument("--out", required=True, help="本地文件路径，或 rtmp（用 push.env）")
+    ap.add_argument("--source", help="跳过取流，直接用这个 URL 或本地文件（测试用）")
     ap.add_argument("--duration", type=float, help="只跑这么多秒")
     ap.add_argument("--language", default="ja-JP")
     ap.add_argument("--delay", type=float, default=3.0, help="画面延迟秒数，用于对齐字幕")
@@ -265,8 +266,11 @@ def main():
 
     here = Path(__file__).resolve().parent
     env = dict(os.environ, TIKTOK_HEVC_FLV="1")
-    url = subprocess.run([sys.executable, str(here / "get_stream.py"), args.username],
-                         capture_output=True, text=True, env=env).stdout.strip().splitlines()
+    if args.source:
+        url = [args.source]
+    else:
+        url = subprocess.run([sys.executable, str(here / "get_stream.py"), args.username],
+                             capture_output=True, text=True, env=env).stdout.strip().splitlines()
     if not url:
         sys.exit(f"@{args.username} 未开播或取流失败")
     url = url[0]
@@ -280,18 +284,19 @@ def main():
             "x=(w-text_w)/2:y=h-text_h-120")
     # 取流：输出 1 原样转 MPEG-TS 进管道（待延迟），输出 2 为 ASR 音频
     ts_r, ts_w = os.pipe()
+    net = ["-headers", f"User-Agent: {UA}\r\nReferer: https://www.tiktok.com/\r\n",
+           "-rw_timeout", "15000000",
+           "-reconnect", "1", "-reconnect_at_eof", "1", "-reconnect_streamed", "1",
+           "-reconnect_on_network_error", "1", "-reconnect_delay_max", "5"]
     pull = [ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "warning", "-re",
-            "-headers", f"User-Agent: {UA}\r\nReferer: https://www.tiktok.com/\r\n",
-            "-fflags", "+discardcorrupt", "-rw_timeout", "15000000",
-            "-analyzeduration", "5M", "-probesize", "5M",
-            "-reconnect", "1", "-reconnect_at_eof", "1", "-reconnect_streamed", "1",
-            "-reconnect_on_network_error", "1", "-reconnect_delay_max", "5",
+            *(net if "://" in url else []),
+            "-fflags", "+discardcorrupt", "-analyzeduration", "5M", "-probesize", "5M",
             *(["-t", str(args.duration)] if args.duration else []),
             "-i", url,
             "-map", "0:v:0", "-map", "0:a:0", "-c", "copy", "-f", "mpegts", f"pipe:{ts_w}",
             "-map", "0:a:0", "-vn", "-ac", "1", "-ar", str(SR), "-f", "f32le", "pipe:1"]
     # 推流：参数同 push.sh v6，另加字幕
-    push = [ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "warning",
+    push = [ffmpeg, "-y", "-nostdin", "-hide_banner", "-loglevel", "warning",
             "-fflags", "+discardcorrupt", "-analyzeduration", "5M", "-probesize", "5M",
             "-f", "mpegts", "-i", "pipe:0",
             "-map", "0:v:0", "-map", "0:a:0",
