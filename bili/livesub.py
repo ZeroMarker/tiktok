@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """实验：TikTok 直播转推时实时烧录日→中字幕。
 
+> **已暂停（2026-10-17）**：推流流程（push.sh / WebUI / systemd）不接入本脚本，详见 docs/livesub.md。
+
 一个 ffmpeg 取流：输出 1 叠加 drawtext 后推 RTMP（或写本地文件），输出 2 把音频以
 16 kHz 单声道 f32 管道交给本进程。本进程用 Nemotron 3.5 流式 ASR（transcribe.cpp
 Python 绑定，常驻模型）切句，送本地 llama-server 上的 Hy-MT2 翻译，再原子替换
