@@ -130,7 +130,7 @@ bash systemd/install.sh   # 装 3 个 user unit，bili-webui 直接 enable --now
 | 验流成功 + 推流单元未跑 | 自动 `ensure_room_live` → `enable` + `restart bili-live` |
 | 验流成功 + 脚本在运行但未推流 | 值守开启时检查 B 站房间；若已关播，自动重新开播、同步推流码并重启推流单元 |
 | 验流失败 1 次 | 只更新状态（网络抖动/WAF 不误停） |
-| 验流失败 ≥2 次 | `disable --now bili-live`（关播自动收工） |
+| 验流失败 ≥2 次 | 停止 `bili-live` 并调用 B 站关播接口；失败下轮重试，保留值守等待下次开播 |
 | 文件轮播在推 | 只报状态，**不抢单元**（两种模式互斥是硬约束） |
 
 值守开关在 `~/.config/bili/auto.env` 的 `AUTO`（管理页勾选框 / `POST /api/arm`）。

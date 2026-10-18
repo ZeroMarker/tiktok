@@ -23,7 +23,7 @@ class IsolatedConfigTest(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         root = Path(self.tmp.name)
         overrides = {'CONFIG_DIR': root, 'LIVE_ENV': root / 'live.env',
-                     'REPLAY_ENV': root / 'replay.env', 'AUTO_ENV': root / 'auto.env'}
+                     'REPLAY_ENV': root / 'replay.env', 'AUTO_ENV': root / 'auto.env', '_offline_close_pending': False}
         for name, value in overrides.items():
             patcher = mock.patch.object(app, name, value)
             patcher.start()
@@ -173,11 +173,36 @@ class TargetMonitorTest(IsolatedConfigTest):
         with mock.patch.object(app, '_show_many', return_value=self.units(live=self.UNIT)), \
                 mock.patch.object(app, '_pushing', return_value={100: False}), \
                 mock.patch.object(app, 'probe_target', return_value=('', 'offline')), \
-                mock.patch.object(app, '_ctl') as ctl:
+                mock.patch.object(app, '_ctl') as ctl, \
+                mock.patch.object(app, '_wait_inactive', return_value=True), \
+                mock.patch.object(app, 'run', return_value=subprocess.CompletedProcess([], 0, '', '')) as run:
             app.monitor_cycle()
             ctl.assert_not_called()
+            run.assert_not_called()
             app.monitor_cycle()
         ctl.assert_called_once_with('disable', '--now', app.LIVE_UNIT)
+        run.assert_called_once_with(['python3', str(app.LIVE_PY), 'stop'], timeout=60, check=False)
+        self.assertTrue(app.auto_armed())
+        self.assertFalse(app._offline_close_pending)
+
+    def test_failed_room_close_retries_after_push_stopped(self):
+        with mock.patch.object(app, '_ctl'), \
+                mock.patch.object(app, '_wait_inactive', return_value=True), \
+                mock.patch.object(app, 'run', return_value=subprocess.CompletedProcess([], 1, '', 'failed')):
+            with self.assertRaises(RuntimeError):
+                app._stop_offline_live()
+        self.assertTrue(app._offline_close_pending)
+        with mock.patch.object(app, '_show_many', return_value=self.units()), \
+                mock.patch.object(app, '_pushing', return_value={0: False}), \
+                mock.patch.object(app, 'probe_target', return_value=('', 'offline')), \
+                mock.patch.object(app, '_ctl'), \
+                mock.patch.object(app, '_wait_inactive', return_value=True), \
+                mock.patch.object(app, 'run', return_value=subprocess.CompletedProcess([], 0, '', '')) as run:
+            app.monitor_cycle()
+            app.monitor_cycle()
+        run.assert_called_once()
+        self.assertFalse(app._offline_close_pending)
+        self.assertTrue(app.auto_armed())
 
     def test_live_probe_starts_push_when_armed(self):
         with mock.patch.object(app, '_show_many', return_value=self.units()), \
@@ -265,7 +290,7 @@ class TargetMonitorTest(IsolatedConfigTest):
         with mock.patch.object(app, '_show_many', return_value=self.units(live=self.UNIT)), \
                 mock.patch.object(app, '_pushing', return_value={100: False}), \
                 mock.patch.object(app, 'probe_target', return_value=('', 'offline')), \
-                mock.patch.object(app, '_ctl'):
+                mock.patch.object(app, '_stop_offline_live'):
             app.monitor_cycle()
             app.monitor_cycle()
             self.assertEqual(app.target_status()['streak'], 2)

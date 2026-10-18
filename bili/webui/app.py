@@ -425,6 +425,24 @@ def _recover_live_unit() -> None:
         _record(True, "B 站房间已重新开播，推流已重启", "probe", 0)
 
 
+_offline_close_pending = False
+
+
+def _stop_offline_live() -> None:
+    """停止转推并关播；关播失败时保留待处理标记，下轮重试，值守保持开启。"""
+    global _offline_close_pending
+    _offline_close_pending = True
+    _ctl("disable", "--now", LIVE_UNIT)
+    if not _wait_inactive(LIVE_UNIT):
+        raise RuntimeError("直播推流尚未停止，稍后重试关播")
+    r = run(["python3", str(LIVE_PY), "stop"], timeout=60, check=False)
+    if r.returncode != 0:
+        raise RuntimeError((r.stdout + r.stderr).strip()[-2000:] or "自动关播失败，稍后重试")
+    invalidate_room()
+    _offline_close_pending = False
+    _record(False, "主播下播 → 已停止推流并关闭 B 站直播间，值守继续", "probe")
+
+
 def monitor_cycle() -> None:
     """一轮监测：读固定目标 → 判断在播 → 必要时自动启停推流。可独立测试。"""
     target = _read_env(LIVE_ENV, "TARGET").strip()
@@ -465,8 +483,9 @@ def monitor_cycle() -> None:
         streak = int(_monitor_state["streak"]) + 1
     _record(False, detail, "probe", streak)
     # 关播自动停推流：单次失败可能是网络抖动，连续两次才动手。
-    if streak >= OFFLINE_STREAK_TO_STOP and live["active"] == "active" and auto_armed():
-        _auto_control(lambda: _ctl("disable", "--now", LIVE_UNIT))
+    if (streak >= OFFLINE_STREAK_TO_STOP and auto_armed()
+            and (live["active"] == "active" or _offline_close_pending)):
+        _auto_control(_stop_offline_live)
 
 
 def monitor_loop(stop: threading.Event) -> None:
