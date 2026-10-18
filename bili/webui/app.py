@@ -272,12 +272,12 @@ def sync_push_env() -> None:
     ])
 
 
-def ensure_room_live() -> None:
+def ensure_room_live() -> bool:
     """切源前保证 B 站房间开着：已开直接返回；关播则用上次分区/标题自动开播并同步推流码。
-    无历史记录时抛错，提示用户去房间卡手动开播。调用方在重启推流单元之前调用，新码即刻生效。"""
+    无历史记录时抛错。返回是否重新开播并刷新了推流码，调用方据此重启推流单元。"""
     r = run(["python3", str(LIVE_PY), "is-live"], timeout=30, check=False)
     if r.returncode == 0:
-        return
+        return False
     try:
         session = json.loads(session_file().read_text())
         area, title = int(session.get("area_id", 0)), str(session.get("title", "")).strip()
@@ -291,6 +291,7 @@ def ensure_room_live() -> None:
         raise RuntimeError((r.stdout + r.stderr).strip()[-2000:] or "关播状态下自动开播失败")
     sync_push_env()
     invalidate_room()
+    return True
 
 
 def _ctl(*args: str) -> None:
@@ -417,6 +418,13 @@ def _start_live_unit(target: str) -> None:
     _ctl("restart", LIVE_UNIT)
 
 
+def _recover_live_unit() -> None:
+    """脚本仍在重试时也检查房间；重新开播换码后重启以加载新码。"""
+    if ensure_room_live():
+        _ctl("restart", LIVE_UNIT)
+        _record(True, "B 站房间已重新开播，推流已重启", "probe", 0)
+
+
 def monitor_cycle() -> None:
     """一轮监测：读固定目标 → 判断在播 → 必要时自动启停推流。可独立测试。"""
     target = _read_env(LIVE_ENV, "TARGET").strip()
@@ -449,6 +457,8 @@ def monitor_cycle() -> None:
         if live["active"] != "active" and auto_armed():
             if _auto_control(lambda: _start_live_unit(target)):
                 _record(True, "开播 → 已自动起推流", "probe", 0)
+        elif live["active"] == "active" and auto_armed():
+            _auto_control(_recover_live_unit)
         return
 
     with _monitor_lock:

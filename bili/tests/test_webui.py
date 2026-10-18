@@ -194,6 +194,30 @@ class TargetMonitorTest(IsolatedConfigTest):
         run.assert_called_once()  # reset-failed
         self.assertTrue(app.target_status()['live'])
 
+    def test_running_retry_loop_recovers_closed_room(self):
+        for reopened in (False, True):
+            with self.subTest(reopened=reopened), \
+                    mock.patch.object(app, '_show_many', return_value=self.units(live=self.UNIT)), \
+                    mock.patch.object(app, '_pushing', return_value={100: False}), \
+                    mock.patch.object(app, 'probe_target', return_value=('https://live.flv', '已开播')), \
+                    mock.patch.object(app, 'ensure_room_live', return_value=reopened) as room, \
+                    mock.patch.object(app, '_ctl') as ctl:
+                app.monitor_cycle()
+                room.assert_called_once_with()
+                if reopened:
+                    ctl.assert_called_once_with('restart', app.LIVE_UNIT)
+                else:
+                    ctl.assert_not_called()
+
+    def test_running_retry_loop_does_not_reopen_when_disarmed(self):
+        self.auto_env.write_text('AUTO=0\n')
+        with mock.patch.object(app, '_show_many', return_value=self.units(live=self.UNIT)), \
+                mock.patch.object(app, '_pushing', return_value={100: False}), \
+                mock.patch.object(app, 'probe_target', return_value=('https://live.flv', '已开播')), \
+                mock.patch.object(app, 'ensure_room_live') as room:
+            app.monitor_cycle()
+        room.assert_not_called()
+
     def test_live_probe_does_not_start_when_disarmed(self):
         """用户明确停掉后开播也不能被拉回来。"""
         self.auto_env.write_text('AUTO=0\n')
