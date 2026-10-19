@@ -17,7 +17,7 @@ const STATES = [
 ];
 
 const LIVES = [
-  ["all", "全部直播状态"],
+  ["all", "全部"],
   ["live", "直播中"],
   ["waiting", "等待开播"],
   ["offline", "未开播"],

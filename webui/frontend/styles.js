@@ -300,10 +300,10 @@ md-text-button.danger,md-outlined-button.danger{
   --md-text-button-focus-label-text-color:var(--err);--md-outlined-button-focus-label-text-color:var(--err);
   --md-text-button-hover-state-layer-color:var(--err);--md-outlined-button-hover-state-layer-color:var(--err);
 }
-md-text-button.compact{--md-text-button-container-height:32px;--md-text-button-label-text-size:12px;padding:0 4px}
-md-outlined-button.compact{--md-outlined-button-container-height:34px;--md-outlined-button-label-text-size:12px}
-md-filled-button.compact{--md-filled-button-container-height:36px;--md-filled-button-label-text-size:12px}
-md-icon-button.compact{--md-icon-button-state-layer-width:32px;--md-icon-button-state-layer-height:32px;--md-icon-button-icon-size:18px}
+md-text-button:is(.compact,[compact]){--md-text-button-container-height:32px;--md-text-button-label-text-size:12px;padding:0 4px}
+md-outlined-button:is(.compact,[compact]){--md-outlined-button-container-height:34px;--md-outlined-button-label-text-size:12px}
+md-filled-button:is(.compact,[compact]){--md-filled-button-container-height:36px;--md-filled-button-label-text-size:12px}
+md-icon-button:is(.compact,[compact]){--md-icon-button-state-layer-width:32px;--md-icon-button-state-layer-height:32px;--md-icon-button-icon-size:18px}
 
 /* ── light DOM 组件：布局透明（见 docs/adr/0001）── */
 app-header,app-nav,metric-card,task-card,task-list,task-filters,file-row,
@@ -347,8 +347,24 @@ app-icon{display:inline-flex}
   .dist{grid-template-columns:repeat(2,minmax(0,1fr))}
   .stat{min-height:132px;padding:16px}
   .create-grid{grid-template-columns:1fr}
+  /* 手机：导航改为底部导航栏（拇指可达），内容区给它让出空间 */
+  .shell{padding-bottom:calc(96px + env(safe-area-inset-bottom))}
+  .nav{position:fixed;left:0;right:0;bottom:0;top:auto;z-index:45;margin:0;padding:6px 8px calc(6px + env(safe-area-inset-bottom));border-top:1px solid rgba(137,151,145,.34);background:rgba(13,22,19,.92);backdrop-filter:blur(22px) saturate(125%);-webkit-backdrop-filter:blur(22px) saturate(125%)}
+  .nav md-list{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;overflow:visible;padding:0;border:0;background:transparent;border-radius:0}
+  .nav md-list-item{min-width:0;margin:0;--md-list-item-leading-space:8px;--md-list-item-trailing-space:8px;--md-list-item-one-line-container-height:48px;--md-list-item-label-text-size:13px}
+  .nav md-list-item div[slot=headline]{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .filter-bar{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+  .filter-bar md-outlined-text-field{grid-column:1/-1}
+  .filter-bar md-outlined-select{width:100%;min-width:0}
+  .filter-bar md-text-button{justify-self:start;align-self:center}
+  .log-tools md-outlined-select{width:132px;flex:none}
+  .log-tools .file-search{flex:1 1 100%}
+  .toast{bottom:calc(84px + env(safe-area-inset-bottom))}
 }
 @media(max-width:440px){
+  .nav app-icon{display:none}
+  .nav md-list-item{--md-list-item-leading-space:4px;--md-list-item-trailing-space:4px}
+  .nav md-list-item div[slot=headline]{text-align:center}
   .shell{padding:20px 12px calc(48px + env(safe-area-inset-bottom))}
   .topbar{gap:8px;padding:12px 10px}
   .brand-mark{width:32px;height:36px;border-radius:11px}
@@ -371,7 +387,7 @@ app-icon{display:inline-flex}
   .file-row{flex-wrap:wrap}
   .fmeta{width:100%}
   pre,.logs{height:320px}
-  .toast{right:12px;bottom:12px;left:12px;max-width:none;text-align:center}
+  .toast{right:12px;left:12px;max-width:none;text-align:center}
 }
 @media(prefers-reduced-motion:reduce){
   *,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}
