@@ -246,9 +246,55 @@ class ParserTest(unittest.TestCase):
 
     def test_every_subcommand_accepts_common_args(self):
         for argv in (["accounts"], ["use", "x"], ["login"], ["status"], ["areas"],
-                     ["is-live"], ["stop"]):
+                     ["is-live"], ["ensure-live"], ["stop"]):
             args = bili_live.build_parser().parse_args(argv + ["--account", "live"])
             self.assertEqual(args.account, "live", argv)
+
+
+class EnsureLiveTest(unittest.TestCase):
+    def _args(self, tmp):
+        args = bili_live.build_parser().parse_args(["ensure-live"])
+        args.session, args.account = Path(tmp) / "s.json", None
+        return args
+
+    def test_already_live_does_not_start(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(bili_live, "cmd_is_live", return_value=0), \
+                mock.patch.object(bili_live, "cmd_start") as start:
+            self.assertEqual(bili_live.cmd_ensure_live(self._args(tmp)), 0)
+            start.assert_not_called()
+
+    def test_closed_room_restarts_with_saved_area_and_writes_push_env(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = self._args(tmp)
+            env = Path(tmp) / "push.env"
+            session = {"area_id": 86, "title": "Reiko", "rtmp_addr": "rtmp://x/", "rtmp_code": "?k=1&a b"}
+            with mock.patch.object(bili_live, "cmd_is_live", return_value=1), \
+                    mock.patch.object(bili_live, "load_session", return_value=session), \
+                    mock.patch.object(bili_live, "cmd_start", return_value=0) as start, \
+                    mock.patch.object(bili_live, "PUSH_ENV", env), \
+                    mock.patch.object(bili_live.write_push_env, "__defaults__", (env,)), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(bili_live.cmd_ensure_live(args), 0)
+            self.assertEqual((start.call_args[0][0].area, start.call_args[0][0].title), (86, "Reiko"))
+            out = subprocess_source(env)
+            self.assertEqual(out, "rtmp://x/?k=1&a b")
+
+    def test_closed_room_without_saved_area_fails(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(bili_live, "cmd_is_live", return_value=1), \
+                mock.patch.object(bili_live, "load_session", return_value={}), \
+                mock.patch.object(bili_live, "cmd_start") as start, \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(bili_live.cmd_ensure_live(self._args(tmp)), 1)
+            start.assert_not_called()
+
+
+def subprocess_source(env: Path) -> str:
+    import subprocess
+    return subprocess.run(
+        ["bash", "-c", 'source "$1" && printf %s "$BILIBILI_PUSH_URL$BILIBILI_PUSH_CODE"', "_", str(env)],
+        capture_output=True, text=True, check=True).stdout
 
 
 if __name__ == "__main__":

@@ -80,6 +80,16 @@ while true; do
         continue
     fi
 
+    # 推流前确认 B 站房间开着：关播状态下推流会被 B 站十几秒内 reset（退出码 152），
+    # 只重启推流不开播会无限空转。关着就按上次分区/标题开播，并重读刷新后的推流码。
+    if ! python3 "$SCRIPT_DIR/live.py" ensure-live; then
+        echo "  → B 站房间未开播且自动开播失败，60 秒后重试..."
+        sleep 60
+        continue
+    fi
+    [ -f "$HOME/.config/bili/push.env" ] && source "$HOME/.config/bili/push.env"
+    BILI_RTMP="${BILIBILI_PUSH_URL}${BILIBILI_PUSH_CODE}"
+
     echo "  → 成功获取源，开始向 B 站推流..."
 
     LOG_FILE="${LOG_DIR}/ffmpeg_tiktok_${USERNAME}_$(date +%Y%m%d).log"
