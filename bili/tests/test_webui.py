@@ -13,6 +13,18 @@ from unittest import mock
 spec = importlib.util.spec_from_file_location('webui_app', Path(__file__).resolve().parents[1] / 'webui/app.py')
 app = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(app)
+ctl = app.ctl  # 与 monitord 共用的 pushctl 模块对象
+
+
+def isolate_config(case, root: Path) -> None:
+    """配置目录隔离：任何用例写 live/replay/auto.env、锁和快照都落在临时目录，不碰线上配置。"""
+    overrides = {'CONFIG_DIR': root, 'LIVE_ENV': root / 'live.env', 'REPLAY_ENV': root / 'replay.env',
+                 'AUTO_ENV': root / 'auto.env', 'PUSH_ENV': root / 'push.env',
+                 'CONTROL_LOCK_FILE': root / 'control.lock', 'MONITOR_STATE_FILE': root / 'monitord.json'}
+    for name, value in overrides.items():
+        patcher = mock.patch.object(ctl, name, value)
+        patcher.start()
+        case.addCleanup(patcher.stop)
 
 
 class IsolatedConfigTest(unittest.TestCase):
@@ -21,13 +33,7 @@ class IsolatedConfigTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        root = Path(self.tmp.name)
-        overrides = {'CONFIG_DIR': root, 'LIVE_ENV': root / 'live.env',
-                     'REPLAY_ENV': root / 'replay.env', 'AUTO_ENV': root / 'auto.env', '_offline_close_pending': False}
-        for name, value in overrides.items():
-            patcher = mock.patch.object(app, name, value)
-            patcher.start()
-            self.addCleanup(patcher.stop)
+        isolate_config(self, Path(self.tmp.name))
 
 
 class WebUITest(IsolatedConfigTest):
@@ -42,9 +48,9 @@ class WebUITest(IsolatedConfigTest):
             # 账号档案目录一并隔离：否则 session_file() 会回落到真实的
             # ~/.config/bili/accounts/live.json，让测试读到线上凭证
             with mock.patch.dict(os.environ, {'BILI_ACCOUNTS_DIR': str(root / 'no-accounts')}), \
-                    mock.patch.object(app, 'CONFIG_DIR', config), mock.patch.object(app, 'PUSH_ENV', output), mock.patch.object(app, 'SESSION_FILE', session):
-                app.sync_push_env()
-                app.sync_push_env()
+                    mock.patch.object(ctl, 'CONFIG_DIR', config), mock.patch.object(ctl, 'PUSH_ENV', output), mock.patch.object(ctl, 'SESSION_FILE', session):
+                ctl.sync_push_env()
+                ctl.sync_push_env()
             self.assertEqual(output.stat().st_mode & 0o777, 0o600)
             self.assertEqual(config.stat().st_mode & 0o777, 0o700)
             result = subprocess.run(['bash', '-c', 'source "$1"; printf "%s" "$BILIBILI_PUSH_CODE"', 'test', str(output)], capture_output=True, text=True, check=True)
@@ -62,11 +68,11 @@ class WebUITest(IsolatedConfigTest):
             (accounts / 'upload.json').write_text(json.dumps({'rtmp_addr': 'rtmp://up/', 'rtmp_code': 'upload-code'}))
             (accounts / 'defaults.json').write_text(json.dumps({'live': 'live', 'upload': 'upload'}))
             with mock.patch.dict(os.environ, {'BILI_ACCOUNTS_DIR': str(accounts)}), \
-                    mock.patch.object(app, 'SESSION_FILE', root / 'missing-legacy.json'):
-                self.assertEqual(app.session_file(), live)
+                    mock.patch.object(ctl, 'SESSION_FILE', root / 'missing-legacy.json'):
+                self.assertEqual(ctl.session_file(), live)
                 # 切走 live 默认账号后 WebUI 应跟随
                 (accounts / 'defaults.json').write_text(json.dumps({'live': 'upload'}))
-                self.assertEqual(app.session_file(), accounts / 'upload.json')
+                self.assertEqual(ctl.session_file(), accounts / 'upload.json')
 
     def test_concurrent_controls_rejected_and_lock_released(self):
         entered, release = threading.Event(), threading.Event()
@@ -80,14 +86,15 @@ class WebUITest(IsolatedConfigTest):
                 app.stop_all()
             except Exception as exc:
                 errors.append(exc)
-        with mock.patch.object(app, '_ctl', side_effect=block), mock.patch.object(app, 'status', return_value={}):
+        with mock.patch.object(ctl, 'ctl', side_effect=block), mock.patch.object(app, '_nudge_monitor'), \
+                mock.patch.object(app, 'status', return_value={}):
             worker = threading.Thread(target=stop)
             worker.start()
             try:
                 self.assertTrue(entered.wait(2))
-                with self.assertRaises(app.ControlBusy):
+                with self.assertRaises(ctl.ControlBusy):
                     app.set_mode({'mode': 'live', 'target': 'test'})
-                with self.assertRaises(app.ControlBusy):
+                with self.assertRaises(ctl.ControlBusy):
                     app.room({'action': 'stop'})
             finally:
                 release.set()
@@ -95,17 +102,18 @@ class WebUITest(IsolatedConfigTest):
         self.assertFalse(errors)
         with self.assertRaises(ValueError):
             app.set_mode({'mode': 'invalid'})
-        self.assertFalse(app.CONTROL_LOCK.locked())
+        with ctl.control_lock():  # 锁已释放
+            pass
 
     def test_failed_stop_never_starts_new_mode(self):
-        with mock.patch.object(app, 'ensure_room_live'), mock.patch.object(app, '_write_env'), mock.patch.object(app, '_ctl') as ctl, mock.patch.object(app, '_wait_inactive', return_value=False):
+        with mock.patch.object(ctl, 'ensure_room_live'), mock.patch.object(ctl, 'write_env'), mock.patch.object(ctl, 'ctl') as systemctl, mock.patch.object(ctl, 'wait_inactive', return_value=False):
             with self.assertRaises(RuntimeError):
                 app.set_mode({'mode': 'live', 'target': 'demo', 'force': True})
-        ctl.assert_called_once_with('disable', '--now', app.REPLAY_UNIT)
+        systemctl.assert_called_once_with('disable', '--now', app.REPLAY_UNIT)
 
     def test_deactivating_is_not_stopped(self):
-        with mock.patch.object(app, '_show', side_effect=[{'active': 'deactivating'}, {'active': 'inactive'}]) as show, mock.patch('time.sleep'):
-            self.assertTrue(app._wait_inactive(app.LIVE_UNIT))
+        with mock.patch.object(ctl, 'show', side_effect=[{'active': 'deactivating'}, {'active': 'inactive'}]) as show, mock.patch('time.sleep'):
+            self.assertTrue(ctl.wait_inactive(app.LIVE_UNIT))
             self.assertEqual(show.call_count, 2)
 
     def test_http_validation_and_busy_response(self):
@@ -122,7 +130,7 @@ class WebUITest(IsolatedConfigTest):
                     self.assertIn('error', json.loads(resp.read()))
                     conn.close()
                 stop.assert_not_called()
-            with mock.patch.object(app.Handler, 'log_message'), mock.patch.object(app, 'stop_all', side_effect=app.ControlBusy('busy')):
+            with mock.patch.object(app.Handler, 'log_message'), mock.patch.object(app, 'stop_all', side_effect=ctl.ControlBusy('busy')):
                 conn = http.client.HTTPConnection(*server.server_address, timeout=2)
                 conn.request('POST', '/api/stop', '{}')
                 resp = conn.getresponse()
@@ -135,214 +143,75 @@ class WebUITest(IsolatedConfigTest):
             thread.join(2)
 
 
-class TargetMonitorTest(IsolatedConfigTest):
-    """固定目标的开播监测：只改状态快照或推流单元，绝不碰真实服务与网络。"""
-
-    UNIT = {'active': 'active', 'sub': 'running', 'pid': 100, 'pushing': False}
-    OFF = {'active': 'inactive', 'sub': 'dead', 'pid': 0, 'pushing': False}
-
-    def setUp(self):
-        super().setUp()
-        root = Path(self.tmp.name)
-        self.live_env, self.auto_env = app.LIVE_ENV, app.AUTO_ENV
-        patcher = mock.patch.object(app, '_monitor_state', dict(app._monitor_state))
-        patcher.start()
-        self.addCleanup(patcher.stop)
-        self.live_env.write_text('TARGET=streamer_1\n')
-        self.auto_env.write_text('AUTO=1\n')
-
-    def units(self, live=None, replay=None):
-        return {app.LIVE_UNIT: dict(live or self.OFF), app.REPLAY_UNIT: dict(replay or self.OFF)}
-
-    def test_offline_probe_reports_reason_and_keeps_unit(self):
-        """未开播只更新状态：单次失败可能是抖动，不能立刻动推流单元。"""
-        with mock.patch.object(app, '_show_many', return_value=self.units()), \
-                mock.patch.object(app, '_pushing', return_value={0: False}), \
-                mock.patch.object(app, 'probe_target', return_value=('', 'not currently live')) as probe, \
-                mock.patch.object(app, '_ctl') as ctl:
-            app.monitor_cycle()
-        state = app.target_status()
-        self.assertFalse(state['live'])
-        self.assertEqual(state['detail'], 'not currently live')
-        self.assertEqual(state['streak'], 1)
-        self.assertEqual(state['target'], 'streamer_1')
-        probe.assert_called_once_with('streamer_1')
-        ctl.assert_not_called()
-
-    def test_second_offline_check_stops_push(self):
-        with mock.patch.object(app, '_show_many', return_value=self.units(live=self.UNIT)), \
-                mock.patch.object(app, '_pushing', return_value={100: False}), \
-                mock.patch.object(app, 'probe_target', return_value=('', 'offline')), \
-                mock.patch.object(app, '_ctl') as ctl, \
-                mock.patch.object(app, '_wait_inactive', return_value=True), \
-                mock.patch.object(app, 'run', return_value=subprocess.CompletedProcess([], 0, '', '')) as run:
-            app.monitor_cycle()
-            ctl.assert_not_called()
-            run.assert_not_called()
-            app.monitor_cycle()
-        ctl.assert_called_once_with('disable', '--now', app.LIVE_UNIT)
-        run.assert_called_once_with(['python3', str(app.LIVE_PY), 'stop'], timeout=60, check=False)
-        self.assertTrue(app.auto_armed())
-        self.assertFalse(app._offline_close_pending)
-
-    def test_failed_room_close_retries_after_push_stopped(self):
-        with mock.patch.object(app, '_ctl'), \
-                mock.patch.object(app, '_wait_inactive', return_value=True), \
-                mock.patch.object(app, 'run', return_value=subprocess.CompletedProcess([], 1, '', 'failed')):
-            with self.assertRaises(RuntimeError):
-                app._stop_offline_live()
-        self.assertTrue(app._offline_close_pending)
-        with mock.patch.object(app, '_show_many', return_value=self.units()), \
-                mock.patch.object(app, '_pushing', return_value={0: False}), \
-                mock.patch.object(app, 'probe_target', return_value=('', 'offline')), \
-                mock.patch.object(app, '_ctl'), \
-                mock.patch.object(app, '_wait_inactive', return_value=True), \
-                mock.patch.object(app, 'run', return_value=subprocess.CompletedProcess([], 0, '', '')) as run:
-            app.monitor_cycle()
-            app.monitor_cycle()
-        run.assert_called_once()
-        self.assertFalse(app._offline_close_pending)
-        self.assertTrue(app.auto_armed())
-
-    def test_live_probe_starts_push_when_armed(self):
-        with mock.patch.object(app, '_show_many', return_value=self.units()), \
-                mock.patch.object(app, '_pushing', return_value={0: False}), \
-                mock.patch.object(app, 'probe_target', return_value=('https://live.flv', '已开播')), \
-                mock.patch.object(app, 'ensure_room_live') as room, \
-                mock.patch.object(app, 'run') as run, \
-                mock.patch.object(app, '_ctl') as ctl:
-            app.monitor_cycle()
-        room.assert_called_once_with()
-        self.assertIn('TARGET=streamer_1', self.live_env.read_text())
-        self.assertEqual([c.args for c in ctl.call_args_list],
-                         [('enable', app.LIVE_UNIT), ('restart', app.LIVE_UNIT)])
-        run.assert_called_once()  # reset-failed
-        self.assertTrue(app.target_status()['live'])
-
-    def test_running_retry_loop_recovers_closed_room(self):
-        for reopened in (False, True):
-            with self.subTest(reopened=reopened), \
-                    mock.patch.object(app, '_show_many', return_value=self.units(live=self.UNIT)), \
-                    mock.patch.object(app, '_pushing', return_value={100: False}), \
-                    mock.patch.object(app, 'probe_target', return_value=('https://live.flv', '已开播')), \
-                    mock.patch.object(app, 'ensure_room_live', return_value=reopened) as room, \
-                    mock.patch.object(app, '_ctl') as ctl:
-                app.monitor_cycle()
-                room.assert_called_once_with()
-                if reopened:
-                    ctl.assert_called_once_with('restart', app.LIVE_UNIT)
-                else:
-                    ctl.assert_not_called()
-
-    def test_running_retry_loop_does_not_reopen_when_disarmed(self):
-        self.auto_env.write_text('AUTO=0\n')
-        with mock.patch.object(app, '_show_many', return_value=self.units(live=self.UNIT)), \
-                mock.patch.object(app, '_pushing', return_value={100: False}), \
-                mock.patch.object(app, 'probe_target', return_value=('https://live.flv', '已开播')), \
-                mock.patch.object(app, 'ensure_room_live') as room:
-            app.monitor_cycle()
-        room.assert_not_called()
-
-    def test_live_probe_does_not_start_when_disarmed(self):
-        """用户明确停掉后开播也不能被拉回来。"""
-        self.auto_env.write_text('AUTO=0\n')
-        with mock.patch.object(app, '_show_many', return_value=self.units()), \
-                mock.patch.object(app, '_pushing', return_value={0: False}), \
-                mock.patch.object(app, 'probe_target', return_value=('https://live.flv', '已开播')), \
-                mock.patch.object(app, '_ctl') as ctl:
-            app.monitor_cycle()
-        ctl.assert_not_called()
-        self.assertTrue(app.target_status()['live'])  # 状态照样展示
-
-    def test_ffmpeg_pushing_skips_tiktok_probe(self):
-        with mock.patch.object(app, '_show_many', return_value=self.units(live=self.UNIT)), \
-                mock.patch.object(app, '_pushing', return_value={100: True}), \
-                mock.patch.object(app, 'probe_target') as probe:
-            app.monitor_cycle()
-        probe.assert_not_called()
-        state = app.target_status()
-        self.assertTrue(state['live'])
-        self.assertEqual(state['source'], 'push')
-
-    def test_replay_running_is_never_hijacked(self):
-        """两种模式互斥是硬约束：轮播在跑时监测只报状态，不抢单元。"""
-        with mock.patch.object(app, '_show_many', return_value=self.units(replay=self.UNIT)), \
-                mock.patch.object(app, '_pushing', return_value={0: False, 100: True}), \
-                mock.patch.object(app, 'probe_target') as probe, \
-                mock.patch.object(app, '_ctl') as ctl:
-            app.monitor_cycle()
-        probe.assert_not_called()
-        ctl.assert_not_called()
-        self.assertIsNone(app.target_status()['live'])
-
-    def test_stuck_replay_unit_also_blocks_takeover(self):
-        """轮播 ffmpeg 已死但单元还 active：抢单元就变双推流，仍让路。"""
-        with mock.patch.object(app, '_show_many', return_value=self.units(replay=self.UNIT)), \
-                mock.patch.object(app, '_pushing', return_value={0: False, 100: False}), \
-                mock.patch.object(app, 'probe_target') as probe, \
-                mock.patch.object(app, '_ctl') as ctl:
-            app.monitor_cycle()
-        probe.assert_not_called()
-        ctl.assert_not_called()
-
-    def test_switching_target_clears_offline_streak(self):
-        """换人后第一次失败不算连续：旧目标的账不能带过去。"""
-        with mock.patch.object(app, '_show_many', return_value=self.units(live=self.UNIT)), \
-                mock.patch.object(app, '_pushing', return_value={100: False}), \
-                mock.patch.object(app, 'probe_target', return_value=('', 'offline')), \
-                mock.patch.object(app, '_stop_offline_live'):
-            app.monitor_cycle()
-            app.monitor_cycle()
-            self.assertEqual(app.target_status()['streak'], 2)
-            self.live_env.write_text('TARGET=streamer_2\n')
-            app.monitor_cycle()
-        self.assertEqual(app.target_status()['streak'], 1)
-
-    def test_missing_target_reports_unknown(self):
-        self.live_env.write_text('TARGET=\n')
-        with mock.patch.object(app, '_show_many') as show:
-            app.monitor_cycle()
-        show.assert_not_called()
-        state = app.target_status()
-        self.assertIsNone(state['live'])
-        self.assertIn('未设置目标', state['detail'])
+class WebUIControlTest(IsolatedConfigTest):
+    """管理页只做用户操作 + 读值守快照，不自己跑值守。"""
 
     def test_stop_all_and_room_stop_disarm_watchdog(self):
-        with mock.patch.object(app, '_ctl'), mock.patch.object(app, 'status', return_value={}):
+        with mock.patch.object(ctl, 'ctl'), mock.patch.object(app, '_nudge_monitor'), \
+                mock.patch.object(app, 'status', return_value={}):
             app.stop_all()
-        self.assertFalse(app.auto_armed())
-        with mock.patch.object(app, '_ctl'), mock.patch.object(app, 'run',
+        self.assertFalse(ctl.auto_armed())
+        ctl.set_armed(True)
+        with mock.patch.object(ctl, 'ctl'), mock.patch.object(app, '_nudge_monitor'), mock.patch.object(ctl, 'run',
                   return_value=type('R', (), {'returncode': 0, 'stdout': '', 'stderr': ''})()), \
                 mock.patch.object(app, 'status', return_value={}):
             app.room({'action': 'stop'})
-        self.assertFalse(app.auto_armed())
+        self.assertFalse(ctl.auto_armed())
 
     def test_switch_to_replay_disarms_watchdog(self):
         path = Path(self.tmp.name) / 'clip.mp4'
         path.write_bytes(b'0')
-        with mock.patch.object(app, 'ensure_room_live'), mock.patch.object(app, '_wait_inactive', return_value=True), \
-                mock.patch.object(app, 'run'), mock.patch.object(app, '_ctl'), \
+        with mock.patch.object(ctl, 'ensure_room_live'), mock.patch.object(ctl, 'wait_inactive', return_value=True), \
+                mock.patch.object(ctl, 'run'), mock.patch.object(ctl, 'ctl'), \
                 mock.patch.object(app, 'status', return_value={}):
             app.set_mode({'mode': 'replay', 'paths': [str(path)]})
-        self.assertFalse(app.auto_armed())
+        self.assertFalse(ctl.auto_armed())
         self.assertIn(str(path), (Path(self.tmp.name) / 'replay.env').read_text())  # 落在临时目录
 
-    def test_auto_control_yields_to_user_operation(self):
-        app.CONTROL_LOCK.acquire()
-        try:
-            self.assertFalse(app._auto_control(lambda: self.fail('不该被执行')))
-        finally:
-            app.CONTROL_LOCK.release()
+    def test_switch_to_live_arms_with_new_epoch(self):
+        """每次开值守都是新纪元：monitord 据此清零旧的连续下播计数。"""
+        with mock.patch.object(ctl, 'ensure_room_live'), mock.patch.object(ctl, 'wait_inactive', return_value=True), \
+                mock.patch.object(ctl, 'run'), mock.patch.object(ctl, 'ctl'), mock.patch.object(app, '_nudge_monitor'), \
+                mock.patch.object(app, 'status', return_value={}):
+            app.set_mode({'mode': 'live', 'target': 'demo', 'force': True})
+            first = ctl.arm_epoch()
+            app.set_mode({'mode': 'live', 'target': 'demo', 'force': True})
+        self.assertTrue(ctl.auto_armed())
+        self.assertTrue(first)
+        self.assertNotEqual(first, ctl.arm_epoch())
 
-    def test_probe_target_surfaces_failure_reason(self):
-        failed = type('R', (), {'returncode': 1, 'stdout': '', 'stderr': 'detail\n未开播\n'})()
-        with mock.patch.object(app, 'run', return_value=failed):
-            self.assertEqual(app.probe_target('who'), ('', '未开播'))
-        timed_out = subprocess.TimeoutExpired(cmd='x', timeout=1)
-        with mock.patch.object(app, 'run', side_effect=timed_out):
-            url, detail = app.probe_target('who')
-        self.assertEqual(url, '')
-        self.assertIn('超时', detail)
+    def test_target_status_reads_monitor_snapshot(self):
+        ctl.write_env(ctl.LIVE_ENV, ['TARGET=streamer_1'])
+        ctl.write_monitor_state({'live': True, 'detail': '已开播', 'source': 'probe', 'streak': 0,
+                                 'checked_at': 1.0, 'next_at': 0.0})
+        with mock.patch.object(ctl, 'show', return_value={'active': 'active'}):
+            state = app.target_status()
+        self.assertTrue(state['live'])
+        self.assertEqual(state['target'], 'streamer_1')
+        self.assertTrue(state['monitor'])
+
+    def test_target_status_when_monitor_down_is_unknown(self):
+        """值守没在跑：旧快照不能冒充当前状态。"""
+        ctl.write_monitor_state({'live': True, 'detail': '已开播', 'checked_at': 1.0})
+        with mock.patch.object(ctl, 'show', return_value={'active': 'inactive'}):
+            state = app.target_status()
+        self.assertIsNone(state['live'])
+        self.assertIn('未运行', state['detail'])
+        self.assertFalse(state['monitor'])
+
+    def test_request_probe_signals_monitor_and_waits_for_new_snapshot(self):
+        ctl.write_monitor_state({'checked_at': 1.0})
+
+        def fake_ctl(*args):
+            ctl.write_monitor_state({'checked_at': 2.0})  # monitord 收到信号后写新快照
+        with mock.patch.object(ctl, 'ctl', side_effect=fake_ctl) as systemctl:
+            self.assertTrue(app.request_probe(wait=2))
+        systemctl.assert_called_once_with('kill', '-s', 'USR1', '--kill-whom=main', app.MONITOR_UNIT)
+
+    def test_webui_has_no_monitor_loop(self):
+        """前后端分离：值守逻辑只在 monitord，管理页进程里不能再有监测线程。"""
+        for name in ('monitor_cycle', 'monitor_loop', '_record', '_auto_control'):
+            self.assertFalse(hasattr(app, name), name)
 
 
 if __name__ == '__main__':

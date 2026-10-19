@@ -42,7 +42,7 @@ class StreamProtocolTest(unittest.TestCase):
 
     def test_webui_probe_accepts_rtmp_output(self):
         result = mock.Mock(stdout="diagnostic\nrtmp://example/live\n", returncode=0)
-        with mock.patch.object(webui_app, "run", return_value=result):
+        with mock.patch.object(webui_app.ctl, "run", return_value=result):
             self.assertEqual(webui_app.probe_tiktok("demo"), "rtmp://example/live")
 
     def test_rendered_sigi_extracts_video_flv_before_audio(self):

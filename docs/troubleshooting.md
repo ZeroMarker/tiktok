@@ -94,9 +94,10 @@ yt-dlp --no-warnings -f best --get-url "https://play.sooplive.co.kr/<频道id>"
 3. 目标是否还是那个人：管理页输入框留空时会自动填 `TARGET`；若被改过，
    看板上 `@名字` 就是当前目标。
 4. 两种模式互斥：文件轮播在推时监测只报状态，不会抢单元。先停轮播。
-5. 监测线程随 `bili-webui.service` 跑：`systemctl --user status bili-webui.service`，
-   日志 `journalctl --user -u bili-webui.service`。它挂了不影响已在跑的推流——
-   `push.sh` 自己每 60 秒仍在重试。
+5. 值守是独立服务 `bili-monitord.service`（与管理页无关）：
+   `systemctl --user status bili-monitord.service`，日志 `journalctl --user -u bili-monitord.service`
+   或管理页日志区选「值守」。看板显示「值守服务未运行」就是它没起来。它挂了不影响已在跑的推流——
+   `push.sh` 自己每 60 秒仍在重试；但下播自动关播、再开播自动起流都要它在跑。
 
 ## Bilibili 推流音画不同步
 

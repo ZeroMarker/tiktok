@@ -1,0 +1,20 @@
+[Unit]
+Description=Bili 值守 monitord.py（固定目标开播自动起推流 / 关播自动停推流）
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=@PROJECT_ROOT@
+ExecStart=/usr/bin/python3 @PROJECT_ROOT@/monitord.py
+# 值守必须常在：被 pkill 等直接 SIGTERM 也拉回来（on-failure 会把它当正常退出）
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+# 开播会写会话档案（accounts/）与推流码（push.env）、值守快照（monitord.json）
+ReadWritePaths=@PROJECT_ROOT@ %h/.config/bili
+
+[Install]
+WantedBy=default.target

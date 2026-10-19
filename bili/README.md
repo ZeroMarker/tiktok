@@ -16,8 +16,10 @@
 | `soop.sh` | 直播推流：SOOP 直播间 → Bilibili |
 | `livesub.py` | 实验（**已暂停，推流流程不接入**）：TikTok 直播转推并实时烧录日→中字幕（Nemotron 流式 ASR + 本地 Hy-MT2）。设计、测试记录、负载与暂停原因见 [docs/livesub.md](docs/livesub.md) |
 | `upload.py` | 稿件投稿：本地 `.mp4` 投成 B 站普通稿件（`push` 只传文件，`post` 提交稿件） |
-| `webui/app.py` | 推流管理页后端（标准库 only），见下 |
-| `systemd/` | `bili-live` / `bili-replay` / `bili-webui` 三个 user unit + `install.sh` |
+| `pushctl.py` | 后端控制核心：systemd 单元、配置文件、开播、验流、跨进程控制锁；`monitord.py` 与 `webui/app.py` 共用 |
+| `monitord.py` | 值守守护进程（`bili-monitord.service`）：固定目标开播自动起推流、关播自动停推流，见下 |
+| `webui/app.py` | 推流管理页（标准库 only）：只做展示和用户操作，不跑值守，见下 |
+| `systemd/` | `bili-live` / `bili-replay` / `bili-monitord` / `bili-webui` 四个 user unit + `install.sh` |
 
 ## 登录态来源
 
@@ -122,7 +124,9 @@ bash systemd/install.sh   # 装 3 个 user unit，bili-webui 直接 enable --now
 直播推流的目标是**固定的一个** TikTok 主播，写在 `~/.config/bili/live.env` 的
 `TARGET`（管理页「固定目标主播」填一次即固定，之后每轮自动接管）。
 
-`bili-webui.service` 内常驻一个监测线程，每 60 秒跑一轮：
+值守是独立的后端服务 `bili-monitord.service`（`monitord.py`），与管理页各自有 systemd 生命周期，
+重启或杀掉管理页不影响值守（两者都是 `Restart=always`）。每 60 秒跑一轮，管理页「立即检测」
+向它发 SIGUSR1 立刻跑一轮：
 
 | 轮询所见 | 动作 |
 |---|---|
@@ -135,7 +139,11 @@ bash systemd/install.sh   # 装 3 个 user unit，bili-webui 直接 enable --now
 
 值守开关在 `~/.config/bili/auto.env` 的 `AUTO`（管理页勾选框 / `POST /api/arm`）。
 「停止全部推流」和「停播」都会把它关掉——用户明确停掉的东西不会被后台悄悄拉回来。
-`push.sh` 自己的 60 秒重试仍在，两层互为兜底：`bili-webui` 挂了不影响已在跑的推流恢复。
+`push.sh` 自己的 60 秒重试仍在，两层互为兜底：`bili-monitord` 挂了不影响已在跑的推流恢复。
+
+进程间只经文件交互：值守快照 `~/.config/bili/monitord.json` 只有 monitord 写、管理页只读
+（monitord 没在跑时看板如实显示「值守服务未运行」，不拿旧快照冒充）；用户操作与自动接管经
+`~/.config/bili/control.lock`（flock）互斥。设计取舍见 [ADR 0005](../docs/adr/0005-bili-monitord-split.md)。
 
 自动接管只在探测到**真实流地址**后发生，因此 TikTok 抓不到流（机房 IP 被 WAF 拦、
 主播需登录态）时不会空起推流；此时看板上写的是失败原因而不是「未开播」。
@@ -265,7 +273,8 @@ ffmpeg -hide_banner -v error -i <file> -f null - 2>&1 | grep -c "concealing"
   旧 hub 托管进程与 systemd 不互通，迁移时先停旧进程（`hub stop <name>`）。
 - 固定目标开播后没自动起流：看板「固定目标开播状态」写的是抓流失败原因还是「未开播」——
   前者多为机房 IP 被 TikTok WAF 拦或主播需登录态（见上），此时按设计不会空起推流。
-  值守是否开着看 `~/.config/bili/auto.env`（`AUTO=0` 表示已关）。
+  值守是否开着看 `~/.config/bili/auto.env`（`AUTO=0` 表示已关）；值守服务本身是否在跑看
+  `systemctl --user status bili-monitord.service`。
 - 看日志：管理页日志区，或 `journalctl --user -u bili-live.service`。
 - 投稿报 `-101`/`-111`：`live.py login` 会话过期或 csrf 不匹配，重新登录。
 - 投稿报 `601`：连续提交过多，等十几分钟；确认没有在拆成大量独立稿件。

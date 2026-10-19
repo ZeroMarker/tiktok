@@ -203,8 +203,10 @@ H.265 开关也依赖路径：录制仅在最终选择的路径等于本地固�
 |---|---|---|
 | `live.env` | `TARGET` | **固定的**推流目标 TikTok 主播 |
 | `replay.env` | `REPLAY_ARGS` | 文件轮播的路径与 `--encode` |
-| `auto.env` | `AUTO` | 值守：开播自动起推流、关播自动停推流（1 开 / 0 关） |
+| `auto.env` | `AUTO` / `EPOCH` | 值守：开播自动起推流、关播自动停推流（1 开 / 0 关）；`EPOCH` 每次开值守刷新，`bili-monitord` 见到变化即清零连续下播计数 |
 | `push.env` | `BILIBILI_PUSH_URL` / `BILIBILI_PUSH_CODE` | 当前推流码，每次开播刷新 |
+| `monitord.json` | — | 值守快照，**只由 `bili-monitord` 写**，管理页只读 |
+| `control.lock` | — | 用户操作与自动接管互斥的 flock 锁文件 |
 
 手动等价操作（会绕过管理页的值守判断）：
 

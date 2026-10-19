@@ -4,6 +4,7 @@
 # 装什么：
 #   bili-live.service    直播推流（push.sh），需经 webui 或手动写 live.env 后启动
 #   bili-replay.service  文件轮播（replay.sh），需经 webui 或手动写 replay.env 后启动
+#   bili-monitord.service 值守（开播自动起推流、关播自动停推流），本脚本直接 enable --now
 #   bili-webui.service   管理页（127.0.0.1:8767），本脚本直接 enable --now
 #
 # 两种推流模式互斥（同时只能跑一个），由 webui 保证；手动操作时自己先停另一个。
@@ -38,7 +39,7 @@ escape_unit_value() {
 }
 
 ESCAPED_PROJECT_ROOT="$(escape_unit_value "$PROJECT_ROOT")"
-for unit in bili-live.service bili-replay.service bili-webui.service; do
+for unit in bili-live.service bili-replay.service bili-monitord.service bili-webui.service; do
     rendered="$(mktemp "$UNIT_DIR/.${unit}.XXXXXX")"
     while IFS= read -r line || [ -n "$line" ]; do
         printf '%s\n' "${line//@PROJECT_ROOT@/$ESCAPED_PROJECT_ROOT}"
@@ -74,7 +75,10 @@ if [ "$(loginctl show-user "$USER" -p Linger --value 2>/dev/null)" != "yes" ]; t
     fi
 fi
 
-systemctl --user enable --now bili-webui.service
+# 先重启管理页再起值守：旧版管理页进程内带监测线程，先换成新代码，避免两边同时接管
+systemctl --user enable bili-webui.service
+systemctl --user restart bili-webui.service
+systemctl --user enable --now bili-monitord.service
 systemctl --user --no-pager --full status bili-webui.service | head -8
 echo "管理页：http://127.0.0.1:8767 （以 BILI_WEBUI_PORT 为准）"
 echo "推流模式经管理页启动（互斥）；手动：systemctl --user enable --now bili-live.service"
