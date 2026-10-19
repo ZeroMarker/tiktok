@@ -42,7 +42,7 @@ script 之前存在）：
   （`lit-html`、`@lit/reactive-element`、`lit-element/lit-element.js`）改写成绝对 URL，
   所以 CDN 侧只需一条映射。
 - **离线或 CDN 不可达**（内网/受限网络；探针 1.5 s 超时或 `navigator.onLine === false`）：
-  回落到 `webui/vendor/`，它是 lit 浏览器运行时闭包的**最小集**，只有 6 个文件
+  回落到 `webui/vendor/`（[该目录的说明](../../webui/vendor/README.md)），它是 lit 浏览器运行时闭包的**最小集**，只有 6 个文件
   （lit 3.3.3 / lit-element 4.2.2 / lit-html 3.3.3 / @lit/reactive-element 2.1.2）。
 - `sw.js` 同时缓存 CDN（`esm.sh`）模块与 vendor 闭包，因此**联网首访后即可离线打开**；
   vendor 文件列表与磁盘一致由单元测试保证，避免回落路径缺文件。

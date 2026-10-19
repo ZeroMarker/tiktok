@@ -45,17 +45,26 @@ TikTok 检测需要在后端 Python 中导入 `curl_cffi`，YouTube 浏览器路
 `python3` 启动解算脚本并导入 yt-dlp。因此必须同时确认解释器和子进程 `PATH`。
 
 仓库默认 systemd 单元以 `ubuntu` 用户、`/usr/bin/python3` 运行；激活终端的虚拟环境
-不会改变服务环境。若使用上述虚拟环境，通过 `sudo systemctl edit livestream-webui`
-设置覆盖项（路径按实际项目位置修改）：
+不会改变服务环境。用虚拟环境时，**引擎宿主是必须的、WebUI 不是**：
+
+- `livestream-recorderd`（引擎宿主）**必须**用能导入 `curl_cffi` / `yt-dlp`(`yt_dlp_ejs`)
+  的解释器——它是构造并运行引擎的进程；
+- `livestream-webui` 当前导入链在**导入期不加载** `curl_cffi`（`tiktok_extract` 里是函数内
+  延迟导入），所以只做 UI/API 时不需要这些包；想省事也可以让它用同一个 venv。
+
+按需覆盖（`systemctl edit` 生成 drop-in，路径按实际项目位置修改）：
 
 ```ini
+# sudo systemctl edit livestream-recorderd
 [Service]
 ExecStart=
-ExecStart=/home/ubuntu/tiktok/.venv/bin/python /home/ubuntu/tiktok/webui/app.py
+ExecStart=/home/ubuntu/tiktok/.venv/bin/python /home/ubuntu/tiktok/webui/recorderd.py
 Environment=PATH=/home/ubuntu/tiktok/.venv/bin:/home/ubuntu/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ```
 
-随后执行 `sudo systemctl daemon-reload` 和 `sudo systemctl restart livestream-webui`。
+改的是单元/drop-in → 先 `sudo systemctl daemon-reload` 再 `systemctl restart livestream-recorderd`
+（重启引擎宿主会中断并恢复录制）；只改 `/etc/default/livestream-webui` 里的环境变量则
+不需要 `daemon-reload`，直接重启对应服务即可。
 独立运行 Bilibili 推流脚本或 user 服务时，也需为其 `python3` 与 `yt-dlp` 设置同样的环境。
 共享浏览器服务本身只使用 Python 标准库，无需为它安装这些 Python 包。
 
@@ -230,11 +239,19 @@ RECORDERD_SOCKET=/home/ubuntu/tiktok/state/run/recorderd.sock
 livestream-recorderd` 会优雅收尾当前分段并按任务目录恢复全部未暂停任务（见
 [ADR 0002](adr/0002-recorderd-split.md)）。
 
-后端不校验令牌，因此必须保持监听回环地址，并仅在内网、VPN 或带访问控制的反向代理后使用。修改配置后执行：
+后端不校验令牌，因此必须保持监听回环地址，并仅在内网、VPN 或带访问控制的反向代理后使用。改配置后按影响面重启：
 
 ```bash
+# 只改 LIVE_WEBUI_HOST / LIVE_WEBUI_PORT → 仅 WebUI（不影响录制）
+sudo systemctl restart livestream-webui
+
+# 改 RECORDINGS_DIR / RECORDERD_SOCKET → 两个服务都要（引擎与 UI 必须看同一份目录/同一个 socket）
+sudo systemctl restart livestream-recorderd   # 会优雅收尾当前分段并按任务目录恢复
 sudo systemctl restart livestream-webui
 ```
+
+环境变量（`EnvironmentFile=`）在每次启动时读取，因此改 `/etc/default/livestream-webui`
+不需要 `daemon-reload`；只有改单元文件或 drop-in 才需要。
 
 ### Caddy 反向代理
 

@@ -1,6 +1,6 @@
 # webui/vendor — lit@3 的本地回落（fallback）
 
-前端无构建链，lit@3 的引入方式见 [ADR 0001](../docs/adr/0001-webui-frontend-lit.md)：
+前端无构建链，lit@3 的引入方式见 [ADR 0001](../../docs/adr/0001-webui-frontend-lit.md)：
 
 1. **默认走 CDN**：`index.html` 的引导脚本注入 `{"lit": "https://esm.sh/lit@3.3.3"}`；
 2. **离线 / CDN 不可达时回落到本目录**：探针超时（1.5 s）或 `navigator.onLine === false`
