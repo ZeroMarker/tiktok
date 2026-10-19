@@ -177,3 +177,112 @@ recorderd 的 stdout（`journalctl -u livestream-recorderd -f` 可整体回看�
 yt-dlp / Web API 均判“未开播”）。`platforms/tiktok/record.sh` 会检测项目根 `cookies.txt`
 （Netscape 格式，已被 `.gitignore` 忽略），存在时自动附带 `--cookies` 给引擎，
 由适配器透传给 yt-dlp；Cookie 与 Bilibili 推流码等敏感信息不要提交仓库。
+
+## 流程
+
+以下 Mermaid 图在 GitHub 上直接渲染；纯文本查看时以上下文说明为准。
+
+### 录制监测：引擎侧回合循环
+
+`Engine.run()`（`scripts/dlr/engine.py`）是一个 `while not stopping` 的回合循环：
+「取流 → 校验 → 录制」，取不到就带抖动等下一轮。每个任务是 recorderd 进程内的一个
+线程（详见 [ADR 0002](adr/0002-recorderd-split.md)）。
+
+```mermaid
+flowchart TD
+  A["线程启动：build_engine<br/>解析默认 Cookie、建日志 sink"] --> B{"输出目录已定？"}
+  B -->|"否（新任务 / 进程刚起）"| C["补抓显示昵称<br/>curl_cffi 页面 → yt-dlp channel 兜底<br/>磁盘缓存 recordings/.nicknames/"]
+  B -->|"是（本场已定名）"| D["adapter.detect_stream_url()"]
+  C --> D
+  D -->|"未取到流"| E["记 last_detect_error<br/>等待 120–300 秒（210±90 抖动）"]
+  E --> B
+  D -->|"取到流（日志只记主机名）"| F{"Range 轻量校验<br/>bytes=0-1，5s 超时"}
+  F -->|"400/403/404/410：陈旧 / 过期地址"| E
+  F -->|"通过（其余状态码、网络错误、rtmp 放行）"| G["建输出目录<br/>平台 / slug_昵称 /<br/>本场首轮定名后不再改名"]
+  G --> H["phase=recording<br/>ffmpeg -c copy -f segment -segment_time 600"]
+  H --> I["ffmpeg 退出<br/>断流或 -rw_timeout 30s"]
+  I --> J["phase=detecting，等待 10 秒"]
+  J --> D
+  K["request_stop<br/>暂停 / 删除 / 停服 SIGTERM"] -.->|"置停止位 + terminate ffmpeg<br/>中断任意长等待"| B
+```
+
+- 每回合都包在 `try/except` 里：单次异常只记日志并等一轮，不会压垮监控循环。
+- 录制期间看护线程 `_watch_dir()` 会在输出目录被外部删除时自动重建（目录自愈）。
+- `phase` → UI 状态的映射见上文「生命周期语义」；检测间隔天然是分钟级，UI 的 5 秒轮询
+  只读状态、不触发检测。
+
+### 录制监测：各平台取流顺序
+
+```mermaid
+flowchart LR
+  subgraph TK["TikTok：多级兜底"]
+    T1["① 轻量检测（每轮必跑）<br/>curl_cffi 页面 + webcast API<br/>带 cookies.txt"] --> T2["② 升级轮：Chromium 兜底渲染<br/>首轮 或 连续 3 次 miss<br/>走共享 browserd（CDP）"]
+    T2 --> T3["③ 升级轮且未确认离线<br/>yt-dlp --get-url（带 Cookie）"]
+  end
+  subgraph YD["youtube / kick / chzzk / soop / twitch：同一套 yt-dlp"]
+    Y1["yt-dlp --get-url<br/>按平台拼 live URL、Referer、format 候选<br/>必要时 --impersonate、--netrc"]
+  end
+```
+
+日志里对应 `[tiktok_detect] stage=page|browser|ytdlp …` 的分阶段诊断。
+
+### 状态观测：UI 每 5 秒读一次
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant B as 浏览器（Lit 前端）
+  participant W as WebUI（webui/app.py）
+  participant C as control.py
+  participant R as recorderd
+  participant E as 引擎线程
+  B->>W: GET /api/jobs（每 5s，仅页面可见时）
+  W->>C: control.list_jobs()
+  C->>R: unix socket GET /jobs
+  R->>E: recorder.status() 取实时快照
+  R->>R: 拼上 state/tasks.json 里 paused 的条目
+  R-->>C: JSON，字段与旧模型一致
+  C-->>W: list
+  W-->>B: 200 任务列表，前端显示 运行中 / 等待开播 / 直播中
+  B->>W: GET /api/logs?unit=&tail=（日志面板）
+  W->>R: unix socket GET /logs
+  R-->>B: engine_任务ID.log 尾部，≤5000 行 / 100KB
+```
+
+控制面不可达时 `/api/jobs`、`/api/overview`、`/api/logs` 返回 503，`/api/files` 照常；
+`/api/health` 给出 `"recorderd": true|false`。
+
+### 新增录制任务
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant B as 浏览器
+  participant W as WebUI（server.py）
+  participant C as control.py
+  participant R as recorderd（jobs.py）
+  participant E as 引擎线程
+  B->>B: 表单校验：trim 非空、客户端去重<br/>同平台同频道；已暂停则提示去「继续」
+  B->>W: POST /api/start（platform、target、quality）
+  W->>C: control.start_job(data)
+  C->>R: unix socket POST /start
+  R->>R: _validate_spec：平台白名单、target 长度、twitch 规范化、画质白名单
+  R->>R: 取 _CATALOG_LOCK，目录去重 + 运行中任务去重
+  R->>R: unit_name() → livestream-rec-平台-slug-sha10.service
+  R->>E: Recorder.start(unit, spec) 建任务线程
+  R->>R: catalog 写入 state/tasks.json（原子替换）
+  R-->>C: 201 返回 unit
+  C-->>W: unit
+  W-->>B: 201 返回 unit
+  B->>B: toast、清空输入、refreshAll、跳 #/tasks/任务ID
+  E->>E: build_engine → Engine.run()，进入上面的监测回合
+```
+
+关键点：
+
+- **单一写者**：`state/tasks.json` 只由 recorderd 读写，WebUI 从不碰目录格式。
+- **两层去重**：前端做即时提示（体验），控制面做权威校验（正确性）。
+- **错误映射**：控制面 4xx → `RuntimeError` → WebUI 400（前端直接显示服务端文案）；
+  控制面不可达 → `ControlUnavailable` → WebUI 503（前端按「部分数据同步失败」降级）。
+- **持久化即期望状态**：recorderd 重启会把目录里所有非 paused 任务重新拉起；
+  暂停/继续/重启/删除复用同一控制面，删除只删记录、不删录像文件。
