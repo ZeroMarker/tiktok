@@ -3,7 +3,7 @@
 - 状态：已采纳
 - 日期：2026-10-19（同日修订：依赖改为纯本地 vendor，移除 CDN；组件 shadow/light DOM 混用；
   控件层迁移到 @material/web 见 [ADR 0004](0004-material-web-controls.md)）
-- 范围：`webui/`（直播录制中心 WebUI）。`bili/webui/` 本来就是手写原生页面，不受影响。
+- 范围：`webui/`（直播录制中心 WebUI）。`bili/webui/` 后来也按同一方案迁移，见 [ADR 0006](0006-bili-webui-lit.md)。
 
 ## 背景
 

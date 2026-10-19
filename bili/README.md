@@ -18,7 +18,8 @@
 | `upload.py` | 稿件投稿：本地 `.mp4` 投成 B 站普通稿件（`push` 只传文件，`post` 提交稿件） |
 | `pushctl.py` | 后端控制核心：systemd 单元、配置文件、开播、验流、跨进程控制锁；`monitord.py` 与 `webui/app.py` 共用 |
 | `monitord.py` | 值守守护进程（`bili-monitord.service`）：固定目标开播自动起推流、关播自动停推流，见下 |
-| `webui/app.py` | 推流管理页（标准库 only）：只做展示和用户操作，不跑值守，见下 |
+| `webui/app.py` | 推流管理页后端（标准库 only）：只做展示和用户操作，不跑值守，见下 |
+| `webui/frontend/` | 管理页前端：Lit + @material/web（MD3），原生 ESM、无构建链；依赖在 `webui/vendor/`（纯本地），见 [ADR 0006](../docs/adr/0006-bili-webui-lit.md) |
 | `systemd/` | `bili-live` / `bili-replay` / `bili-monitord` / `bili-webui` 四个 user unit + `install.sh` |
 
 ## 登录态来源

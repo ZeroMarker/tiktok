@@ -3,6 +3,7 @@ import http.client
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import tempfile
 import threading
@@ -13,6 +14,7 @@ from unittest import mock
 spec = importlib.util.spec_from_file_location('webui_app', Path(__file__).resolve().parents[1] / 'webui/app.py')
 app = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(app)
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 ctl = app.ctl  # 与 monitord 共用的 pushctl 模块对象
 
 
@@ -141,6 +143,89 @@ class WebUITest(IsolatedConfigTest):
             server.shutdown()
             server.server_close()
             thread.join(2)
+
+
+class FrontendModuleGraphTest(unittest.TestCase):
+    """Lit + Material Web、无构建链：import map 与相对引用必须都能解析到真实文件。"""
+
+    WEBUI = app.WEBUI_DIR
+    FRONTEND = app.WEBUI_DIR / 'frontend'
+    VENDOR = app.WEBUI_DIR / 'vendor'
+    IMPORT_SPEC = re.compile(r"""(?:from|import)\s*['"]([^'"]+)['"]""")
+
+    def setUp(self):
+        self.shell = app.INDEX_FILE.read_text(encoding='utf-8')
+        match = re.search(r'<script type="importmap">(.*?)</script>', self.shell, re.S)
+        self.assertIsNotNone(match, '壳页面必须提供静态 import map')
+        self.imports = json.loads(match.group(1))['imports']
+
+    def sources(self):
+        return [*self.FRONTEND.rglob('*.js'), *self.VENDOR.rglob('*.js')]
+
+    def test_shell_assets_exist(self):
+        self.assertIn('./frontend/main.js', self.shell)
+        for name, target in self.imports.items():
+            self.assertTrue(target.startswith('./vendor/'), f'{name} 必须指向本地 vendor：{target}')
+            resolved = (self.WEBUI / target[2:])
+            self.assertTrue(resolved.is_dir() if target.endswith('/') else resolved.is_file(), f'{name} -> {target}')
+
+    def test_relative_imports_resolve(self):
+        for path in self.sources():
+            for spec in self.IMPORT_SPEC.findall(path.read_text(encoding='utf-8')):
+                if spec.startswith('.'):
+                    self.assertTrue((path.parent / spec).resolve().is_file(), f'{path.relative_to(self.WEBUI)} -> {spec}')
+
+    def test_bare_imports_are_mapped(self):
+        for path in self.sources():
+            for spec in self.IMPORT_SPEC.findall(path.read_text(encoding='utf-8')):
+                if spec.startswith('.'):
+                    continue
+                ok = spec in self.imports or any(k.endswith('/') and spec.startswith(k) for k in self.imports)
+                self.assertTrue(ok, f'{path.relative_to(self.WEBUI)} -> {spec} 不在 import map 中')
+
+    def test_no_cdn_references(self):
+        for path in [app.INDEX_FILE, *self.FRONTEND.rglob('*.js')]:
+            self.assertNotRegex(path.read_text(encoding='utf-8'), r'https?://(?!127\.0\.0\.1)', path.name)
+
+    def test_every_component_is_registered_and_used(self):
+        main = (self.FRONTEND / 'main.js').read_text(encoding='utf-8')
+        for path in (self.FRONTEND / 'components').glob('*.js'):
+            self.assertIn(f'./components/{path.name}', main)
+            self.assertIn(f'customElements.define("{path.stem}"', path.read_text(encoding='utf-8'))
+
+    def test_vendor_identical_to_recorder_webui(self):
+        """与录制中心 webui/vendor 同一份文件：升级时漏同步一边会在这里暴露。"""
+        other = PROJECT_ROOT.parent / 'webui' / 'vendor'
+        if not other.is_dir():
+            self.skipTest('不在主仓库中')
+        mine = {p.relative_to(self.VENDOR): p.read_bytes() for p in self.VENDOR.rglob('*') if p.is_file()}
+        theirs = {p.relative_to(other): p.read_bytes() for p in other.rglob('*') if p.is_file()}
+        self.assertEqual(mine.keys() - {Path('README.md')}, theirs.keys() - {Path('README.md')})
+        for rel, data in mine.items():
+            if rel != Path('README.md'):
+                self.assertEqual(data, theirs[rel], str(rel))
+
+    def test_service_worker_precache_entries_exist(self):
+        sw = (self.WEBUI / 'sw.js').read_text(encoding='utf-8')
+        shell = re.search(r'const SHELL = \[(.*?)\];', sw, re.S).group(1)
+        for url in re.findall(r'"(/[^"]*)"', shell):
+            if url == '/':
+                continue
+            path = app.PWA_STATIC.get(url, (None,))[0] or (tree := app.resolve_static_tree(url)) and tree[0]
+            self.assertTrue(path and Path(path).is_file(), url)
+
+
+class StaticTreeTest(unittest.TestCase):
+    def test_serves_frontend_and_vendor(self):
+        for url in ('/frontend/main.js', '/vendor/lit/index.js', '/vendor/material-web/dialog/dialog.js'):
+            path, ctype, _ = app.resolve_static_tree(url)
+            self.assertTrue(path.is_file(), url)
+            self.assertTrue(ctype.startswith('text/javascript'), url)
+
+    def test_rejects_traversal_and_other_files(self):
+        for url in ('/frontend/../app.py', '/vendor/../app.py', '/frontend/', '/vendor/README.md',
+                    '/frontend/../../pushctl.py', '/frontend/__pycache__/x.pyc'):
+            self.assertIsNone(app.resolve_static_tree(url), url)
 
 
 class WebUIControlTest(IsolatedConfigTest):

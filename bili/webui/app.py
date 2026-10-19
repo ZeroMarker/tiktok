@@ -60,6 +60,39 @@ PWA_STATIC: dict[str, tuple[Path, str, str]] = {
 }
 
 
+# 目录型静态资源（Lit 前端源码 + 本地 vendor，无构建链，源码即产物）：前缀 → webui/ 下的目录。
+# 只放行下列后缀，目录里的 .py / __pycache__ / *.map 等不会被暴露。
+STATIC_PREFIXES: dict[str, tuple[str, str]] = {
+    "/frontend/": ("frontend", "no-cache"),
+    "/vendor/": ("vendor", "public, max-age=604800"),
+}
+STATIC_CONTENT_TYPES: dict[str, str] = {
+    ".js": "text/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".svg": "image/svg+xml",
+}
+
+
+def resolve_static_tree(path: str) -> tuple[Path, str, str] | None:
+    """把 ``/frontend/…`` ``/vendor/…`` 映射到 webui/ 下的文件（含穿越防护）。"""
+    for prefix, (directory, cache_control) in STATIC_PREFIXES.items():
+        if not path.startswith(prefix):
+            continue
+        relative = path[len(prefix):]
+        if not relative or relative.endswith("/"):
+            return None
+        root = (WEBUI_DIR / directory).resolve()
+        candidate = (root / relative).resolve()
+        try:
+            candidate.relative_to(root)
+        except ValueError:
+            return None  # 目录穿越
+        content_type = STATIC_CONTENT_TYPES.get(candidate.suffix.lower())
+        if content_type is None or not candidate.is_file():
+            return None
+        return candidate, content_type, cache_control
+    return None
+
 def exclusive(fn):
     @wraps(fn)
     def wrapped(*args, **kwargs):
@@ -396,6 +429,8 @@ class Handler(BaseHTTPRequestHandler):
                 path, mime, cache = PWA_STATIC[parsed.path]
                 extra = {"Service-Worker-Allowed": "/"} if parsed.path == "/sw.js" else None
                 self.send_file(path, mime, cache, extra)
+            elif (tree := resolve_static_tree(parsed.path)) is not None:
+                self.send_file(*tree)
             elif parsed.path == "/api/health":
                 self.send_json(HTTPStatus.OK, {"ok": True})
             elif parsed.path == "/api/status":

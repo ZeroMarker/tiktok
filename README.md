@@ -109,6 +109,7 @@ WebUI 同时提供 PWA 支持：可安装到桌面/主屏幕，断网时仍可�
 - [ADR 0003：任务期望状态用命令式（不做文件对账）](docs/adr/0003-imperative-task-control.md)
 - [ADR 0004：控件层迁移到 Material Web（MD3）](docs/adr/0004-material-web-controls.md)
 - [ADR 0005：把 Bili 值守从管理页进程里拆出来（bili-monitord）](docs/adr/0005-bili-monitord-split.md)
+- [ADR 0006：Bili 管理页前端迁到 Lit + Material Web](docs/adr/0006-bili-webui-lit.md)
 - [排障](docs/troubleshooting.md)
 - [Bilibili 推流与投稿](bili/README.md)
 - [Bilibili 投稿接口细节](bili/docs/bilibili-upload-api.md)
