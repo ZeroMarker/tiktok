@@ -41,8 +41,6 @@ import hashlib
 import io
 import json
 import os
-import shlex
-import tempfile
 import sys
 import time
 import urllib.parse
@@ -469,48 +467,6 @@ def cmd_is_live(args: argparse.Namespace) -> int:
     return 0 if live_status == 1 else 1
 
 
-PUSH_ENV = Path.home() / ".config" / "bili" / "push.env"
-
-
-def write_push_env(addr: str, code: str, path: Path = PUSH_ENV) -> None:
-    """把推流地址/推流码原子写入 push.env（600），格式同 webui 的 sync_push_env。"""
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    fd, name = tempfile.mkstemp(dir=path.parent, prefix=".bili-")
-    try:
-        with os.fdopen(fd, "w") as stream:
-            stream.write(
-                "# 由 live.py ensure-live 写入（600，不进 git）\n"
-                f"export BILIBILI_PUSH_URL={shlex.quote(addr)}\n"
-                f"export BILIBILI_PUSH_CODE={shlex.quote(code)}\n"
-            )
-        os.replace(name, path)
-    finally:
-        Path(name).unlink(missing_ok=True)
-
-
-def cmd_ensure_live(args: argparse.Namespace) -> int:
-    """推流前保证房间开着：已开返回 0；关播则按上次分区/标题重新开播并刷新 push.env。
-
-    给 push.sh 每次推流前调用——房间被关（主播下播自动关播、B 站侧断开等）后
-    推流单元重启时，若不先开播，B 站会在十几秒内 reset 连接，推流无限空转。
-    """
-    if cmd_is_live(args) == 0:
-        return 0
-    session = load_session(args.session)
-    area, title = int(session.get("area_id") or 0), str(session.get("title") or "").strip()
-    if not area:
-        print("房间未开播，且会话里没有上次开播的分区：请先在 webui 开播一次")
-        return 1
-    args.area, args.title, args.print_export = area, title, False
-    rc = cmd_start(args)
-    if rc != 0:
-        return rc
-    session = load_session(args.session)
-    write_push_env(session["rtmp_addr"], session["rtmp_code"])
-    print("已重新开播并刷新 push.env")
-    return 0
-
-
 def cmd_areas(_args: argparse.Namespace) -> int:
     for group in get_areas():
         print(f"[{group.get('id')}] {group.get('name')}")
@@ -675,8 +631,6 @@ def build_parser() -> argparse.ArgumentParser:
     areas.set_defaults(func=cmd_areas)
     is_live = add("is-live", "房间是否正在直播（是返回 0）")
     is_live.set_defaults(func=cmd_is_live)
-    ensure_live = add("ensure-live", "房间关着则按上次分区/标题开播并刷新 push.env")
-    ensure_live.set_defaults(func=cmd_ensure_live)
 
     start = add("start", "开播并获取 RTMP 地址/推流码")
     start.add_argument("--area", type=int, required=True, help="子分区 ID（见 areas 输出）")
