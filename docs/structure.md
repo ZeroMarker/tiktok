@@ -50,7 +50,7 @@ exec python3 "${SCRIPT_DIR}/../../scripts/dlr.py" <platform> "$@"
 ├── scripts/               # 统一录制引擎（见上）
 ├── systemd/               # WebUI/browserd systemd unit 与安装脚本
 ├── tests/                 # WebUI 与引擎单元测试（bili/ 另有 bili/tests/，由 test.sh 一并运行）
-├── webui/                 # 本地录制任务管理页面与 API
+├── webui/                 # 本地录制任务管理页面与 API（app.py 与前端源码 frontend/、vendor/）
 ├── docs/                  # 使用、配置、排障和维护文档（archive/ 存已归档的历史排障记录）
 ├── archive/               # 已封存的根目录散脚本（start.sh / yt.sh，见 archive/README.md）
 └── test.sh                # 运行仓库全部单元测试（tests/ + bili/tests/，纯标准库）
@@ -104,6 +104,13 @@ systemd 临时单元，也不再经 `record.sh` 包装（包装仅保留给命�
 后端实现拆分为 `webui/{config,jobs,files,stats,server,recorder}.py`（配置 / 任务编排与
 任务目录 / 录制文件 / 概览聚合 / HTTP 层 / 引擎线程调度），`app.py` 仅为兼容门面与
 直接执行入口；跨模块配置一律经 `config.X` 运行时读取，便于测试在定义处 patch。
+
+前端是**原生 Web Components（Lit 3）**，没有构建链：`webui/index.html` 只是静态壳
+（引导脚本注入 import map + 加载入口模块），源码在 `webui/frontend/`（`components/`、
+`views/`、`stores/`、`services/`、`config/`、`actions/`）。lit@3 默认从 CDN（esm.sh）
+加载，离线/不可达时回落到仓库内 `webui/vendor/`（最小闭包）。
+`webui/server.py` 把 `/frontend/` 与 `/vendor/` 作为静态资源提供（限白名单后缀并强制
+目录边界），见 [ADR 0001](adr/0001-webui-frontend-lit.md)。
 
 生命周期语义与旧多进程模型一一对等：
 

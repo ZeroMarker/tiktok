@@ -84,7 +84,9 @@ ssh -L 8765:127.0.0.1:8766 <server>
 
 然后打开 `http://127.0.0.1:8765`。
 
-WebUI 同时提供 PWA 支持：可安装到桌面/主屏幕，断网时仍可打开界面（任务数据在联网后自动刷新）。前端资源（`manifest.webmanifest`、`sw.js`、图标）在 `webui/` 目录下，配合 Caddy 路径剥离可正常工作。
+WebUI 同时提供 PWA 支持：可安装到桌面/主屏幕，断网时仍可打开界面（任务数据在联网后自动刷新）。
+前端资源（`manifest.webmanifest`、`sw.js`、图标，以及 `frontend/` 应用模块与 `vendor/` 回落）
+都在 `webui/` 目录下，`sw.js` 会预缓存应用壳与 vendor 闭包，配合 Caddy 路径剥离可正常工作。
 
 ## 常用文档
 
@@ -92,6 +94,7 @@ WebUI 同时提供 PWA 支持：可安装到桌面/主屏幕，断网时仍可�
 - [配置与外部依赖](docs/configuration.md)
 - [使用说明](docs/usage.md)
 - [WebUI 设计规范](docs/webui-design-spec.md)
+- [ADR 0001：WebUI 前端采用 Lit、去掉构建链](docs/adr/0001-webui-frontend-lit.md)
 - [排障](docs/troubleshooting.md)
 - [Bilibili 推流与投稿](bili/README.md)
 - [Bilibili 投稿接口细节](bili/docs/bilibili-upload-api.md)
@@ -107,15 +110,14 @@ WebUI 同时提供 PWA 支持：可安装到桌面/主屏幕，断网时仍可�
 bash test.sh    # 运行 tests/ 与 bili/tests/ 两套测试
 ```
 
-前端（`webui/frontend/`，Vue 3 + Vite）改动后必须重新构建单文件产物，否则 CI 会失败：
-
-```bash
-cd webui/frontend && npm ci && npm run build   # 产出覆盖 webui/index.html
-```
+前端（`webui/frontend/`）是**原生 Web Components + Lit 3**，以 ESM + import map 直接运行，
+没有 npm / bundler / 构建产物：改完源码刷新页面即可，`webui/index.html` 只是静态壳页面
+（由引导脚本注入 import map 并加载入口模块）。lit@3 默认从 CDN（esm.sh）加载，离线或
+CDN 不可达时回落到仓库内 `webui/vendor/` 的最小闭包。
 
 CI（`.github/workflows/checks.yml`）在每次 push / PR 校验：两套单元测试、全部 shell
-脚本语法（`bash -n`）、以及 `webui/index.html` 与前端源码的一致性（防止改了
-`frontend/src` 忘记构建）。
+脚本语法（`bash -n`）。前端没有构建步骤，模块路径、import map 与 vendor 闭包由单元测试
+（`tests/test_webui.py` 的 `FrontendModuleGraphTest`）保证可解析。
 
 本地想逐项手动复现 CI 的检查（不依赖 `test.sh`）：
 

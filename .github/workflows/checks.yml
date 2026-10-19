@@ -13,7 +13,9 @@ jobs:
         with:
           python-version: "3.12"
       - name: Recorder tests
-        # curl_cffi：tiktok_extract 取流测试的真实依赖（无它则相关用例自动 skip）
+        # curl_cffi：tiktok_extract 取流测试的真实依赖（无它则相关用例自动 skip）。
+        # 前端无构建链，其模块图 / 事件绑定 / 静态资源服务也在这套用例里校验
+        # （tests/test_webui.py），因此不再有单独的 npm 构建 job。
         run: |
           python -m pip install curl_cffi
           python -m unittest discover -s tests
@@ -24,26 +26,3 @@ jobs:
           while IFS= read -r script; do
             bash -n "$script"
           done < <(find . -name '*.sh' -type f -print)
-
-  frontend-build:
-    # webui/index.html 是 vite-plugin-singlefile 的构建产物（有意入库，供 systemd 直接服务）。
-    # 本 job 重新构建并要求零 diff，防止只改 frontend/src 忘记 npm run build。
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: webui/frontend/package-lock.json
-      - name: Build frontend
-        working-directory: webui/frontend
-        run: |
-          npm ci
-          npm run build
-      - name: Verify committed build artifact is up to date
-        run: |
-          if ! git diff --exit-code webui/index.html; then
-            echo "::error::webui/index.html 与前端源码不一致：请在本地运行 cd webui/frontend && npm ci && npm run build 并提交产物。"
-            exit 1
-          fi

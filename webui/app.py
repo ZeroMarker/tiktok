@@ -47,13 +47,13 @@ from webui.jobs import (
     unit_name,
 )
 from webui.recorder import Recorder, build_engine, engine_log_path
-from webui.server import STATIC_FILES, Handler, main
+from webui.server import STATIC_FILES, STATIC_PREFIXES, Handler, main, resolve_static_tree
 from webui.stats import overview, system_stats
 
 __all__ = [
     "CATALOG_FILE", "INDEX_FILE", "PLATFORMS", "PROJECT_ROOT",
     "QUALITY_CHOICES", "RECORDINGS_DIR", "STATE_DIR", "WEBUI_DIR",
-    "STATIC_FILES", "Handler", "main",
+    "STATIC_FILES", "STATIC_PREFIXES", "Handler", "main", "resolve_static_tree",
     "delete_file", "list_files", "recent_files", "resolve_recording",
     "delete_job", "job_logs", "list_jobs", "pause_job", "restart_job",
     "resume_job", "restore_jobs", "shutdown_recorder", "start_job", "unit_name",

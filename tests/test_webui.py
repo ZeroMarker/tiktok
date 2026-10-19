@@ -96,6 +96,14 @@ class _FakeHandler(app.Handler):
         self.end_headers()
 
 
+def _frontend_sources() -> str:
+    """前端源码全文（无构建链：源码即产物，直接读文件即可断言）。"""
+    return "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted((app.WEBUI_DIR / "frontend").rglob("*.js"))
+    )
+
+
 class WebUIHTTPTest(unittest.TestCase):
     def _get(self, path: str, token: str = "") -> tuple[int, str, bytes]:
         handler = _FakeHandler(path, token)
@@ -154,6 +162,30 @@ class WebUIHTTPTest(unittest.TestCase):
         status, _, _ = self._get("/nope")
         self.assertEqual(status, 404)
 
+    def test_frontend_module_served_as_javascript(self):
+        status, content_type, body = self._get("/frontend/main.js")
+        self.assertEqual(status, 200)
+        self.assertIn("javascript", content_type)
+        self.assertEqual(body, (app.WEBUI_DIR / "frontend" / "main.js").read_bytes())
+
+    def test_vendored_lit_served(self):
+        status, content_type, body = self._get("/vendor/lit/index.js")
+        self.assertEqual(status, 200)
+        self.assertIn("javascript", content_type)
+        self.assertEqual(body, (app.WEBUI_DIR / "vendor" / "lit" / "index.js").read_bytes())
+
+    def test_static_tree_rejects_traversal_and_unlisted_suffixes(self):
+        for path in (
+            "/frontend/../server.py",
+            "/frontend/../../syncStore.js",
+            "/frontend/%2e%2e/server.py",
+            "/vendor/lit/LICENSE",  # 未放行的后缀
+            "/frontend/__init__.py",
+            "/frontend/",  # 目录本身
+        ):
+            status, _, _ = self._get(path)
+            self.assertEqual(status, 404, path)
+
     def test_manifest_icons_are_valid(self):
         manifest = json.loads((app.WEBUI_DIR / "manifest.webmanifest").read_text())
         self.assertTrue(manifest["start_url"])
@@ -181,22 +213,37 @@ class WebUIHTTPTest(unittest.TestCase):
             self.assertEqual(handler.wfile.getvalue().split(b"\r\n")[0], b"HTTP/1.1 200 OK")
 
     def test_dynamic_values_are_not_interpolated_into_inline_handlers(self):
-        # Vue 应用使用事件绑定而非内联 onclick="..." 拼接用户数据，防范持久型 XSS。
-        index = app.INDEX_FILE.read_text(encoding="utf-8")
-        self.assertNotIn("onclick=", index)
-        self.assertNotIn("onerror=", index)
-        self.assertNotIn("javascript:", index)
-        self.assertIn("createApp", index)
-        self.assertIn("#app", index)
+        # Lit 用属性/事件绑定而非内联 onclick="..." 拼接用户数据，防范持久型 XSS：
+        # 壳页面与前端源码都不应出现内联处理器，也不应走 innerHTML/unsafeHTML。
+        shell = app.INDEX_FILE.read_text(encoding="utf-8")
+        sources = _frontend_sources()
+        for text in (shell, sources):
+            self.assertNotIn("onclick=", text)
+            self.assertNotIn("onerror=", text)
+            self.assertNotIn("javascript:", text)
+        self.assertNotIn("unsafeHTML", sources)
+        self.assertNotIn("innerHTML", sources)
+
+    def test_shell_is_a_static_module_entry(self):
+        shell = app.INDEX_FILE.read_text(encoding="utf-8")
+        self.assertIn('id="app"', shell)
+        self.assertIn("./frontend/main.js", shell)
+        self.assertIn("importmap", shell)
+        self.assertIn("https://esm.sh/lit@3", shell)
+        self.assertIn("./vendor/lit/index.js", shell)
 
     def test_webui_has_persistent_snapshot_and_refresh_feedback(self):
-        index = app.INDEX_FILE.read_text(encoding="utf-8")
-        self.assertIn("livestream-webui-snapshot-v1", index)
-        self.assertIn("localStorage.setItem", index)
-        self.assertIn("AbortController", index)
-        self.assertIn("api/jobs", index)
-        self.assertIn("api/overview", index)
-        self.assertIn("serviceWorker", index)
+        sources = _frontend_sources()
+        for fragment in (
+            "livestream-webui-snapshot-v1",
+            "localStorage.setItem",
+            "AbortController",
+            "api/jobs",
+            "api/overview",
+            "serviceWorker",
+            "customElements.define",
+        ):
+            self.assertIn(fragment, sources, fragment)
 
 
 class WebUIHelpersTest(unittest.TestCase):
@@ -485,16 +532,14 @@ class WebUIHelpersTest(unittest.TestCase):
         self.assertIn("Content-Disposition: inline", head.decode("latin-1"))
 
     def test_index_has_quality_selector_and_player(self):
-        index = app.INDEX_FILE.read_text(encoding="utf-8")
-        self.assertIn("1080p", index)
-        self.assertIn("quality", index)
-        self.assertIn("inline-player", index)
-        self.assertIn("api/file", index)
-        self.assertIn("播放", index)
+        # 质量选择器、内嵌播放器与下载入口都在前端源码里（无构建链，源码即产物）。
+        sources = _frontend_sources()
+        for fragment in ("1080p", "quality", "inline-player", "api/file", "播放"):
+            self.assertIn(fragment, sources, fragment)
 
     def test_index_retains_grid_and_flex_layout(self):
         # 布局原语必须保留（曾被合并后遗漏导致 UI 完全混乱）。
-        index = app.INDEX_FILE.read_text(encoding="utf-8")
+        styles = (app.WEBUI_DIR / "frontend" / "styles.js").read_text(encoding="utf-8")
         for fragment in (
             ".stats{display:grid;grid-template-columns:repeat(4,1fr)",
             ".split{display:grid;grid-template-columns:1.3fr .7fr",
@@ -503,7 +548,7 @@ class WebUIHelpersTest(unittest.TestCase):
             ".file-actions{display:flex",
             ".inline-player",
         ):
-            self.assertIn(fragment, index, fragment)
+            self.assertIn(fragment, styles, fragment)
 
 
 class RecorderStatusTest(unittest.TestCase):
@@ -625,50 +670,107 @@ def _spec_recorder(unit: str, platform: str) -> app_recorder.Recorder:
     return rec
 
 
-class FrontendTemplateWiringTest(unittest.TestCase):
-    """组件模板里的事件处理器必须在本组件 <script setup> 中定义。
+class FrontendEventHandlerWiringTest(unittest.TestCase):
+    """Lit 模板里 `@event=${this.#handler}` 引用的处理器必须在同一模块中定义。
 
-    历史故障：任务列表（Tasks.vue）在拆分模块后漏了 taskActions 的 import，
+    历史故障（Vue 时期）：任务列表在拆分模块后漏了 taskActions 的 import，
     `@stop="askStop"` 等绑定解析为 undefined，点击"停止/重启/日志"毫无反应；
-    这类断裂不会报构建错误，只有真机点击才暴露。
+    这类断裂不会报构建错误，只有真机点击才暴露。同样的风险在 Lit 下依然存在。
     """
 
-    SRC = app.WEBUI_DIR / "frontend" / "src"
-    IMPORT_NAMED = re.compile(r"import\s*\{([^}]*)\}\s*from")
-    IMPORT_DEFAULT = re.compile(r"import\s+([A-Za-z_$][\w$]*)\s*(?:,|from)")
-    DEFINITION = re.compile(r"(?:const|let|var|function|class)\s+([A-Za-z_$][\w$]*)")
-    DESTRUCTURE = re.compile(r"(?:const|let|var)\s*\{([^}]*)\}")
+    SRC = app.WEBUI_DIR / "frontend"
+    # 只检查「整个绑定就是一个 this.<name>」的写法；内联箭头函数由浏览器直接解析。
+    BINDING = re.compile(r"@[\w.:-]+=\$\{\s*this\.(#?[A-Za-z_$][\w$]*)\s*\}")
 
-    def _defined_names(self, script: str) -> set[str]:
-        names = set(self.DEFINITION.findall(script))
-        for block in self.IMPORT_NAMED.findall(script):
-            names.update(part.split(" as ")[-1].strip() for part in block.split(",") if part.strip())
-        names.update(self.IMPORT_DEFAULT.findall(script))
-        for block in self.DESTRUCTURE.findall(script):
-            names.update(part.split(":")[-1].strip() for part in block.split(",") if part.strip())
-        return names
-
-    def _handler_refs(self, template: str) -> set[str]:
-        refs: set[str] = set()
-        for expression in re.findall(r'@[\w.-]+="([^"]*)"', template):
-            refs.update(re.findall(r"(?<![\w$])([A-Za-z_$][\w$]*)\s*(?=\()", expression))
-            stripped = expression.strip()
-            if re.fullmatch(r"[A-Za-z_$][\w$]*", stripped):
-                refs.add(stripped)
-        return {name for name in refs if not name.startswith("$")}
-
-    def test_component_handlers_are_defined_in_script_setup(self):
+    def test_event_handlers_are_defined_in_the_same_module(self):
         broken: list[str] = []
-        for path in sorted(self.SRC.rglob("*.vue")):
+        for path in sorted(self.SRC.rglob("*.js")):
             text = path.read_text(encoding="utf-8")
-            template = re.search(r"<template>(.*?)</template>", text, re.S)
-            script = re.search(r"<script setup>(.*?)</script>", text, re.S)
-            if not (template and script):
-                continue
-            unknown = self._handler_refs(template.group(1)) - self._defined_names(script.group(1))
-            if unknown:
-                broken.append(f"{path.relative_to(self.SRC)}: {sorted(unknown)}")
+            for name in sorted(set(self.BINDING.findall(text))):
+                if not re.search(re.escape(name) + r"\s*[=(]", text):
+                    broken.append(f"{path.relative_to(self.SRC)}: {name}")
         self.assertEqual(broken, [])
+
+
+class FrontendModuleGraphTest(unittest.TestCase):
+    """无构建链：import map 与相对模块引用必须都能解析到真实文件。
+
+    壳页面在加载入口模块前用 JS 注入 import map（CDN 优先、vendor 回落），两个 map
+    的声明都在 index.html 的 `#lit-import-maps` JSON 里，这里逐个校验。
+    """
+
+    FRONTEND = app.WEBUI_DIR / "frontend"
+    VENDOR = app.WEBUI_DIR / "vendor"
+    IMPORT_SPEC = re.compile(r'(?:from|import)\s*"([^"]+)"')
+    MAPS_JSON = re.compile(r'<script type="application/json" id="lit-import-maps">(.*?)</script>', re.S)
+
+    def setUp(self):
+        self.shell = app.INDEX_FILE.read_text(encoding="utf-8")
+        match = self.MAPS_JSON.search(self.shell)
+        self.assertIsNotNone(match, "壳页面必须声明 #lit-import-maps")
+        self.maps = json.loads(match.group(1))
+
+    @staticmethod
+    def _maps(spec, exact, prefixes):
+        return spec in exact or any(spec.startswith(prefix) for prefix in prefixes)
+
+    def _bare_specs(self, path):
+        return [s for s in self.IMPORT_SPEC.findall(path.read_text(encoding="utf-8")) if not s.startswith(".")]
+
+    def test_shell_assets_exist(self):
+        self.assertIn('id="app"', self.shell)
+        self.assertIn("./frontend/main.js", self.shell)
+        self.assertIn('"importmap"', self.shell)  # 由引导脚本动态注入
+        self.assertTrue((self.FRONTEND / "main.js").is_file())
+        imports = self.maps["vendor"]["imports"]
+        self.assertTrue(imports, "必须提供 vendor import map")
+        for name, target in imports.items():
+            resolved = (app.WEBUI_DIR / target[2:]).resolve()
+            if target.endswith("/"):
+                self.assertTrue(resolved.is_dir(), f"vendor map {name} -> {target}")
+            else:
+                self.assertTrue(resolved.is_file(), f"vendor map {name} -> {target}")
+
+    def test_cdn_map_uses_https(self):
+        imports = self.maps["cdn"]["imports"]
+        self.assertTrue(imports, "必须提供 cdn import map")
+        for name, target in imports.items():
+            self.assertTrue(target.startswith("https://"), f"cdn map {name} -> {target}")
+
+    def test_relative_imports_resolve(self):
+        for path in self.FRONTEND.rglob("*.js"):
+            text = path.read_text(encoding="utf-8")
+            for spec in self.IMPORT_SPEC.findall(text):
+                if not spec.startswith("."):
+                    continue
+                target = (path.parent / spec).resolve()
+                self.assertTrue(target.is_file(), f"{path.relative_to(app.WEBUI_DIR)} -> {spec}")
+
+    def test_bare_imports_are_mapped(self):
+        # 前端源码只能引用 cdn map 覆盖的裸模块名（CDN 侧由 esm.sh 改写 subgraph）；
+        # vendor 闭包内部还要能靠 vendor map 走通（离线回落路径）。
+        cdn = self.maps["cdn"]["imports"]
+        vendor = self.maps["vendor"]["imports"]
+        vendor_prefixes = [name for name in vendor if name.endswith("/")]
+        for path in self.FRONTEND.rglob("*.js"):
+            for spec in self._bare_specs(path):
+                self.assertTrue(
+                    self._maps(spec, set(cdn), []),
+                    f"{path.relative_to(app.WEBUI_DIR)} -> {spec} 不在 cdn import map 中",
+                )
+        for path in self.VENDOR.rglob("*.js"):
+            for spec in self._bare_specs(path):
+                self.assertTrue(
+                    self._maps(spec, {n for n in vendor if not n.endswith("/")}, vendor_prefixes),
+                    f"{path.relative_to(app.WEBUI_DIR)} -> {spec} 不在 vendor import map 中",
+                )
+
+    def test_service_worker_precaches_the_vendor_fallback(self):
+        # vendor 是离线/CDN 不可达时的回落，SW 必须预缓存它的整份闭包。
+        sw = (app.WEBUI_DIR / "sw.js").read_text(encoding="utf-8")
+        listed = set(re.findall(r'"\./(vendor/[^"]+\.js)"', sw))
+        on_disk = {path.relative_to(app.WEBUI_DIR).as_posix() for path in self.VENDOR.rglob("*.js")}
+        self.assertEqual(listed, on_disk)
 
 
 class TaskPauseResumeDeleteTest(unittest.TestCase):

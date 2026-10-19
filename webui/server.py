@@ -2,6 +2,11 @@
 
 路由只做协议与参数编解码，业务操作一律委托 jobs/files/stats 模块
 （经 ``jobs.xxx`` 运行时查找，便于测试在定义处 patch）。
+
+静态资源分两类：
+- PWA 白名单（``STATIC_FILES``，如 manifest/sw/图标）；
+- 前端源码与依赖目录（``STATIC_PREFIXES``：``/frontend/`` 原生 ESM 应用、
+  ``/vendor/`` 本地 lit@3）——无构建链，源码即产物。
 """
 
 from __future__ import annotations
@@ -31,6 +36,44 @@ STATIC_FILES: dict[str, tuple[str, str]] = {
     "manifest.webmanifest": ("application/manifest+json; charset=utf-8", "no-cache"),
     "sw.js": ("application/javascript; charset=utf-8", "no-cache"),
 }
+
+# 目录型静态资源：前缀 → webui/ 下的目录名。只放行下列后缀，源码目录里的
+# .py / __pycache__ / *.map 等不会被暴露。
+STATIC_PREFIXES: dict[str, tuple[str, str]] = {
+    "/frontend/": ("frontend", "no-cache"),
+    "/vendor/": ("vendor", "public, max-age=604800"),
+}
+
+STATIC_CONTENT_TYPES: dict[str, str] = {
+    ".js": "text/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".html": "text/html; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".webmanifest": "application/manifest+json; charset=utf-8",
+}
+
+
+def resolve_static_tree(path: str) -> tuple[Path, str, str] | None:
+    """把 ``/frontend/…`` ``/vendor/…`` 映射到 webui/ 下的文件（含穿越防护）。"""
+    for prefix, (directory, cache_control) in STATIC_PREFIXES.items():
+        if not path.startswith(prefix):
+            continue
+        relative = path[len(prefix):]
+        if not relative or relative.endswith("/"):
+            return None
+        root = (config.WEBUI_DIR / directory).resolve()
+        candidate = (root / relative).resolve()
+        try:
+            candidate.relative_to(root)
+        except ValueError:
+            return None  # 目录穿越
+        content_type = STATIC_CONTENT_TYPES.get(candidate.suffix.lower())
+        if content_type is None or not candidate.is_file():
+            return None
+        return candidate, content_type, cache_control
+    return None
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -126,6 +169,9 @@ class Handler(BaseHTTPRequestHandler):
                 name = parsed.path.lstrip("/")
                 content_type, cache_control = STATIC_FILES[name]
                 self.send_file(config.WEBUI_DIR / name, content_type, cache_control)
+            elif (tree := resolve_static_tree(parsed.path)) is not None:
+                file_path, content_type, cache_control = tree
+                self.send_file(file_path, content_type, cache_control)
             elif parsed.path == "/api/jobs":
                 self.send_json(HTTPStatus.OK, jobs.list_jobs())
             elif parsed.path == "/api/logs":

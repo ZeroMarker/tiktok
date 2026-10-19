@@ -2,7 +2,7 @@
 
 适用范围：本仓库的「直播录制中心」WebUI（`webui/frontend/`）。Bilibili 独立 WebUI 不在本规范范围内。
 
-本文以现有 Vue 3 页面和样式为基线，供页面设计、组件开发与验收使用。标为「现有」的内容描述当前实现；标为「要求」的内容约束后续新增和改造，不代表现有页面已全部满足。设计值以 [styles.css](../webui/frontend/src/styles.css) 为准，平台配置以 [platforms.js](../webui/frontend/src/config/platforms.js) 为准；变更时同步维护本文。
+本文以现有页面和样式为基线，供页面设计、组件开发与验收使用。标为「现有」的内容描述当前实现；标为「要求」的内容约束后续新增和改造，不代表现有页面已全部满足。前端为原生 Web Components（Lit 3，ESM + import map，**无构建链**）；设计值以 [styles.js](../webui/frontend/styles.js) 为准，平台配置以 [platforms.js](../webui/frontend/config/platforms.js) 为准；变更时同步维护本文。
 
 ## 1. 产品目标与设计原则
 
@@ -135,13 +135,13 @@
 | 确认框 | 最大宽度 440px、内边距 24px、32px 圆角 | 标题说明动作，正文说明对象与影响；提供取消、Escape 和完整焦点管理 |
 | Toast | 默认显示 2500ms；桌面右下、窄屏底部通栏 | 用于短反馈；需要用户持续处理的错误另用常驻提示 |
 
-图标统一通过 [AppIcon.vue](../webui/frontend/src/features/app/AppIcon.vue) 使用，基础尺寸 18px；导航 17px、顶部操作 16px。装饰图标隐藏于辅助技术；仅图标按钮必须保留可访问名称。
+图标统一通过 [app-icon.js](../webui/frontend/components/app-icon.js) 使用，基础尺寸 18px；导航 17px、顶部操作 16px。装饰图标隐藏于辅助技术；仅图标按钮必须保留可访问名称。
 
 ## 6. 状态与交互
 
 ### 6.1 任务与直播状态
 
-现有映射由 [utils.js](../webui/frontend/src/utils.js) 管理；任务生命周期与直播检测结果是两个维度，应并列展示。
+现有映射由 [utils.js](../webui/frontend/utils.js) 管理；任务生命周期与直播检测结果是两个维度，应并列展示。
 
 | 维度 | 数据值 | 显示与语义 |
 | --- | --- | --- |
@@ -226,15 +226,31 @@
 
 ## 10. 开发交付与验收
 
-页面编排位于 `src/views/`，领域组件位于 `src/features/`，共享状态位于 `src/stores/`。新功能优先复用组件、变量、格式化函数和确认／反馈入口；新增共享变量时说明语义并更新本规范。
+页面编排位于 `frontend/views/`，领域组件位于 `frontend/components/`，共享状态位于
+`frontend/stores/`，动作在 `frontend/actions/`。组件基于 Lit 3：`class extends BaseElement`
+（[base.js](../webui/frontend/base.js)）+ `customElements.define()`；响应式属性用
+`static properties`（**不用装饰器**），样式用 `static styles` + `css` 标签模板。
+新功能优先复用组件、变量、格式化函数和确认／反馈入口；新增共享变量时说明语义并更新本规范。
 
-涉及前端代码变更时，按 [README 开发与测试](../README.md#开发与测试) 构建并提交单文件产物：
+### Shadow DOM 与 light DOM 的混用
 
-```bash
-cd webui/frontend
-npm ci
-npm run build
-```
+原则：**要参与父级布局或级联的组件用 light DOM，自包含的组件用 shadow DOM。**
+
+- light DOM 组件（`LightElement`，`frontend/base.js`）：`app-header`、`app-nav`、`app-icon`、
+  `metric-card`、`task-card`、`task-list`、`task-filters`、`task-creation-form`、`file-row`
+  与五个 view。内容落在所在地（`app-root` 的 shadow root）的文档流里，因此祖先选择器与父布局
+  照常生效；它们的样式来自所在地的共享样式表，**不要**给它们写 `static styles`。
+- shadow DOM 组件（默认 `BaseElement`）：`app-root`、`connection-banner`、`global-feedback`、
+  `log-panel`、`file-browser`、`file-group`、`file-toolbar`、`media-player`。它们自带完整样式，
+  无祖先依赖，样式写在各自的 `static styles`。
+
+结构性约定集中在 [styles.js](../webui/frontend/styles.js)：需要「布局透明」的 light DOM 宿主用
+`display:contents`（`app-header`、`app-nav`、`metric-card`、`task-card`、`task-list`、
+`task-filters`、`file-row`、各 view），指标卡位置配色用 `metric-card:nth-child(n) .stat…`。
+新增 light DOM 组件时，把它的宿主显示方式与位置规则一起写进该文件。
+
+前端**没有构建步骤**：改完 `frontend/` 直接刷新页面即可（无需 npm / bundler）。
+lit@3 由 `index.html` 的引导脚本注入 import map：CDN 优先，离线/不可达时回落 `webui/vendor/`。
 
 交付检查：
 
@@ -246,5 +262,6 @@ npm run build
 - [ ] 在 320、440、680、920、1280px 宽度检查布局，并检查断点前后表现。
 - [ ] 长文本、大量任务、长日志不会遮挡操作或导致页面横向溢出。
 - [ ] 键盘操作、焦点、对话框、屏幕阅读语义与减弱动画模式可用。
-- [ ] 修改前端源码后已重新构建 `webui/index.html`，完成与变更相关的检查。
+- [ ] 新增 light DOM 组件时，其宿主显示方式与位置规则已写进 `styles.js`（见上）。
+- [ ] `python3 -m unittest tests.test_webui` 通过（含模块图、import map 与事件绑定检查）。
 - [ ] 规范、界面文案与实际数据口径同步更新。

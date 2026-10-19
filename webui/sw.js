@@ -2,11 +2,16 @@
  * Strategy:
  *  - API requests: never intercepted (auth headers / live data stay network-only)
  *  - Navigation: network-first, falls back to the cached app shell when offline
- *  - Static assets (manifest/icons): stale-while-revalidate
+ *  - Static assets (app modules, manifest/icons): stale-while-revalidate
+ *  - lit 的 CDN（esm.sh）也缓存：联网首访后可离线打开
  * All paths are relative to the SW script, so it works both directly
  * (127.0.0.1:8766/) and behind Caddy's /tiktok/ path stripping.
  */
-const CACHE = "livestream-webui-v5";
+const CACHE = "livestream-webui-v7";
+
+// lit 的 CDN 源（对应 index.html 里 import map 的 cdn 分支）。
+const CDN_ORIGINS = ["https://esm.sh"];
+
 const ASSETS = [
   "./",
   "./manifest.webmanifest",
@@ -15,6 +20,13 @@ const ASSETS = [
   "./icon-192.png",
   "./icon-512.png",
   "./icon-maskable-512.png",
+  // vendor 是离线/CDN 不可达时的回落（index.html 的 import map），必须预缓存整份最小闭包。
+  "./vendor/lit/index.js",
+  "./vendor/lit-element/lit-element.js",
+  "./vendor/lit-html/lit-html.js",
+  "./vendor/lit-html/is-server.js",
+  "./vendor/reactive-element/reactive-element.js",
+  "./vendor/reactive-element/css-tag.js",
 ];
 
 self.addEventListener("install", (event) => {
@@ -46,9 +58,11 @@ self.addEventListener("fetch", (event) => {
   const request = event.request;
   if (request.method !== "GET") return;
   const url = new URL(request.url);
-  if (url.origin !== self.location.origin) return;
+  const sameOrigin = url.origin === self.location.origin;
+  const cdnAsset = CDN_ORIGINS.includes(url.origin);
+  if (!sameOrigin && !cdnAsset) return;
   // Never touch the API: it carries auth data and must always be live.
-  if (url.pathname.includes("/api/")) return;
+  if (sameOrigin && url.pathname.includes("/api/")) return;
 
   if (request.mode === "navigate") {
     event.respondWith(networkFirst(request));

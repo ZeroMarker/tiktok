@@ -20,11 +20,10 @@ Bash 执行这些 `.sh` 文件。Python 主体、WebUI 后端及 Bilibili 登录
 | uv | 创建 Python 环境和安装依赖 | 安装工具，程序运行时不要求 uv 常驻 |
 | systemd、logrotate | 后台服务、日志轮转 | 使用 `systemd/install.sh` 部署时需要；安装脚本不代装运行依赖 |
 | Caddy | 公网反向代理与访问认证 | 可选，配置见下方 WebUI 部分 |
-| Node.js、npm、Vue / Vite | 修改并构建 WebUI 前端 | 仅前端开发需要；可统一使用 Node 22+，包版本由 `webui/frontend/package-lock.json` 锁定 |
 
-前端直接依赖 `vue`；构建依赖 `vite`、`@vitejs/plugin-vue`、`vite-plugin-singlefile`，
-详见 [`package.json`](../webui/frontend/package.json)。仓库已提交 `webui/index.html`
-单文件构建产物，运行 WebUI 无需安装 npm 包或启动 Vite。
+WebUI 前端是**原生 Web Components（Lit 3）**，通过 ESM + import map 运行，运行和修改都
+**不需要 Node.js / npm / bundler**。lit@3 默认从 CDN（esm.sh）加载，离线或 CDN 不可达时
+回落到仓库内 `webui/vendor/` 的最小闭包（见 [ADR 0001](adr/0001-webui-frontend-lit.md)）。
 
 ### Python 安装与环境一致性
 
