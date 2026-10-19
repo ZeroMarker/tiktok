@@ -216,10 +216,19 @@ LIVE_WEBUI_PORT=8766
 RECORDINGS_DIR=/home/ubuntu/tiktok/recordings
 ```
 
-默认服务以 `ubuntu`、`/usr/bin/python3` 运行（单进程模型：录制引擎线程与 WebUI
-同进程），单元内已将 `~/.local/bin` 加入 `PATH`；Python 包仍需由实际解释器可导入，
-使用虚拟环境时按上方「Python 安装与环境一致性」设置覆盖项（旧版 `record.sh`
-包装仅保留给命令行）。
+默认服务以 `ubuntu`、`/usr/bin/python3` 运行，单元内已将 `~/.local/bin` 加入 `PATH`；
+Python 包仍需由实际解释器可导入，使用虚拟环境时按上方「Python 安装与环境一致性」设置
+覆盖项（旧版 `record.sh` 包装仅保留给命令行）。该环境文件由 `livestream-webui.service`
+与 `livestream-recorderd.service` **共用**：`LIVE_WEBUI_HOST/PORT` 只对 WebUI 生效，
+`RECORDINGS_DIR` 两者都需要；控制面 socket 路径可选（默认 `<STATE_DIR>/run/recorderd.sock`）：
+
+```text
+RECORDERD_SOCKET=/home/ubuntu/tiktok/state/run/recorderd.sock
+```
+
+重启语义：`systemctl restart livestream-webui` 不影响录制；`systemctl restart
+livestream-recorderd` 会优雅收尾当前分段并按任务目录恢复全部未暂停任务（见
+[ADR 0002](adr/0002-recorderd-split.md)）。
 
 后端不校验令牌，因此必须保持监听回环地址，并仅在内网、VPN 或带访问控制的反向代理后使用。修改配置后执行：
 

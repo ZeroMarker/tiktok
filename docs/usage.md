@@ -206,16 +206,18 @@ sudo bash systemd/install.sh
 常用维护命令：
 
 ```bash
-systemctl status livestream-webui
-journalctl -u livestream-webui -f
-sudo systemctl restart livestream-webui
+systemctl status livestream-recorderd livestream-webui
+journalctl -u livestream-recorderd -f      # 引擎（录制）日志
+journalctl -u livestream-webui -f          # UI / API 请求日志
+sudo systemctl restart livestream-recorderd   # 重启引擎宿主（会中断并恢复录制）
+sudo systemctl restart livestream-webui       # 重启 UI（不影响录制）
 ```
 
-WebUI 创建的录制任务是服务进程内的引擎线程（单进程模型），任务 ID 仍以
+WebUI 创建的录制任务是 **recorderd 进程**内的引擎线程，任务 ID 仍以
 `livestream-rec-` 开头。查看整体运行与单频道日志：
 
 ```bash
-journalctl -u livestream-webui -f                      # 所有频道（带 [平台:频道] 前缀）
+journalctl -u livestream-recorderd -f                  # 所有频道（带 [平台:频道] 前缀）
 less recordings/logs/tiktok/engine_<任务ID>.log        # 单频道引擎日志
 ```
 
@@ -236,17 +238,23 @@ WebUI 的“最近文件”和磁盘统计均读取 `RECORDINGS_DIR`。修改录
   5 秒——引擎若正阻在网络调用（页面抓取超时可达 20 秒）里，接口不挂起，线程转后台
   自行退出；任务**保留在列表中**显示“已暂停”，启动参数（画质、Cookie 等）留在任务
   目录，随时“继续”按原参数重新拉起。暂停期间不占进程、不检测开播。
-- **继续**：按任务目录 `state/tasks.json` 里保存的启动参数，在服务进程内重建引擎线程
-  （`WEBUI_STATE_DIR` 可覆盖路径；服务单元已放行 `state/` 的写权限）。
-- **开机恢复**：WebUI 启动时自动把目录中所有未暂停的任务恢复为引擎线程；暂停任务保持
-  暂停。因此应通过“删除”永久移除任务——重启服务不会清除任务目录里的记录。
+- **继续**：按任务目录 `state/tasks.json` 里保存的启动参数，在 recorderd 进程内重建引擎线程
+  （`WEBUI_STATE_DIR` 可覆盖路径；两个服务单元都已放行 `state/` 的写权限）。
+- **开机恢复**：`livestream-recorderd` 启动时自动把目录中所有未暂停的任务恢复为引擎线程；
+  暂停任务保持暂停。因此应通过“删除”永久移除任务——重启服务不会清除任务目录里的记录。
 - **删除**：停止该任务（若在运行）并移除任务记录，**不会删除已录制的文件**；录像仍在
   “录制文件”页面可单独删除，删除暂停中的任务同样只改目录。
 
-点击后卡片立刻显示状态并禁用该行操作（读取的是进程内实时状态，刷新不丢）；引擎异常
+点击后卡片立刻显示状态并禁用该行操作（读取的是引擎宿主的实时状态，刷新不丢）；引擎异常
 退出会按 10 秒退避自动重启并计入“重启次数”（等价旧版 Restart=on-failure）。日志页读取
 该任务的引擎日志文件（尾部最多 5000 行）。旧版“每频道一个 systemd 单元 + 终态停止
-（`--collect` 回收后只能登录服务器重建）”的模型已被“单进程 + 暂停/删除”取代。
+（`--collect` 回收后只能登录服务器重建）”的模型已被“进程内任务 + 暂停/删除”取代；
+2026-10 起引擎宿主（recorderd）与 WebUI 也拆成两个服务，**重启 WebUI 不再打断录制**。
+
+**引擎宿主不可达时**：任务列表/概览/日志会显示“部分数据同步失败”（接口 503），
+`/api/health` 里 `recorderd: false`；录制文件页仍可用。排查顺序：
+`systemctl status livestream-recorderd` → `journalctl -u livestream-recorderd -n 50`
+→ `ls -l state/run/recorderd.sock`。
 WebUI 新建录制时可选择画质（原画/1080p/720p/480p），画质由 WebUI 直接传给录制引擎
 （命令行入口经各平台 `record.sh` 等价透传），用于限制检测到的流清晰度；选择“原画”则
 不设上限。文件列表支持点击“播放”在内嵌播放器中

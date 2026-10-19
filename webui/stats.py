@@ -7,7 +7,9 @@ import shutil
 import time
 from pathlib import Path
 
-from webui import config, files, jobs
+from webui import config, control, files
+
+# 概览聚合：任务统计来自录制控制面（recorderd），磁盘与最近文件是本进程的文件系统视图。
 
 
 def system_stats() -> dict[str, object]:
@@ -34,7 +36,7 @@ def system_stats() -> dict[str, object]:
 def overview() -> dict[str, object]:
     root = Path(config.RECORDINGS_DIR)
     usage = shutil.disk_usage(root if root.exists() else config.PROJECT_ROOT)
-    job_list = jobs.list_jobs()
+    job_list = control.list_jobs()
     platforms: dict[str, int] = {}
     for job in job_list:
         platforms[job["platform"]] = platforms.get(job["platform"], 0) + 1

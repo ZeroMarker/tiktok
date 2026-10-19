@@ -19,9 +19,11 @@ from unittest.mock import patch
 
 from webui import app
 from webui import config as app_config
+from webui import control as app_control
 from webui import files as app_files
 from webui import jobs as app_jobs
 from webui import recorder as app_recorder
+from webui import recorderd as app_recorderd
 from webui import stats as app_stats
 
 # 所有用例都在临时任务目录上运行：start_job 会持久化启动参数（state/tasks.json，
@@ -200,7 +202,7 @@ class WebUIHTTPTest(unittest.TestCase):
         self.assertEqual(json.loads(body)["ok"], True)
 
     def test_api_jobs_without_token_is_allowed(self):
-        with patch.object(app_jobs, "list_jobs", return_value=[]):
+        with patch.object(app_control, "list_jobs", return_value=[]):
             status, _, body = self._get("/api/jobs")
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(body), [])
@@ -271,7 +273,7 @@ class WebUIHelpersTest(unittest.TestCase):
         with patch.object(app_jobs, "list_jobs", return_value=existing), \
                 patch.object(app_recorder, "build_engine", side_effect=AssertionError("不应启动引擎")):
             with self.assertRaises(ValueError) as ctx:
-                app.start_job({"platform": "tiktok", "target": " @some.user "})
+                app_jobs.start_job({"platform": "tiktok", "target": " @some.user "})
         self.assertIn("已存在", str(ctx.exception))
         # 重复任务不得真的启动任何线程
         self.assertEqual(self.rec.status(), [])
@@ -283,7 +285,7 @@ class WebUIHelpersTest(unittest.TestCase):
         ]
         with patch.object(app_jobs, "list_jobs", return_value=existing), \
                 patch.object(app_recorder, "build_engine", side_effect=_fake_build()):
-            unit = app.start_job({"platform": "kick", "target": "@some.user"})
+            unit = app_jobs.start_job({"platform": "kick", "target": "@some.user"})
         self.assertTrue(unit.startswith("livestream-rec-kick-"))
         self.assertTrue(self.rec.is_running(unit))
         self.assertEqual(self.rec.get_spec(unit)["target"], "@some.user")
@@ -291,29 +293,29 @@ class WebUIHelpersTest(unittest.TestCase):
     def test_start_job_forwards_quality(self):
         with patch.object(app_jobs, "list_jobs", return_value=[]), \
                 patch.object(app_recorder, "build_engine", side_effect=_fake_build()):
-            unit = app.start_job({"platform": "tiktok", "target": "@user", "quality": "720p"})
+            unit = app_jobs.start_job({"platform": "tiktok", "target": "@user", "quality": "720p"})
         self.assertEqual(self.rec.get_spec(unit)["quality"], "720p")
 
     def test_twitch_task_normalizes_target_and_rejects_duplicate_channel(self):
         with patch.object(app_recorder, "build_engine", side_effect=_fake_build()):
-            unit = app.start_job({"platform": "twitch", "target": "https://www.twitch.tv/Shroud/?ref=home", "quality": "720p"})
+            unit = app_jobs.start_job({"platform": "twitch", "target": "https://www.twitch.tv/Shroud/?ref=home", "quality": "720p"})
             self.assertEqual(self.rec.get_spec(unit)["target"], "shroud")
             self.assertEqual(self.rec.get_spec(unit)["quality"], "720p")
             self.assertEqual(app_jobs._load_catalog()[unit]["platform"], "twitch")
             with self.assertRaisesRegex(ValueError, "已存在"):
-                app.start_job({"platform": "twitch", "target": "@SHROUD"})
-            app.pause_job(unit)
+                app_jobs.start_job({"platform": "twitch", "target": "@SHROUD"})
+            app_jobs.pause_job(unit)
             with self.assertRaisesRegex(ValueError, "处于暂停"):
-                app.start_job({"platform": "twitch", "target": "https://twitch.tv/shroud"})
-            app.resume_job(unit)
+                app_jobs.start_job({"platform": "twitch", "target": "https://twitch.tv/shroud"})
+            app_jobs.resume_job(unit)
             self.assertTrue(self.rec.is_running(unit))
-            app.delete_job(unit)
+            app_jobs.delete_job(unit)
             self.assertNotIn(unit, app_jobs._load_catalog())
 
     def test_twitch_vod_rejected_before_engine_start(self):
         with patch.object(app_recorder, "build_engine", side_effect=AssertionError("不应启动")):
             with self.assertRaises(ValueError):
-                app.start_job({"platform": "twitch", "target": "https://www.twitch.tv/videos/12345"})
+                app_jobs.start_job({"platform": "twitch", "target": "https://www.twitch.tv/videos/12345"})
 
     def test_twitch_recorder_builds_unified_engine(self):
         unit = app.unit_name("twitch", "shroud")
@@ -327,14 +329,14 @@ class WebUIHelpersTest(unittest.TestCase):
     def test_start_job_defaults_to_best_quality(self):
         with patch.object(app_jobs, "list_jobs", return_value=[]), \
                 patch.object(app_recorder, "build_engine", side_effect=_fake_build()):
-            unit = app.start_job({"platform": "tiktok", "target": "@user"})
+            unit = app_jobs.start_job({"platform": "tiktok", "target": "@user"})
         self.assertEqual(self.rec.get_spec(unit)["quality"], "best")
 
     def test_start_job_rejects_invalid_quality(self):
         with patch.object(app_jobs, "list_jobs", return_value=[]), \
                 patch.object(app_recorder, "build_engine", side_effect=AssertionError("不应启动")):
             with self.assertRaises(ValueError):
-                app.start_job({"platform": "tiktok", "target": "@user", "quality": "4k"})
+                app_jobs.start_job({"platform": "tiktok", "target": "@user", "quality": "4k"})
         self.assertEqual(self.rec.status(), [])
 
     def test_recent_files_uses_configured_recordings_directory(self):
@@ -361,7 +363,7 @@ class WebUIHelpersTest(unittest.TestCase):
             {"platform": "tiktok", "state": "failed", "live": "offline"},
         ]
         with (
-            patch.object(app_jobs, "list_jobs", return_value=jobs),
+            patch.object(app_control, "list_jobs", return_value=jobs),
             patch.object(app_files, "list_files", return_value={"total": 0, "offset": 0, "files": []}),
             patch.object(app_stats, "system_stats", return_value={"load": [0.1, 0.2, 0.3], "mem_total": 1000, "mem_available": 500}),
         ):
@@ -440,7 +442,7 @@ class WebUIHelpersTest(unittest.TestCase):
             path.write_text("".join(f"line{i}\n" for i in range(10)), encoding="utf-8")
             with patch.object(app_config, "RECORDINGS_DIR", directory), \
                     patch.object(app_jobs, "_recorder", _spec_recorder(unit, "tiktok")):
-                tail = app.job_logs(unit, tail=4)
+                tail = app_jobs.job_logs(unit, tail=4)
             self.assertEqual(tail.splitlines(), ["line6", "line7", "line8", "line9"])
 
     def test_job_logs_clamps_tail_and_handles_missing(self):
@@ -451,27 +453,27 @@ class WebUIHelpersTest(unittest.TestCase):
             path.write_text("".join(f"l{i}\n" for i in range(6000)), encoding="utf-8")
             with patch.object(app_config, "RECORDINGS_DIR", directory), \
                     patch.object(app_jobs, "_recorder", _spec_recorder(unit, "tiktok")):
-                tail = app.job_logs(unit, tail=999999)  # 上限 5000 行
+                tail = app_jobs.job_logs(unit, tail=999999)  # 上限 5000 行
             self.assertEqual(len(tail.splitlines()), 5000)
             self.assertTrue(tail.endswith("l5999\n"))
         # 校验失败 / 无日志文件
         with self.assertRaises(ValueError):
-            app.job_logs("evil.service")
+            app_jobs.job_logs("evil.service")
         with patch.object(app_jobs, "_recorder", _spec_recorder(app.unit_name("kick", "x"), "kick")):
-            self.assertEqual(app.job_logs(app.unit_name("kick", "x")), "")
+            self.assertEqual(app_jobs.job_logs(app.unit_name("kick", "x")), "")
 
     def test_restart_job_requires_running_task(self):
         unit = app.unit_name("tiktok", "chan")
         with self.assertRaises(ValueError):
-            app.restart_job("../../evil")
+            app_jobs.restart_job("../../evil")
         with self.assertRaises(RuntimeError):
-            app.restart_job(unit)  # 未运行（含暂停中）
+            app_jobs.restart_job(unit)  # 未运行（含暂停中）
 
     def test_restart_job_respawns_thread(self):
         unit = app.unit_name("tiktok", "chan")
         with patch.object(app_recorder, "build_engine", side_effect=_fake_build()):
             self.rec.start(unit, {"platform": "tiktok", "target": "chan", "quality": "best"})
-            app.restart_job(unit)
+            app_jobs.restart_job(unit)
         self.assertTrue(self.rec.is_running(unit))
         status = self.rec.status()
         self.assertEqual(status[0]["unit"], unit)
@@ -504,7 +506,7 @@ class WebUIHelpersTest(unittest.TestCase):
     def test_files_api_and_overview_platforms(self):
         jobs = [{"platform": "tiktok", "state": "active"}, {"platform": "tiktok", "state": "failed"}]
         with (
-            patch.object(app_jobs, "list_jobs", return_value=jobs),
+            patch.object(app_control, "list_jobs", return_value=jobs),
             patch.object(app_files, "list_files", return_value={"total": 0, "offset": 0, "files": []}),
             patch.object(app_stats, "system_stats", return_value={"load": [0.1, 0.2, 0.3], "mem_total": 1000, "mem_available": 500}),
         ):
@@ -807,13 +809,13 @@ class TaskPauseResumeDeleteTest(unittest.TestCase):
         return {"platform": "tiktok", "target": "chan", "quality": "720p", "cookie_file": "", "paused": False}
 
     def test_pause_stops_thread_and_persists_spec(self):
-        app.start_job({"platform": "tiktok", "target": "chan", "quality": "720p"})
-        app.pause_job(self.UNIT)
+        app_jobs.start_job({"platform": "tiktok", "target": "chan", "quality": "720p"})
+        app_jobs.pause_job(self.UNIT)
         self.assertFalse(self.rec.is_running(self.UNIT))
         self.assertNotIn(self.UNIT, self.rec.running_units())
         # 暂停后线程已停：仍能从任务目录列出，且状态为 paused
         with patch.object(app_jobs, "_recorder", _empty_recorder()):
-            jobs_list = app.list_jobs()
+            jobs_list = app_jobs.list_jobs()
         self.assertEqual(
             [(job["unit"], job["state"], job["live"]) for job in jobs_list],
             [(self.UNIT, "paused", "paused")],
@@ -825,7 +827,7 @@ class TaskPauseResumeDeleteTest(unittest.TestCase):
         self.catalog_file.write_text(
             json.dumps({self.UNIT: {**self._spec(), "paused": True}}), encoding="utf-8"
         )
-        unit = app.resume_job(self.UNIT)
+        unit = app_jobs.resume_job(self.UNIT)
         self.assertEqual(unit, self.UNIT)
         self.assertTrue(self.rec.is_running(unit))
         spec = self.rec.get_spec(unit)
@@ -834,9 +836,9 @@ class TaskPauseResumeDeleteTest(unittest.TestCase):
 
     def test_pause_recovers_arguments_from_runtime_when_catalog_is_empty(self):
         """任务目录缺失记录时（外部创建/旧数据），暂停从运行时反推参数。"""
-        app.start_job({"platform": "tiktok", "target": "chan", "quality": "480p"})
+        app_jobs.start_job({"platform": "tiktok", "target": "chan", "quality": "480p"})
         self.catalog_file.write_text("{}", encoding="utf-8")  # 目录被清空
-        app.pause_job(self.UNIT)
+        app_jobs.pause_job(self.UNIT)
         spec = self._catalog()[self.UNIT]
         self.assertEqual(
             (spec["platform"], spec["target"], spec["quality"], spec["paused"]),
@@ -844,29 +846,29 @@ class TaskPauseResumeDeleteTest(unittest.TestCase):
         )
 
     def test_delete_stops_running_thread_and_drops_record(self):
-        app.start_job({"platform": "tiktok", "target": "chan"})
-        app.delete_job(self.UNIT)
+        app_jobs.start_job({"platform": "tiktok", "target": "chan"})
+        app_jobs.delete_job(self.UNIT)
         self.assertFalse(self.rec.is_running(self.UNIT))
         self.assertEqual(self._catalog(), {})
         with patch.object(app_jobs, "_recorder", _empty_recorder()):
-            self.assertEqual(app.list_jobs(), [])
+            self.assertEqual(app_jobs.list_jobs(), [])
 
     def test_deleting_paused_task_keeps_recordless_state(self):
         self.catalog_file.write_text(
             json.dumps({self.UNIT: {**self._spec(), "paused": True}}), encoding="utf-8"
         )
-        app.delete_job(self.UNIT)
+        app_jobs.delete_job(self.UNIT)
         self.assertEqual(self._catalog(), {})
 
     def test_pause_rejects_task_that_is_not_running(self):
         with self.assertRaises(ValueError):
-            app.pause_job(self.UNIT)
+            app_jobs.pause_job(self.UNIT)
         self.assertFalse(self.catalog_file.exists())
 
     def test_resume_rejects_task_that_is_not_paused(self):
         self.catalog_file.write_text(json.dumps({self.UNIT: self._spec()}), encoding="utf-8")
         with self.assertRaises(ValueError):
-            app.resume_job(self.UNIT)
+            app_jobs.resume_job(self.UNIT)
         self.assertFalse(self.rec.is_running(self.UNIT))
 
     def test_start_rejects_duplicate_of_paused_task(self):
@@ -874,13 +876,13 @@ class TaskPauseResumeDeleteTest(unittest.TestCase):
             json.dumps({self.UNIT: {**self._spec(), "paused": True}}), encoding="utf-8"
         )
         with self.assertRaises(ValueError) as ctx:
-            app.start_job({"platform": "tiktok", "target": " CHAN ", "quality": "best"})
+            app_jobs.start_job({"platform": "tiktok", "target": " CHAN ", "quality": "best"})
         self.assertIn("暂停", str(ctx.exception))
         self.assertEqual(self.rec.status(), [])
 
     def test_restore_respawns_missing_nonpaused_task(self):
         self.catalog_file.write_text(json.dumps({self.UNIT: self._spec()}), encoding="utf-8")
-        restored, failed = app.restore_jobs()
+        restored, failed = app_jobs.restore_jobs()
         self.assertEqual(restored, [self.UNIT])
         self.assertEqual(failed, {})
         self.assertTrue(self.rec.is_running(self.UNIT))
@@ -895,13 +897,13 @@ class TaskPauseResumeDeleteTest(unittest.TestCase):
         self.catalog_file.write_text(json.dumps(catalog), encoding="utf-8")
         with patch.object(app_recorder, "build_engine", side_effect=AssertionError("不应启动")):
             self.rec.start(self.UNIT, self._spec())  # 已在运行
-            restored, failed = app.restore_jobs()
+            restored, failed = app_jobs.restore_jobs()
         self.assertEqual((restored, failed), ([], {}))
 
     def test_restore_failure_does_not_delete_catalog(self):
         self.catalog_file.write_text(json.dumps({self.UNIT: self._spec()}), encoding="utf-8")
         with patch.object(self.rec, "start", side_effect=RuntimeError("启动失败: nope")):
-            restored, failed = app.restore_jobs()
+            restored, failed = app_jobs.restore_jobs()
         self.assertEqual(restored, [])
         self.assertIn("nope", failed[self.UNIT])
         self.assertIn(self.UNIT, self._catalog())
@@ -910,14 +912,14 @@ class TaskPauseResumeDeleteTest(unittest.TestCase):
         # unit_name 由 (platform, target) 决定：目录里放一个名字对不上的记录必须失败且保留记录。
         other = app.unit_name("tiktok", "different")
         self.catalog_file.write_text(json.dumps({other: self._spec()}), encoding="utf-8")
-        restored, failed = app.restore_jobs()
+        restored, failed = app_jobs.restore_jobs()
         self.assertEqual(restored, [])
         self.assertIn("不匹配", failed[other])
         self.assertIn(other, self._catalog())
 
     def test_corrupt_catalog_does_not_break_listing(self):
         self.catalog_file.write_text("{ not json", encoding="utf-8")
-        self.assertEqual(app.list_jobs(), [])
+        self.assertEqual(app_jobs.list_jobs(), [])
 
 
 def _empty_recorder() -> app_recorder.Recorder:
@@ -925,21 +927,21 @@ def _empty_recorder() -> app_recorder.Recorder:
 
 
 class TaskControlHTTPTest(unittest.TestCase):
-    """任务控制接口的路由（暂停/继续/删除任务，以及已移除的 /api/stop）。"""
+    """任务控制接口的路由（转发到录制控制面 control，以及已移除的 /api/stop）。"""
 
     def test_delete_task_route_dispatches_to_delete_job(self):
-        with patch.object(app_jobs, "delete_job") as mocked:
+        with patch.object(app_control, "delete_job") as mocked:
             status, _ = WebUIHTTPTest()._post("/api/delete-task", {"unit": "u.service"})
         self.assertEqual(status, 200)
         mocked.assert_called_once_with("u.service")
 
     def test_pause_and_resume_routes_dispatch(self):
         handler = WebUIHTTPTest()
-        with patch.object(app_jobs, "pause_job") as paused:
+        with patch.object(app_control, "pause_job") as paused:
             status, _ = handler._post("/api/pause", {"unit": "u.service"})
             self.assertEqual(status, 200)
             paused.assert_called_once_with("u.service")
-        with patch.object(app_jobs, "resume_job", return_value="new.service") as resumed:
+        with patch.object(app_control, "resume_job", return_value="new.service") as resumed:
             status, body = handler._post("/api/resume", {"unit": "u.service"})
         self.assertEqual(status, 200)
         resumed.assert_called_once_with("u.service")
@@ -950,6 +952,143 @@ class TaskControlHTTPTest(unittest.TestCase):
         status, body = WebUIHTTPTest()._post("/api/stop", {"unit": "u.service"})
         self.assertEqual(status, 404)
         self.assertEqual(json.loads(body), {"error": "not found"})
+
+
+class ControlPlaneTest(unittest.TestCase):
+    """录制控制面闭环：recorderd（unix socket 上的 HTTP）↔ WebUI 的 control 客户端。
+
+    这里不碰真实引擎：Recorder 用假引擎工厂，任务目录与 socket 都在临时目录里。
+    """
+
+    def setUp(self):
+        base = Path(tempfile.mkdtemp(prefix="webui_control_"))
+        self.addCleanup(shutil.rmtree, base, ignore_errors=True)
+        for target, value in (
+            ("STATE_DIR", base),
+            ("CATALOG_FILE", base / "tasks.json"),
+            ("RECORDERD_SOCKET", str(base / "run" / "recorderd.sock")),
+        ):
+            patcher = patch.object(app_config, target, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.rec = app_recorder.Recorder(restart_backoff=0.05)
+        rec_patcher = patch.object(app_jobs, "_recorder", self.rec)
+        rec_patcher.start()
+        self.addCleanup(rec_patcher.stop)
+        build_patcher = patch.object(app_recorder, "build_engine", side_effect=_fake_build())
+        build_patcher.start()
+        self.addCleanup(build_patcher.stop)
+        self.addCleanup(self.rec.shutdown, 2)
+
+        self.server = app_recorderd.UnixHTTPServer(
+            app_recorderd.prepare_socket_path(), app_recorderd.Handler
+        )
+        self.addCleanup(self.server.server_close)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.addCleanup(self.server.shutdown)
+
+    def _wait_running(self, unit: str) -> None:
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            if any(job["unit"] == unit and job["substate"] == "running" for job in app_jobs.list_jobs()):
+                return
+            time.sleep(0.01)
+        self.fail(f"{unit} 未进入 running")
+
+    def test_health_and_jobs_round_trip(self):
+        self.assertTrue(app_control.health())
+        self.assertEqual(app_control.list_jobs(), [])
+        unit = app_control.start_job({"platform": "tiktok", "target": "chan", "quality": "720p"})
+        self._wait_running(unit)
+        jobs_list = app_control.list_jobs()
+        self.assertEqual([job["unit"] for job in jobs_list], [unit])
+        self.assertEqual(jobs_list[0]["quality"], "720p")
+        # 控制面状态与库内直读同形（memory/pid 属进程级实时值，不参与比较）
+        direct = app_jobs.list_jobs()
+        self.assertEqual(list(jobs_list[0].keys()), list(direct[0].keys()))
+        self.assertEqual(jobs_list[0]["unit"], direct[0]["unit"])
+        self.assertEqual(jobs_list[0]["substate"], direct[0]["substate"])
+
+    def test_pause_resume_restart_delete_round_trip(self):
+        unit = app_control.start_job({"platform": "tiktok", "target": "chan"})
+        self._wait_running(unit)
+
+        app_control.pause_job(unit)
+        paused = [job for job in app_control.list_jobs() if job["unit"] == unit]
+        self.assertEqual([job["state"] for job in paused], ["paused"])
+
+        self.assertEqual(app_control.resume_job(unit), unit)
+        self._wait_running(unit)
+
+        app_control.restart_job(unit)
+        self._wait_running(unit)
+
+        app_control.delete_job(unit)
+        self.assertEqual(app_control.list_jobs(), [])
+        # 暂停/删除都落在任务目录上（控制面独占写入）
+        self.assertEqual(json.loads(app_config.CATALOG_FILE.read_text(encoding="utf-8")), {})
+
+    def test_validation_errors_surface_as_messages(self):
+        with self.assertRaises(RuntimeError) as ctx:
+            app_control.start_job({"platform": "nope", "target": "chan"})
+        self.assertIn("不支持的平台", str(ctx.exception))
+        with self.assertRaises(RuntimeError) as ctx:
+            app_control.pause_job("../../evil")
+        self.assertIn("任务名称无效", str(ctx.exception))
+
+    def test_logs_round_trip(self):
+        unit = app_control.start_job({"platform": "tiktok", "target": "chan"})
+        self._wait_running(unit)
+        log_path = app_recorder.engine_log_path(str(app_config.RECORDINGS_DIR), "tiktok", unit)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text("第一行\n第二行\n", encoding="utf-8")
+        self.assertEqual(app_control.job_logs(unit, tail=1), "第二行\n")
+
+    def test_missing_socket_means_unavailable(self):
+        with patch.object(app_config, "RECORDERD_SOCKET", "/nonexistent/recorderd.sock"):
+            self.assertFalse(app_control.health())
+            with self.assertRaises(app_control.ControlUnavailable):
+                app_control.list_jobs()
+            with self.assertRaises(app_control.ControlUnavailable):
+                app_control.pause_job("u.service")
+
+
+class WebUIDegradedTest(unittest.TestCase):
+    """recorderd 不可达时：任务/概览 503、文件与健康检查照常（前端逐模块降级）。"""
+
+    def setUp(self):
+        base = Path(tempfile.mkdtemp(prefix="webui_degraded_"))
+        self.addCleanup(shutil.rmtree, base, ignore_errors=True)
+        self.recordings = base / "recordings"
+        self.recordings.mkdir()
+        for target, value in (
+            ("RECORDERD_SOCKET", str(base / "nope.sock")),
+            ("RECORDINGS_DIR", str(self.recordings)),
+        ):
+            patcher = patch.object(app_config, target, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_jobs_and_overview_report_service_unavailable(self):
+        status, _, body = WebUIHTTPTest()._get("/api/jobs")
+        self.assertEqual(status, 503)
+        self.assertIn("录制服务不可用", json.loads(body)["error"])
+        status, _, body = WebUIHTTPTest()._get("/api/overview")
+        self.assertEqual(status, 503)
+        self.assertIn("录制服务不可用", json.loads(body)["error"])
+
+    def test_control_posts_report_service_unavailable(self):
+        status, body = WebUIHTTPTest()._post("/api/pause", {"unit": "u.service"})
+        self.assertEqual(status, 503)
+        self.assertIn("录制服务不可用", json.loads(body)["error"])
+
+    def test_files_and_health_still_serve(self):
+        status, _, body = WebUIHTTPTest()._get("/api/health")
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body), {"ok": True, "recorderd": False})
+        status, _, body = WebUIHTTPTest()._get("/api/files")
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["files"], [])
 
 
 if __name__ == "__main__":
@@ -995,7 +1134,7 @@ class SlowWindDownPauseTest(unittest.TestCase):
                     break
                 time.sleep(0.01)
             started = time.monotonic()
-            app.pause_job(unit, timeout=0.2)  # 短 join
+            app_jobs.pause_job(unit, timeout=0.2)  # 短 join
             elapsed = time.monotonic() - started
         self.assertLess(elapsed, 2.0, "暂停被慢收尾阻塞")
         self.assertFalse(self.rec.is_running(unit))          # 立即视为已暂停

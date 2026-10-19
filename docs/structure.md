@@ -21,7 +21,7 @@ scripts/
         └── tiktok_extract.py  # TikTok 取流（curl_cffi 页面 + webcast API；渲染走 browserd）
 ```
 
-每平台的 `record.sh` 最终都 `exec` 到引擎（单进程 WebUI 不经此包装、直接构造引擎；包装保留给命令行手动使用）：
+每平台的 `record.sh` 最终都 `exec` 到引擎（引擎宿主 `webui/recorderd.py` 不经此包装、直接构造引擎；包装保留给命令行手动使用）：
 
 ```bash
 exec python3 "${SCRIPT_DIR}/../../scripts/dlr.py" <platform> "$@"
@@ -96,14 +96,27 @@ WebUI 的最近文件列表扫描 `RECORDINGS_DIR`，不会遍历整个仓库。
 
 ## 控制面
 
-录制执行是**单进程模型**：`webui/app.py`（常驻 systemd 服务 `livestream-webui.service`，
-以 `ubuntu` 运行）在自身进程内调度所有频道——每个任务是一个引擎线程
-（`webui/recorder.py` 驱动 `scripts/dlr/engine.py` 的 `Engine`），不再按频道创建
-systemd 临时单元，也不再经 `record.sh` 包装（包装仅保留给命令行手动使用）。
+录制执行拆成**两个进程**（见 [ADR 0002](adr/0002-recorderd-split.md)）：
 
-后端实现拆分为 `webui/{config,jobs,files,stats,server,recorder}.py`（配置 / 任务编排与
-任务目录 / 录制文件 / 概览聚合 / HTTP 层 / 引擎线程调度），`app.py` 仅为兼容门面与
-直接执行入口；跨模块配置一律经 `config.X` 运行时读取，便于测试在定义处 patch。
+```text
+livestream-recorderd.service   webui/recorderd.py
+  引擎宿主：每个任务是一个引擎线程（webui/recorder.py 驱动 scripts/dlr/engine.py 的
+  Engine）；独占任务目录 state/tasks.json；控制面只监听本地 unix socket
+  （默认 state/run/recorderd.sock，0700 目录 / 0600 socket，可用 RECORDERD_SOCKET 覆盖）
+
+livestream-webui.service       webui/app.py
+  静态资源 + /api/* 编解码；任务状态与控制经 webui/control.py 转发给 recorderd；
+  录制文件（列表/下载/删除）与系统概览是本进程的文件系统视图
+```
+
+因此**重启 WebUI 不再打断录制**（改前端、调端口、升级 UI 都不影响引擎）；反之重启
+recorderd 会按任务目录恢复全部未暂停任务。WebUI 不再按频道创建 systemd 单元，也不经
+`record.sh` 包装（包装仅保留给命令行手动使用）。
+
+后端实现拆分为 `webui/{config,jobs,files,stats,server,recorder,control,recorderd}.py`
+（配置 / 任务编排与任务目录 / 录制文件 / 概览聚合 / WebUI HTTP 层 / 引擎线程调度 /
+控制面客户端 / 控制面服务）；`app.py` 仅为兼容门面与 WebUI 直接执行入口；跨模块配置
+一律经 `config.X` 运行时读取，便于测试在定义处 patch。
 
 前端是**原生 Web Components（Lit 3）**，没有构建链：`webui/index.html` 只是静态壳
 （引导脚本注入 import map + 加载入口模块），源码在 `webui/frontend/`（`components/`、
@@ -117,32 +130,37 @@ systemd 临时单元，也不再经 `record.sh` 包装（包装仅保留给命�
 - **优雅停止**：暂停/删除/停服都会对每个引擎 `request_stop()`——置停止位、中断长等待
   （检测间隔可长达 5 分钟）、立即向 ffmpeg 发终止信号收尾当前分段。控制类操作（暂停/
   删除/重启）短 join 最长 5 秒：引擎若正阻在网络调用（页面抓取超时可达 20s）里，超时
-  即返回、线程后台自行退出并从任务表自摘，API 不挂起；停服（SIGTERM/SIGINT）则并行
-  join 全部引擎（单元 `TimeoutStopSec=60s` 兜底）。命令行路径（dlr.py）仍由引擎信号
-  处理器直接 `os._exit`，停止不会等到超时才生效。
+  即返回、线程后台自行退出并从任务表自摘，API 不挂起；recorderd 停服（SIGTERM/SIGINT）
+  则并行 join 全部引擎（代码上限 45s，单元 `TimeoutStopSec=75s` 兜底）。命令行路径
+  （dlr.py）仍由引擎信号处理器直接 `os._exit`，停止不会等到超时才生效。
 - **崩溃自动重启**：引擎线程内未捕获异常按 10 秒退避重建（等价旧
   `Restart=on-failure RestartSec=10s`），重启计数即任务状态里的 `restarts`。
 - **状态**：`active/running`（检测或录制中）、`active/activating`（构建/退避窗口）、
   `active/deactivating`（停止收尾）、`failed`、`paused`；`live` 由引擎
   `phase == recording 且 ffmpeg 存活` 直接判定，不再扫描 /proc 进程树。
+  状态里的 `pid`/`memory` 描述**引擎宿主进程**（线程与进程共享 RSS，无法按任务切分）。
 
 **任务目录（`state/tasks.json`）**：仍是期望状态与参数持久化——创建任务时写入启动
 参数（平台/频道/画质/Cookie），「暂停」置 `paused=true`（参数留存、线程停止），
-「继续」按记录重建线程，「删除」清理记录。WebUI 启动时把目录作为期望状态恢复所有
-未暂停任务，因此服务器重启后任务会恢复；已暂停任务不会自动启动。单个任务恢复失败
-只写入服务日志，不会删除其目录记录或阻止 WebUI 启动。目录读取失败或损坏时按空目录
-处理，不影响其他功能。`livestream-rec-*.service` 命名仅作为稳定任务 ID 沿用
-（目录键、日志文件名、API 字段），历史数据零迁移。**列表接口** = 运行任务的进程内
-状态快照（`recorder.status()`）拼上目录里 `paused:true` 的条目，两者字段形状一致
+「继续」按记录重建线程，「删除」清理记录。**只有 recorderd 读写它**（单一写者）：
+recorderd 启动时把目录作为期望状态恢复所有未暂停任务，因此它重启后任务会恢复；已暂停
+任务不会自动启动。单个任务恢复失败只写入服务日志，不会删除其目录记录或阻止服务启动。
+目录读取失败或损坏时按空目录处理，不影响其他功能。`livestream-rec-*.service` 命名仅作为
+稳定任务 ID 沿用（目录键、日志文件名、API 字段），历史数据零迁移。**列表接口** = 运行
+任务的状态快照（`recorder.status()`）拼上目录里 `paused:true` 的条目，两者字段形状一致
 （前端零改动）；因此暂停任务重启后仍显示，运行任务的状态永远来自真实线程而非缓存。
-文件为运行产物（已 gitignore），
-路径可用 `WEBUI_STATE_DIR`/`STATE_DIRECTORY` 覆盖；服务单元通过
-`ReadWritePaths=.../state` 放行写入。
+文件为运行产物（已 gitignore），路径可用 `WEBUI_STATE_DIR`/`STATE_DIRECTORY` 覆盖；
+两个服务单元都通过 `ReadWritePaths=.../state` 放行写入（WebUI 侧是为连接 socket）。
+
+**控制面不可达时的降级**：recorderd 宕机不影响 WebUI 启动与静态资源；`/api/jobs`、
+`/api/overview`、`/api/logs` 与控制类 POST 返回 **503**，`/api/files` 照常可用，
+`/api/health` 返回 `{"ok": true, "recorderd": false}` 便于排障。前端据此显示
+「部分数据同步失败 + 重试」。
 
 **任务日志**：每个引擎的输出写入 `recordings/logs/<平台>/engine_<任务ID>.log`
-（WebUI 日志面板读取，尾部上限 5000 行/100KB），同时带 `[平台:频道]` 前缀镜像到
-服务 stdout（`journalctl -u livestream-webui -f` 可整体回看）；ffmpeg 自身日志仍按
-`ffmpeg_record_*.log` 分文件。
+（WebUI 日志面板经控制面读取，尾部上限 5000 行/100KB），同时带 `[平台:频道]` 前缀镜像到
+recorderd 的 stdout（`journalctl -u livestream-recorderd -f` 可整体回看）；ffmpeg 自身
+日志仍按 `ffmpeg_record_*.log` 分文件。
 
 **运行用户**：`livestream-webui.service` 以 `ubuntu` 运行（与 browserd 一致），
 原生使用其 `~/.local` 下的 yt-dlp / curl_cffi；换用户运行时需自行保证依赖可见。

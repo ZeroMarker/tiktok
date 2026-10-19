@@ -1,0 +1,32 @@
+[Unit]
+Description=Live Stream Toolkit recorder control plane (engine host)
+Documentation=file://__PROJECT_ROOT__/docs/adr/0002-recorderd-split.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# 引擎宿主：全部频道的录制引擎线程跑在本进程内（webui/recorderd.py），
+# 任务目录（state/tasks.json）由本进程独占写入，控制面只监听本地 unix socket。
+#
+# 与 WebUI 分离的意义：重启/升级 WebUI 不会打断正在进行的录制；反之本服务重启会
+# 按任务目录恢复全部未暂停任务（下面 TimeoutStopSec 留足 ffmpeg 收尾当前分段的时间）。
+User=ubuntu
+Group=ubuntu
+Environment=HOME=/home/ubuntu
+# systemd 服务默认 PATH 不含 ~/.local/bin，这里直接补齐，保证子进程能找到 yt-dlp 等用户工具。
+Environment=PATH=/home/ubuntu/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+WorkingDirectory=__PROJECT_ROOT__
+# 与 WebUI 共用同一个环境文件（RECORDINGS_DIR 等；LIVE_WEBUI_* 在本服务中不生效）。
+EnvironmentFile=-/etc/default/livestream-webui
+ExecStart=/usr/bin/python3 __PROJECT_ROOT__/webui/recorderd.py
+Restart=on-failure
+RestartSec=5s
+# SIGTERM → 并行 request_stop 全部引擎 → ffmpeg 收尾当前分段（代码内上限 45s）。
+TimeoutStopSec=75s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=__PROJECT_ROOT__/recordings __PROJECT_ROOT__/logs __PROJECT_ROOT__/state
+
+[Install]
+WantedBy=multi-user.target

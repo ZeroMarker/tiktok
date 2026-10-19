@@ -1,29 +1,30 @@
 [Unit]
-Description=Live Stream Toolkit Web UI + single-process recorder
-After=network-online.target
-Wants=network-online.target
+Description=Live Stream Toolkit Web UI (static assets + JSON API)
+Documentation=file://__PROJECT_ROOT__/docs/adr/0002-recorderd-split.md
+# 控制面先起（恢复任务），WebUI 后起；控制面不可达时 WebUI 仍可启动：
+# 任务/概览接口返回 503，前端按「部分数据同步失败」降级。
+After=network-online.target livestream-recorderd.service
+Wants=network-online.target livestream-recorderd.service
 
 [Service]
-# 单进程模型：本服务进程内调度所有频道的录制引擎线程（webui/recorder.py），
-# 以 ubuntu 运行以原生使用其 ~/.local 下的 yt-dlp / curl_cffi（旧版桥接
-# PYTHONPATH 的 record.sh 包装仅保留给命令行手动使用）。
-# 停止时 SIGTERM → 并行 request_stop 所有引擎 → ffmpeg 收尾当前分段 → 退出。
+# WebUI 进程**不托管**录制引擎（见 ADR 0002）：只做静态资源、/api/* 编解码、
+# 录制文件与系统概览；任务状态与控制通过 state/run/recorderd.sock 转发给
+# livestream-recorderd.service。因此重启本服务不会打断任何录制。
 User=ubuntu
 Group=ubuntu
 Environment=HOME=/home/ubuntu
-# systemd 服务默认 PATH 不含 ~/.local/bin（旧版靠 record.sh 包装桥接），
-# 单进程模型不再经包装，这里直接补齐，保证子进程能找到 yt-dlp 等用户工具。
-Environment=PATH=/home/ubuntu/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 WorkingDirectory=__PROJECT_ROOT__
 EnvironmentFile=-/etc/default/livestream-webui
 ExecStart=/usr/bin/python3 __PROJECT_ROOT__/webui/app.py
 Restart=on-failure
 RestartSec=5s
-TimeoutStopSec=60s
+# 没有引擎要收尾：给在途请求留一点时间即可。
+TimeoutStopSec=15s
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ReadWritePaths=__PROJECT_ROOT__/recordings __PROJECT_ROOT__/logs __PROJECT_ROOT__/state
+# recordings：文件列表/下载/删除；state：连接 recorderd 的 unix socket 需要写权限。
+ReadWritePaths=__PROJECT_ROOT__/recordings __PROJECT_ROOT__/state
 
 [Install]
 WantedBy=multi-user.target

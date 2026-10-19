@@ -69,10 +69,20 @@ sudo bash systemd/install.sh
 ```
 
 `install.sh` 同时部署并启用共享浏览器渲染服务 `tiktok-browserd`（TikTok 检测的浏览器
-兜底依赖它；缺失时该兜底自动跳过，轻量检测与 yt-dlp 路径不受影响）。
+兜底依赖它；缺失时该兜底自动跳过，轻量检测与 yt-dlp 路径不受影响），以及录制控制面
+`livestream-recorderd`。
 
-录制执行是**单进程模型**：所有频道的引擎线程运行在 WebUI 进程内（`webui/recorder.py`），
-不再按频道创建 systemd 单元；任务状态、日志、暂停/继续/重启均由进程内调度。
+录制执行是**两进程**（见 [ADR 0002](docs/adr/0002-recorderd-split.md)）：
+
+- `livestream-recorderd.service`（`webui/recorderd.py`）= 引擎宿主：每个任务是它进程内的
+  引擎线程，任务目录 `state/tasks.json` 由它独占写入，控制面只监听本地 unix socket
+  （`state/run/recorderd.sock`）。
+- `livestream-webui.service`（`webui/app.py`）= 静态资源 + `/api/*`，任务状态与控制转发给
+  控制面。
+
+因此**重启 WebUI 不会打断录制**（改前端、调端口、升级 UI 都安全）；**重启 recorderd 会**
+（SIGTERM → 引擎收尾当前分段 → 启动时按任务目录恢复全部未暂停任务），它也是"换引擎代码/
+换参数"时用的动作：`sudo systemctl restart livestream-recorderd`。
 
 WebUI 后端默认监听 `127.0.0.1:8766`，应用层不校验令牌。若通过 Caddy 对外提供服务，必须在反向代理层启用 Basic Auth 或等效访问控制；最小配置片段见[配置说明](docs/configuration.md#caddy-反向代理)。真实的 `/etc/caddy/Caddyfile` 属于服务器配置，不由本仓库安装或覆盖。
 
@@ -95,6 +105,7 @@ WebUI 同时提供 PWA 支持：可安装到桌面/主屏幕，断网时仍可�
 - [使用说明](docs/usage.md)
 - [WebUI 设计规范](docs/webui-design-spec.md)
 - [ADR 0001：WebUI 前端采用 Lit、去掉构建链](docs/adr/0001-webui-frontend-lit.md)
+- [ADR 0002：录制引擎拆为独立控制面 recorderd](docs/adr/0002-recorderd-split.md)
 - [排障](docs/troubleshooting.md)
 - [Bilibili 推流与投稿](bili/README.md)
 - [Bilibili 投稿接口细节](bili/docs/bilibili-upload-api.md)
@@ -138,7 +149,8 @@ WebUI 创建的任务统一使用 `RECORDINGS_DIR`；概览页的磁盘容量与
 
 FFmpeg 录制和轮播默认仅记录 warning/error，关闭常规进度输出；TikTok 转推每
 10 秒保留一条进度心跳，供 60 秒假死看门狗使用。脚本在下次启动时应用这些参数；
-WebUI 内的录制引擎需要重启 WebUI 服务后生效，可等当前录制结束再重启。
+引擎侧的此类改动需要重启 `livestream-recorderd` 服务后生效（重启 WebUI 不影响录制），
+可等当前录制结束再重启。
 
 `systemd/install.sh` 同时安装日志轮转（需要系统已安装 `logrotate`）；已有部署可单独运行：
 

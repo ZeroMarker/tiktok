@@ -35,3 +35,7 @@ STATE_DIR = Path(
     or (PROJECT_ROOT / "state")
 )
 CATALOG_FILE = STATE_DIR / "tasks.json"
+
+# 录制控制面（recorderd）的本地 unix socket。WebUI 与 recorderd 使用同一路径；
+# 默认放 state/run/（生产两个服务都以 ubuntu 运行，0700 目录 + 0600 socket 即够）。
+RECORDERD_SOCKET = os.environ.get("RECORDERD_SOCKET") or str(STATE_DIR / "run" / "recorderd.sock")

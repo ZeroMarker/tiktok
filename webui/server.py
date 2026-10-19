@@ -1,7 +1,9 @@
 """HTTP 层：Handler（JSON API + 静态资源 + 录制文件下载）与服务入口。
 
-路由只做协议与参数编解码，业务操作一律委托 jobs/files/stats 模块
-（经 ``jobs.xxx`` 运行时查找，便于测试在定义处 patch）。
+路由只做协议与参数编解码：
+
+- 任务状态与控制 → 转发给录制控制面 ``control``（→ recorderd 进程，见 ADR 0002）；
+- 录制文件与系统概览 → ``files`` / ``stats``（本进程内的文件系统视图）。
 
 静态资源分两类：
 - PWA 白名单（``STATIC_FILES``，如 manifest/sw/图标）；
@@ -14,15 +16,13 @@ from __future__ import annotations
 import json
 import os
 import re
-import signal
 import subprocess
-import sys
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlparse
 
-from webui import config, files, jobs, stats
+from webui import config, control, files, stats
 
 # Static PWA assets served by the web UI.  Only whitelisted names, served
 # from webui/ with explicit content types.
@@ -173,12 +173,12 @@ class Handler(BaseHTTPRequestHandler):
                 file_path, content_type, cache_control = tree
                 self.send_file(file_path, content_type, cache_control)
             elif parsed.path == "/api/jobs":
-                self.send_json(HTTPStatus.OK, jobs.list_jobs())
+                self.send_json(HTTPStatus.OK, control.list_jobs())
             elif parsed.path == "/api/logs":
                 query = parse_qs(parsed.query)
                 unit = query.get("unit", [""])[0]
                 tail = int(query.get("tail", ["200"])[0] or "200")
-                self.send_json(HTTPStatus.OK, {"logs": jobs.job_logs(unit, tail)})
+                self.send_json(HTTPStatus.OK, {"logs": control.job_logs(unit, tail)})
             elif parsed.path == "/api/files":
                 query = parse_qs(parsed.query)
                 q = query.get("q", [""])[0]
@@ -195,9 +195,11 @@ class Handler(BaseHTTPRequestHandler):
             elif parsed.path == "/api/overview":
                 self.send_json(HTTPStatus.OK, stats.overview())
             elif parsed.path == "/api/health":
-                self.send_json(HTTPStatus.OK, {"ok": True})
+                self.send_json(HTTPStatus.OK, {"ok": True, "recorderd": control.health()})
             else:
                 self.send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
+        except control.ControlUnavailable as exc:
+            self.send_json(HTTPStatus.SERVICE_UNAVAILABLE, {"error": str(exc)})
         except (ValueError, RuntimeError, subprocess.TimeoutExpired) as exc:
             self.send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
 
@@ -208,23 +210,25 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("请求过大")
             data = json.loads(self.rfile.read(length) or b"{}")
             if self.path == "/api/start":
-                self.send_json(HTTPStatus.CREATED, {"unit": jobs.start_job(data)})
+                self.send_json(HTTPStatus.CREATED, {"unit": control.start_job(data)})
             elif self.path == "/api/pause":
-                jobs.pause_job(str(data.get("unit", "")))
+                control.pause_job(str(data.get("unit", "")))
                 self.send_json(HTTPStatus.OK, {"ok": True})
             elif self.path == "/api/resume":
-                self.send_json(HTTPStatus.OK, {"unit": jobs.resume_job(str(data.get("unit", "")))})
+                self.send_json(HTTPStatus.OK, {"unit": control.resume_job(str(data.get("unit", "")))})
             elif self.path == "/api/restart":
-                jobs.restart_job(str(data.get("unit", "")))
+                control.restart_job(str(data.get("unit", "")))
                 self.send_json(HTTPStatus.OK, {"ok": True})
             elif self.path == "/api/delete-task":
-                jobs.delete_job(str(data.get("unit", "")))
+                control.delete_job(str(data.get("unit", "")))
                 self.send_json(HTTPStatus.OK, {"ok": True})
             elif self.path == "/api/delete":
                 files.delete_file(str(data.get("path", "")))
                 self.send_json(HTTPStatus.OK, {"ok": True})
             else:
                 self.send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
+        except control.ControlUnavailable as exc:
+            self.send_json(HTTPStatus.SERVICE_UNAVAILABLE, {"error": str(exc)})
         except (ValueError, RuntimeError, json.JSONDecodeError, subprocess.TimeoutExpired) as exc:
             self.send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
 
@@ -236,27 +240,14 @@ def main() -> None:
     host = os.environ.get("LIVE_WEBUI_HOST", "127.0.0.1")
     port = int(os.environ.get("LIVE_WEBUI_PORT", "8765"))
 
-    # 单进程录制：SIGTERM/SIGINT 必须先让所有引擎的 ffmpeg 收尾当前分段再退出
-    # （等价旧 transient unit 的 KillMode=mixed），否则停服会截断正在写的分段。
-    def _graceful(signum: int, _frame: object) -> None:
-        print(f"收到信号 {signum}，正在并行停止全部录制任务...", flush=True)
-        jobs.shutdown_recorder(timeout=25)
-        os._exit(0)
-
-    signal.signal(signal.SIGTERM, _graceful)
-    signal.signal(signal.SIGINT, _graceful)
-
-    restored, failed = jobs.restore_jobs()
-    if restored:
-        print(f"已恢复 {len(restored)} 个录制任务：{', '.join(restored)}", flush=True)
-    for unit, error in failed.items():
-        print(f"恢复录制任务失败 {unit}：{error}", file=sys.stderr, flush=True)
+    # 本进程不再托管录制引擎（见 ADR 0002）：SIGTERM 直接退出即可，
+    # 不会打断任何录制；引擎由 livestream-recorderd.service 自己收尾。
     server = ThreadingHTTPServer((host, port), Handler)
     print(f"Live Stream WebUI: http://{host}:{port}", flush=True)
+    print(f"录制控制面：{config.RECORDERD_SOCKET}", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
         server.server_close()
-        jobs.shutdown_recorder(timeout=25)

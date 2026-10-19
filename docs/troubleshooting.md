@@ -234,8 +234,26 @@ ls ~/.cache/tiktok-browserd/profile             # 常驻 profile，正常应有�
 
 ```bash
 ps -eo pid,ppid,user,etime,args | grep -E 'dlr.py tiktok|chromium.*headless' | grep -v grep
-pgrep -af 'browserd|webui/app.py'   # 共享渲染服务与录制主进程（单进程模型，无按频道单元）
+pgrep -af 'browserd|recorderd.py|webui/app.py'   # 共享渲染服务 / 引擎宿主 / WebUI
 ```
+
+## WebUI 显示「部分数据同步失败」（任务/概览/日志 503）
+
+两种进程分离后，任务相关接口由引擎宿主 `livestream-recorderd` 提供。它不可达时 WebUI
+仍能打开（静态资源与录制文件页正常），但 `/api/jobs`、`/api/overview`、`/api/logs` 与
+控制类 POST 会返回 503。
+
+```bash
+systemctl status livestream-recorderd          # 是否 active；看退出码与重启次数
+journalctl -u livestream-recorderd -n 50       # 恢复/引擎报错
+ls -l /home/ubuntu/tiktok/state/run/recorderd.sock   # socket 是否存在（0600）
+curl -s http://127.0.0.1:8766/api/health       # {"ok":true,"recorderd":false} 即控制面不可达
+sudo systemctl restart livestream-recorderd    # 会优雅收尾当前分段并按任务目录恢复
+```
+
+常见原因：控制面被停/崩溃（`Restart=on-failure` 会在 5 秒后重试）、`state/` 被外部清理
+导致 socket 消失、任务目录损坏（会被当作空目录，服务仍能起来）。注意 socket 只监听本地
+unix socket，不需要也不应该开放端口。
 
 ### 案例：`mitsuri_nagahama` 间歇性未取到流（2026-10-04）
 
