@@ -12,7 +12,9 @@
 - [x] 录制引擎拆为独立控制面 `livestream-recorderd`（`c743c64`，[ADR 0002](docs/adr/0002-recorderd-split.md)）。
   - 2026-10-19 05:59 UTC 完成切换（当时 0 频道在录，无损）：恢复 45 个任务、保留 8 个暂停；
     实测重启 WebUI 耗时 0.03s，recorderd PID 与全部任务 `started` 不变。
-- [x] 文档：结构/使用/配置/排障/设计规范同步，新增 ADR 0001、0002 与 `docs/structure.md` §流程（4 张 Mermaid 图）。
+- [x] 文档：结构/使用/配置/排障/设计规范同步，新增 ADR 0001、0002、0003 与
+      `docs/structure.md` §流程（4 张 Mermaid 图）；`state/tasks.json` 的“非实时接口”
+      语义已由测试钉住（`test_catalog_edits_do_not_control_running_tasks`）。
 
 ## 待办
 
@@ -32,8 +34,9 @@
 
 - [ ] （可选）任务目录外部改动检测：记录 mtime/内容 hash，发现被外部修改时**只写一条日志**
   提醒「改动将在 recorderd 重启后生效」，不做任何启停。约 30 行。
-  背景：现在文件变更完全不影响运行中的任务（命令式设计，见 structure.md），静默不一致
-  容易让人误以为改文件就能改任务。
+  背景：现在文件变更完全不影响运行中的任务（命令式设计，见
+  [ADR 0003](docs/adr/0003-imperative-task-control.md)），静默不一致容易让人误以为
+  改文件就能改任务。
 
 - [ ] （可选）删除录像文件前询问控制面「该文件是否正在写入」，避免删到正在录的分段。
   背景：删除由 WebUI 直接 `unlink`（`files.delete_file`），recorderd 不知情；

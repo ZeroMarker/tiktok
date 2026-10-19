@@ -152,6 +152,10 @@ recorderd 启动时把目录作为期望状态恢复所有未暂停任务，因�
 文件为运行产物（已 gitignore），路径可用 `WEBUI_STATE_DIR`/`STATE_DIRECTORY` 覆盖；
 两个服务单元都通过 `ReadWritePaths=.../state` 放行写入（WebUI 侧是为连接 socket）。
 
+**它不是实时接口**：控制是命令式的（请求驱动，不做文件对账），所以手改这个文件不会
+启停任何任务；两种控制模型的取舍、以及"手改文件各自会发生什么"见
+[ADR 0003](adr/0003-imperative-task-control.md)。
+
 **控制面不可达时的降级**：recorderd 宕机不影响 WebUI 启动与静态资源；`/api/jobs`、
 `/api/overview`、`/api/logs` 与控制类 POST 返回 **503**，`/api/files` 照常可用，
 `/api/health` 返回 `{"ok": true, "recorderd": false}` 便于排障。前端据此显示

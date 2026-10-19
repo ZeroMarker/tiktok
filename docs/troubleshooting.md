@@ -255,6 +255,24 @@ sudo systemctl restart livestream-recorderd    # 会优雅收尾当前分段并�
 导致 socket 消失、任务目录损坏（会被当作空目录，服务仍能起来）。注意 socket 只监听本地
 unix socket，不需要也不应该开放端口。
 
+### 手改了 `state/tasks.json` 但“没反应”
+
+这是**设计如此**（命令式控制，见 [ADR 0003](adr/0003-imperative-task-control.md)）：
+任务目录只由 recorderd 读写在请求路径上，改了它不会启停任何任务——
+运行中的任务照跑、列表仍按内存里的真实状态显示；新增条目不会拉起引擎；把某条改成
+`paused: true` 只会在**下一次** `livestream-recorderd` 启动恢复时生效（那之前引擎继续录）。
+
+要立即生效：用 WebUI 操作，或直接调控制面
+
+```bash
+curl --unix-socket /home/ubuntu/tiktok/state/run/recorderd.sock -X POST \
+     -H 'Content-Type: application/json' \
+     -d '{"unit":"livestream-rec-tiktok-xxx-xxxxxxxxxx.service"}' http://localhost/pause
+```
+
+另外提醒：目录损坏/被清空时按空目录处理，**下次 recorderd 重启会一条任务都不恢复**，
+所以不要手动清理 `state/`（`.bak` 兜底见 [TODO](../TODO.md)）。
+
 ### 案例：`mitsuri_nagahama` 间歇性未取到流（2026-10-04）
 
 **现象**：WebUI 任务已启动并能读取主播昵称，但起初没有录像文件。引擎日志连续两轮

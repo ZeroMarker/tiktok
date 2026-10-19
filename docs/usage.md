@@ -245,6 +245,18 @@ WebUI 的“最近文件”和磁盘统计均读取 `RECORDINGS_DIR`。修改录
 - **删除**：停止该任务（若在运行）并移除任务记录，**不会删除已录制的文件**；录像仍在
   “录制文件”页面可单独删除，删除暂停中的任务同样只改目录。
 
+> ⚠️ **任务目录不是实时接口**：任务控制是命令式的——**手改 `state/tasks.json` 不会启停任何任务**
+> （运行中的任务照跑、列表按真实状态显示；新增条目不会拉起引擎；`paused:true` 也只在下一次
+> `livestream-recorderd` 启动恢复时生效）。要立即生效请用界面，或直接调控制面：
+>
+> ```bash
+> curl --unix-socket state/run/recorderd.sock -X POST \
+>      -H 'Content-Type: application/json' \
+>      -d '{"unit":"livestream-rec-tiktok-xxx-xxxxxxxxxx.service"}' http://localhost/pause
+> ```
+>
+> 两种控制模型（命令式 vs 文件对账）的取舍见 [ADR 0003](adr/0003-imperative-task-control.md)。
+
 检测回合的状态机、各平台取流顺序、UI 观测链路与新建任务的调用链已画成流程图：
 [项目结构 · 流程](structure.md#流程)。
 

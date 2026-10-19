@@ -823,6 +823,26 @@ class TaskPauseResumeDeleteTest(unittest.TestCase):
         self.assertTrue(self._catalog()[self.UNIT]["paused"])
         self.assertEqual(self._catalog()[self.UNIT]["quality"], "720p")
 
+    def test_catalog_edits_do_not_control_running_tasks(self):
+        """命令式设计（ADR 0003）：手改任务目录不启停任务，只在启动恢复时生效。"""
+        app_jobs.start_job({"platform": "tiktok", "target": "chan", "quality": "720p"})
+
+        # 模拟外部编辑器：把正在运行的任务在目录里标成 paused
+        catalog = self._catalog()
+        catalog[self.UNIT]["paused"] = True
+        self.catalog_file.write_text(json.dumps(catalog), encoding="utf-8")
+
+        # 引擎不受影响；列表仍按真实状态显示（status() 优先，目录条目被跳过）
+        self.assertTrue(self.rec.is_running(self.UNIT))
+        entry = next(job for job in app_jobs.list_jobs() if job["unit"] == self.UNIT)
+        self.assertEqual((entry["state"], entry["live"]), ("active", "waiting"))
+
+        # 等到进程重启（重新按目录恢复）时才按文件处理：paused 的任务不恢复
+        self.rec.shutdown(timeout=2)
+        restored, failed = app_jobs.restore_jobs()
+        self.assertEqual((restored, failed), ([], {}))
+        self.assertFalse(self.rec.is_running(self.UNIT))
+
     def test_resume_respawns_thread_with_saved_arguments(self):
         self.catalog_file.write_text(
             json.dumps({self.UNIT: {**self._spec(), "paused": True}}), encoding="utf-8"
