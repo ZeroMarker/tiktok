@@ -231,7 +231,7 @@ class WebUIHTTPTest(unittest.TestCase):
         self.assertIn('id="app"', shell)
         self.assertIn("./frontend/main.js", shell)
         self.assertIn("importmap", shell)
-        self.assertIn("https://esm.sh/lit@3", shell)
+        self.assertIn("importmap", shell)
         self.assertIn("./vendor/lit/index.js", shell)
 
     def test_webui_has_persistent_snapshot_and_refresh_feedback(self):
@@ -545,7 +545,7 @@ class WebUIHelpersTest(unittest.TestCase):
         for fragment in (
             ".stats{display:grid;grid-template-columns:repeat(4,1fr)",
             ".split{display:grid;grid-template-columns:1.3fr .7fr",
-            "header{display:flex;justify-content:space-between",
+            ".topbar{position:sticky;top:12px;z-index:40;display:flex;justify-content:space-between",
             ".jobs{display:grid;gap:10px}",
             ".file-actions{display:flex",
             ".inline-player",
@@ -695,26 +695,28 @@ class FrontendEventHandlerWiringTest(unittest.TestCase):
 
 
 class FrontendModuleGraphTest(unittest.TestCase):
-    """无构建链：import map 与相对模块引用必须都能解析到真实文件。
+    """无构建链：静态 import map 与相对模块引用必须都能解析到真实文件。
 
-    壳页面在加载入口模块前用 JS 注入 import map（CDN 优先、vendor 回落），两个 map
-    的声明都在 index.html 的 `#lit-import-maps` JSON 里，这里逐个校验。
+    依赖全部来自仓库内 `webui/vendor/`（lit / @material/web / tslib），没有 CDN 分支；
+    裸模块名、相对路径、vendor 包内部引用都在这里校验。
     """
 
     FRONTEND = app.WEBUI_DIR / "frontend"
     VENDOR = app.WEBUI_DIR / "vendor"
-    IMPORT_SPEC = re.compile(r'(?:from|import)\s*"([^"]+)"')
-    MAPS_JSON = re.compile(r'<script type="application/json" id="lit-import-maps">(.*?)</script>', re.S)
+    IMPORT_SPEC = re.compile(r"""(?:from|import)\s*['"]([^'"]+)['"]""")
+    IMPORT_MAP = re.compile(r'<script type="importmap">(.*?)</script>', re.S)
 
     def setUp(self):
         self.shell = app.INDEX_FILE.read_text(encoding="utf-8")
-        match = self.MAPS_JSON.search(self.shell)
-        self.assertIsNotNone(match, "壳页面必须声明 #lit-import-maps")
-        self.maps = json.loads(match.group(1))
+        match = self.IMPORT_MAP.search(self.shell)
+        self.assertIsNotNone(match, "壳页面必须提供静态 import map")
+        self.imports = json.loads(match.group(1))["imports"]
 
     @staticmethod
-    def _maps(spec, exact, prefixes):
-        return spec in exact or any(spec.startswith(prefix) for prefix in prefixes)
+    def _maps(spec, imports):
+        if spec in imports:
+            return True
+        return any(name.endswith("/") and spec.startswith(name) for name in imports)
 
     def _bare_specs(self, path):
         return [s for s in self.IMPORT_SPEC.findall(path.read_text(encoding="utf-8")) if not s.startswith(".")]
@@ -722,25 +724,23 @@ class FrontendModuleGraphTest(unittest.TestCase):
     def test_shell_assets_exist(self):
         self.assertIn('id="app"', self.shell)
         self.assertIn("./frontend/main.js", self.shell)
-        self.assertIn('"importmap"', self.shell)  # 由引导脚本动态注入
         self.assertTrue((self.FRONTEND / "main.js").is_file())
-        imports = self.maps["vendor"]["imports"]
-        self.assertTrue(imports, "必须提供 vendor import map")
-        for name, target in imports.items():
+        for name, target in self.imports.items():
+            self.assertTrue(target.startswith("./vendor/"), f"{name} 必须指向本地 vendor：{target}")
             resolved = (app.WEBUI_DIR / target[2:]).resolve()
             if target.endswith("/"):
-                self.assertTrue(resolved.is_dir(), f"vendor map {name} -> {target}")
+                self.assertTrue(resolved.is_dir(), f"import map {name} -> {target}")
             else:
-                self.assertTrue(resolved.is_file(), f"vendor map {name} -> {target}")
+                self.assertTrue(resolved.is_file(), f"import map {name} -> {target}")
 
-    def test_cdn_map_uses_https(self):
-        imports = self.maps["cdn"]["imports"]
-        self.assertTrue(imports, "必须提供 cdn import map")
-        for name, target in imports.items():
-            self.assertTrue(target.startswith("https://"), f"cdn map {name} -> {target}")
+    def test_no_cdn_references(self):
+        # 纯 vendor：壳与前端源码都不应再出现 CDN 域名。
+        self.assertNotIn("esm.sh", self.shell)
+        for path in self.FRONTEND.rglob("*.js"):
+            self.assertNotIn("esm.sh", path.read_text(encoding="utf-8"), path.name)
 
     def test_relative_imports_resolve(self):
-        for path in self.FRONTEND.rglob("*.js"):
+        for path in [*self.FRONTEND.rglob("*.js"), *self.VENDOR.rglob("*.js")]:
             text = path.read_text(encoding="utf-8")
             for spec in self.IMPORT_SPEC.findall(text):
                 if not spec.startswith("."):
@@ -749,30 +749,26 @@ class FrontendModuleGraphTest(unittest.TestCase):
                 self.assertTrue(target.is_file(), f"{path.relative_to(app.WEBUI_DIR)} -> {spec}")
 
     def test_bare_imports_are_mapped(self):
-        # 前端源码只能引用 cdn map 覆盖的裸模块名（CDN 侧由 esm.sh 改写 subgraph）；
-        # vendor 闭包内部还要能靠 vendor map 走通（离线回落路径）。
-        cdn = self.maps["cdn"]["imports"]
-        vendor = self.maps["vendor"]["imports"]
-        vendor_prefixes = [name for name in vendor if name.endswith("/")]
-        for path in self.FRONTEND.rglob("*.js"):
+        for path in [*self.FRONTEND.rglob("*.js"), *self.VENDOR.rglob("*.js")]:
             for spec in self._bare_specs(path):
                 self.assertTrue(
-                    self._maps(spec, set(cdn), []),
-                    f"{path.relative_to(app.WEBUI_DIR)} -> {spec} 不在 cdn import map 中",
-                )
-        for path in self.VENDOR.rglob("*.js"):
-            for spec in self._bare_specs(path):
-                self.assertTrue(
-                    self._maps(spec, {n for n in vendor if not n.endswith("/")}, vendor_prefixes),
-                    f"{path.relative_to(app.WEBUI_DIR)} -> {spec} 不在 vendor import map 中",
+                    self._maps(spec, self.imports),
+                    f"{path.relative_to(app.WEBUI_DIR)} -> {spec} 不在 import map 中",
                 )
 
-    def test_service_worker_precaches_the_vendor_fallback(self):
-        # vendor 是离线/CDN 不可达时的回落，SW 必须预缓存它的整份闭包。
+    def test_service_worker_precache_entries_exist(self):
         sw = (app.WEBUI_DIR / "sw.js").read_text(encoding="utf-8")
-        listed = set(re.findall(r'"\./(vendor/[^"]+\.js)"', sw))
-        on_disk = {path.relative_to(app.WEBUI_DIR).as_posix() for path in self.VENDOR.rglob("*.js")}
-        self.assertEqual(listed, on_disk)
+        listed = re.findall(r'"(\./[^"]*)"', sw)
+        self.assertIn("./", listed, "应用壳必须预缓存（离线首屏）")
+        for rel in listed:
+            target = (app.WEBUI_DIR / rel[2:]).resolve()
+            self.assertTrue(target.exists(), f"SW 预缓存目标不存在：{rel}")
+
+    def test_material_components_are_vendored(self):
+        material = (self.VENDOR / "material-web").resolve()
+        self.assertTrue(material.is_dir(), "material-web 必须随仓库 vendor")
+        for name in ("button/filled-button.js", "dialog/dialog.js", "select/outlined-select.js"):
+            self.assertTrue((material / name).is_file(), name)
 
 
 class TaskPauseResumeDeleteTest(unittest.TestCase):

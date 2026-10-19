@@ -1,6 +1,7 @@
 // file-browser.js — 录制文件浏览器（搜索、分组、播放、删除、加载更多）。
 import { html, css } from "lit";
 import { BaseElement, emit } from "../base.js";
+import "../material.js";
 import "./file-toolbar.js";
 import "./file-group.js";
 import "./media-player.js";
@@ -82,7 +83,7 @@ export class FileBrowser extends BaseElement {
         ${this.loading && !this.files.length
           ? html`<div class="loading-state" role="status">正在加载文件…</div>`
           : this.error && !this.files.length
-            ? html`<div class="error-state" role="alert"><span>${this.error}</span><button class="mini secondary" type="button" @click=${() => emit(this, "retry")}>重试</button></div>`
+            ? html`<div class="error-state" role="alert"><span>${this.error}</span><md-text-button compact @click=${() => emit(this, "retry")}>重试</md-text-button></div>`
             : !groups.length
               ? html`<div class="empty"><strong>${activeQuery ? "没有匹配的文件" : "暂无录制文件"}</strong><span>${activeQuery ? "请尝试其他关键词" : "录制完成后，文件会显示在这里"}</span></div>`
               : html`
@@ -98,9 +99,9 @@ export class FileBrowser extends BaseElement {
                         @delete=${(event) => emit(this, "delete", event.detail)}
                       ></file-group>
                     `)}
-                    ${this.error ? html`<div class="inline-error" role="alert">${this.error} <button class="mini secondary" type="button" @click=${() => emit(this, "retry")}>重试</button></div>` : ""}
+                    ${this.error ? html`<div class="inline-error" role="alert">${this.error} <md-text-button compact @click=${() => emit(this, "retry")}>重试</md-text-button></div>` : ""}
                     ${this.#hasMore()
-                      ? html`<button class="load-more" type="button" ?disabled=${this.loading} @click=${() => emit(this, "load-more")}>${this.loading ? "加载中…" : `加载更多（${this.files.length}/${this.total}）`}</button>`
+                      ? html`<md-outlined-button class="load-more" ?disabled=${this.loading} @click=${() => emit(this, "load-more")}>${this.loading ? "加载中…" : `加载更多（${this.files.length}/${this.total}）`}</md-outlined-button>`
                       : ""}
                   </div>
                 `}

@@ -1,6 +1,7 @@
 // tasks-view.js — 任务列表（筛选、平台 Chip、按状态分组）。
 import { html } from "lit";
 import { LightElement } from "../base.js";
+import "../material.js";
 import "../components/app-icon.js";
 import "../components/task-filters.js";
 import "../components/task-list.js";
@@ -90,9 +91,12 @@ export class TasksView extends LightElement {
           ${platforms.length
             ? html`<div id="chips" aria-label="平台任务统计">
                 ${platforms.map(([platform, count]) => html`
-                  <button class="chip ${taskState.platformFilter === platform ? "on" : ""}" type="button" aria-pressed=${String(taskState.platformFilter === platform)} @click=${() => { taskState.platformFilter = platform; }}>
-                    ${PLATFORM_ZH[platform] || platform} <b style=${`color:${LOGO_COLORS[platform] || "var(--blue)"}`}>${count}</b>
-                  </button>
+                  <md-filter-chip
+                    .label=${`${PLATFORM_ZH[platform] || platform} ${count}`}
+                    .selected=${taskState.platformFilter === platform}
+                    style=${`--md-filter-chip-selected-label-text-color:${LOGO_COLORS[platform] || "var(--pri)"}`}
+                    @click=${() => { taskState.platformFilter = platform; }}
+                  ></md-filter-chip>
                 `)}
               </div>`
             : ""}
@@ -100,7 +104,7 @@ export class TasksView extends LightElement {
             ? html`<div class="empty">
                 <strong>${hasFilter ? "没有符合条件的任务" : "还没有录制任务"}</strong>
                 <span>${hasFilter ? "请调整搜索关键词或筛选条件" : "创建一个任务后，它会显示在这里"}</span>
-                ${!hasFilter ? html`<button class="secondary" type="button" @click=${() => navigate("/new")}>新建任务</button>` : ""}
+                ${!hasFilter ? html`<md-outlined-button @click=${() => navigate("/new")}>新建任务</md-outlined-button>` : ""}
               </div>`
             : ""}
           ${groups.map((group) => html`

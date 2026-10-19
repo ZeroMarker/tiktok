@@ -1,7 +1,8 @@
 # ADR 0001：WebUI 前端采用 Lit（原生 Web Components），去掉构建链
 
 - 状态：已采纳
-- 日期：2026-10-19（同日修订：lit 改走 CDN + 本地回落；组件改为 shadow/light DOM 混用）
+- 日期：2026-10-19（同日修订：依赖改为纯本地 vendor，移除 CDN；组件 shadow/light DOM 混用；
+  控件层迁移到 @material/web 见 [ADR 0004](0004-material-web-controls.md)）
 - 范围：`webui/`（直播录制中心 WebUI）。`bili/webui/` 本来就是手写原生页面，不受影响。
 
 ## 背景
@@ -33,21 +34,47 @@
 - 删除 npm / Vite / `package.json` / `node_modules` / 构建产物与对应 CI job。
 - 后端新增受控静态目录（`/frontend/`、`/vendor/`）：白名单后缀 + 强制目录边界（防穿越）。
 
-### 2. lit@3：CDN 优先，仓库内 vendor 回落
+### 2. 依赖全部本地 vendor（无 CDN）
 
-`index.html` 在加载入口模块前用一段引导脚本注入 import map（import map 必须在任何 module
-script 之前存在）：
+`index.html` 使用**静态 import map**，所有裸模块名直接指向仓库内 `webui/vendor/`：
 
-- **正常网络**：`{"lit": "https://esm.sh/lit@3.3.3"}` —— esm.sh 会把 lit 内部的裸模块名
-  （`lit-html`、`@lit/reactive-element`、`lit-element/lit-element.js`）改写成绝对 URL，
-  所以 CDN 侧只需一条映射。
-- **离线或 CDN 不可达**（内网/受限网络；探针 1.5 s 超时或 `navigator.onLine === false`）：
-  回落到 `webui/vendor/`（[该目录的说明](../../webui/vendor/README.md)），它是 lit 浏览器运行时闭包的**最小集**，只有 6 个文件
-  （lit 3.3.3 / lit-element 4.2.2 / lit-html 3.3.3 / @lit/reactive-element 2.1.2）。
-- `sw.js` 同时缓存 CDN（`esm.sh`）模块与 vendor 闭包，因此**联网首访后即可离线打开**；
-  vendor 文件列表与磁盘一致由单元测试保证，避免回落路径缺文件。
+```json
+{
+  "lit": "./vendor/lit/index.js",
+  "lit/": "./vendor/lit/",
+  "lit-element": "./vendor/lit-element/lit-element.js",
+  "lit-element/": "./vendor/lit-element/",
+  "lit-html": "./vendor/lit-html/lit-html.js",
+  "lit-html/": "./vendor/lit-html/",
+  "@lit/reactive-element": "./vendor/reactive-element/reactive-element.js",
+  "@lit/reactive-element/": "./vendor/reactive-element/",
+  "@material/web/": "./vendor/material-web/",
+  "tslib": "./vendor/tslib/tslib.es6.js"
+}
+```
 
-这样既用上了 CDN（版本集中、仓库不背依赖），又保住了 README 承诺的离线/内网可用性。
+内容：lit 3.3.3 / lit-element 4.2.2 / lit-html 3.3.3 / @lit/reactive-element 2.1.2、
+`@material/web` 2.5.0（按需组件闭包）、tslib 2.8.1。更新步骤与文件清单见
+[webui/vendor/README.md](../../webui/vendor/README.md)。
+
+**为什么最终不用 CDN。** 早期实现是「CDN（esm.sh）优先 + vendor 回落」，实测发现三个问题：
+
+1. **双份 lit 风险**：esm.sh 会把 Material Web 内部的 `lit`/`lit/decorators.js` 改写成
+   它自己的绝对 URL。虽然 `?external=lit` 对子图有效，但需要为**每个入口**带上参数，
+   漏一个就会出现两份 `LitElement`（两套样式表与控制器，`instanceof` 失效）——这类 bug
+   极难定位。
+2. **请求放大**：esm.sh 每个模块先返回一个转发 stub，真正的 `.mjs` 再请求一次；而后端
+   `BaseHTTPRequestHandler` 默认是 HTTP/1.0（无 keep-alive），模块数一多就是几十条连接。
+3. **可用性与确定性**：内网/被墙时整页打不开；CDN 侧还会按 `^2.1.0` 之类的范围解析传递
+   依赖，版本可能漂移。
+
+本地 vendor 的体积很小（未压缩总计约 1.6 MB，其中只用到的 Material 组件闭包 558 KB），
+换来的是：单一 lit 实例、零跨域请求、离线可用、版本可审计（含 LICENSE）、CI 可校验。
+
+### 2.1 控件层使用 @material/web
+
+见 [ADR 0004](0004-material-web-controls.md)：按钮/输入/下拉/复选/对话框/标签使用 MD3
+组件，外观通过 `--md-sys-color-*` 等 token 桥接；布局与自有卡片保持原样。
 
 ### 3. Shadow DOM 与 light DOM 混用
 
@@ -74,20 +101,19 @@ light DOM 的普通级联，只有真正自包含的部件再开一层 shadow ro
   `state.x = y` 的写法；`base.js` 的 `BaseElement` 订阅 store，变更即 `requestUpdate()`。
 - 事件：组件对外 `dispatchEvent(new CustomEvent(type, {bubbles:true, composed:true}))`，
   跨 shadow 边界直接冒泡到使用方，不做手工中转。
-- 新增网络依赖：lit 从 `esm.sh` 加载（仅首个未缓存访问需要网络；之后由 SW/HTTP 缓存服务）。
-  若部署环境要求完全离线、不接受任何外联，把 `index.html` 的 cdn map 去掉即可（引导脚本
-  会固定走 vendor 分支）。
+- 依赖随仓库提交（含 LICENSE），升级需按 `webui/vendor/README.md` 手动换文件；
+  运行期**不访问公网**，离线/内网可用。
 - 未改动后端 API 与业务逻辑；未修复设计规范 §9 记录的历史文案（`systemd 单元列表`、
   `Journal`、`最长 30 秒`）——仍按规范作为后续验收项。
 
 ## 验证
 
-- `python3 -m unittest tests.test_webui`（71 用例）：静态目录（含穿越防护）、两张 import map
-  （cdn 必须 https；vendor 目标必须存在）、前端源码只引用 cdn 覆盖的裸模块名、vendor 闭包
-  自洽、SW 预缓存列表 = 磁盘 vendor 文件、`@event=${this.#handler}` 同文件定义。
+- `python3 -m unittest tests.test_webui`：静态目录（含穿越防护）、静态 import map 目标全部存在、
+  前端与 vendor 源码的裸模块名都能被映射、相对导入可解析、壳与前端源码不出现 CDN 域名、
+  Material 组件已 vendor、SW 预缓存目标存在、`@event=${this.#handler}` 同文件定义。
 - 无头 Chromium 实拍 `/`、`/#/tasks`、`/#/library`、`/#/new`、`/#/tasks/<unit>` 与 400px 窄屏，
   与改造前一致；控制台无脚本错误。
-- 两条 lit 来源都实测：正常网络注入 `https://esm.sh/lit@3.3.3`；用
-  `--host-resolver-rules="MAP esm.sh 127.0.0.1"` 模拟被墙/离线时注入 vendor map，页面同样正常。
+- 纯 vendor 加载实测：无头浏览器逐条 `import("@material/web/…")` 全部成功；主页面零跨域请求、
+  控制台无脚本错误。
 - `curl` 校验 `/frontend/main.js`、`/vendor/lit/index.js` 以 JS MIME 返回；
   `/frontend/../server.py`、`/vendor/lit/LICENSE`、`/frontend/` 均 404。

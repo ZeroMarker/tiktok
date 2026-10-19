@@ -219,8 +219,9 @@
 
 以下事项仍是后续改造的验收项：
 
-- 确认框已有 dialog 语义、标题关联和 Escape 关闭，尚缺焦点进入、焦点约束与关闭后还原。
-- 平台与画质选择已有 radio 语义，尚缺完整的方向键切换和单选组焦点管理。
+- 确认框已改为 `md-dialog`：焦点进入/约束/关闭后还原与 Escape 由组件提供（2026-10-19 起）。
+- 平台/画质选择改为 `md-filter-chip` 按钮组：Tab 可逐项聚焦、Enter/Space 切换；未实现
+  `radiogroup` 的方向键 roving（组件库无 segmented button，labs 版未 vendor）。
 - 部分字号及紧凑按钮需要复核移动端可读性、触控区域和最终渲染色对比度。
 - 任务详情仍有「systemd 单元列表」「Journal」等历史文案，暂停／重启确认框仍写「最长 30 秒」。
   两处都应按当前模型更新：引擎由 recorderd 托管（不是 systemd 单元、也不再在 WebUI 进程内），
@@ -252,7 +253,15 @@
 新增 light DOM 组件时，把它的宿主显示方式与位置规则一起写进该文件。
 
 前端**没有构建步骤**：改完 `frontend/` 直接刷新页面即可（无需 npm / bundler）。
-lit@3 由 `index.html` 的引导脚本注入 import map：CDN 优先，离线/不可达时回落 `webui/vendor/`。
+
+**控件层**用 @material/web 2.5.0（MD3）：按钮、输入框、下拉、复选框、对话框、筛选标签、
+列表项、进度条都由组件提供，外观通过 `styles.js` 里的 `--md-sys-color-*` / `--md-*` token
+桥接（见 [ADR 0004](adr/0004-material-web-controls.md)）。因此：
+
+- 新增控件优先用 `md-*` 组件，不再手写 `<button>/<input>/<select>`；
+- 组件密度是 MD3 默认值（按钮 40px、输入框 56px），比早期紧凑排版更高，属已知取舍；
+- 展示结构（任务行、文件树、指标卡、日志台、Toast）仍是自有组件与 `.job`/`.stat` 等类。
+依赖由 `index.html` 的静态 import map 指向仓库内 `webui/vendor/`（lit + @material/web + tslib）。
 
 交付检查：
 

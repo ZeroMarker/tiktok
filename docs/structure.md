@@ -120,8 +120,8 @@ recorderd 会按任务目录恢复全部未暂停任务。WebUI 不再按频道�
 
 前端是**原生 Web Components（Lit 3）**，没有构建链：`webui/index.html` 只是静态壳
 （引导脚本注入 import map + 加载入口模块），源码在 `webui/frontend/`（`components/`、
-`views/`、`stores/`、`services/`、`config/`、`actions/`）。lit@3 默认从 CDN（esm.sh）
-加载，离线/不可达时回落到仓库内 `webui/vendor/`（最小闭包）。
+`views/`、`stores/`、`services/`、`config/`、`actions/`）。控件用 @material/web（MD3），
+依赖全部来自仓库内 `webui/vendor/`（lit、material-web、tslib），运行期不访问 CDN。
 `webui/server.py` 把 `/frontend/` 与 `/vendor/` 作为静态资源提供（限白名单后缀并强制
 目录边界），见 [ADR 0001](adr/0001-webui-frontend-lit.md)。
 

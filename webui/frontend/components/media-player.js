@@ -2,6 +2,7 @@
 import { html, css } from "lit";
 import { BaseElement, emit } from "../base.js";
 import { fmtBytes, fileUrl } from "../utils.js";
+import "../material.js";
 
 function fmtDate(timestamp) { return new Date(timestamp * 1000).toLocaleString(); }
 
@@ -25,8 +26,8 @@ export class MediaPlayer extends BaseElement {
         <div class="inline-player-head">
           <span class="player-title" title=${file.path}>${file.name}</span>
           <span class="fmeta">${fmtBytes(file.size)} · ${fmtDate(file.modified)}</span>
-          <a href=${fileUrl(file.path)} download class="mini secondary">下载</a>
-          <button class="mini secondary" type="button" @click=${() => emit(this, "close")}>收起播放器</button>
+          <md-text-button compact href=${fileUrl(file.path)} download>下载</md-text-button>
+          <md-text-button compact @click=${() => emit(this, "close")}>收起播放器</md-text-button>
         </div>
         <video controls autoplay playsinline src=${fileUrl(file.path)} @error=${() => emit(this, "error")}></video>
       </div>

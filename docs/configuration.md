@@ -22,8 +22,8 @@ Bash 执行这些 `.sh` 文件。Python 主体、WebUI 后端及 Bilibili 登录
 | Caddy | 公网反向代理与访问认证 | 可选，配置见下方 WebUI 部分 |
 
 WebUI 前端是**原生 Web Components（Lit 3）**，通过 ESM + import map 运行，运行和修改都
-**不需要 Node.js / npm / bundler**。lit@3 默认从 CDN（esm.sh）加载，离线或 CDN 不可达时
-回落到仓库内 `webui/vendor/` 的最小闭包（见 [ADR 0001](adr/0001-webui-frontend-lit.md)）。
+**不需要 Node.js / npm / bundler**。依赖（lit、@material/web、tslib）全部来自仓库内
+`webui/vendor/`，运行期不访问 CDN（见 [ADR 0001](adr/0001-webui-frontend-lit.md)）。
 
 ### Python 安装与环境一致性
 

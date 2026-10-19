@@ -1,11 +1,12 @@
 // app-header.js — 顶部状态栏（连接状态、时钟、安装、刷新）。
 //
-// light DOM：`.topbar` 是 sticky，必须是 .shell 的直接流子元素；`.offline`/`.degraded`
-// 祖先规则（在 styles.js 里）也需要命中 .status-pill / .dot。
+// light DOM：`.topbar` 是 sticky，必须是 .shell 的直接流子元素。
+// 控件使用 @material/web（md-outlined-button / md-text-button）。
 import { html } from "lit";
 import { LightElement } from "../base.js";
 import { appState } from "../stores/appStore.js";
 import { refreshAll } from "../stores/syncStore.js";
+import "../material.js";
 import "./app-icon.js";
 
 export class AppHeader extends LightElement {
@@ -65,11 +66,12 @@ export class AppHeader extends LightElement {
           <div class="status-pill" title=${this.#statusText()}><div class="online"><i class="dot" aria-hidden="true"></i><span>${this.#connectionText()}</span></div></div>
           <div class="clock-pill" title=${`本地时间 ${this.clock}`}><span>${this.clock}</span></div>
           ${appState.installPrompt
-            ? html`<button class="secondary header-action install" type="button" @click=${this.#install}><app-icon name="download"></app-icon><span>安装应用</span></button>`
+            ? html`<md-text-button @click=${this.#install}><app-icon slot="icon" name="download"></app-icon>安装应用</md-text-button>`
             : ""}
-          <button class="secondary header-action refresh" type="button" ?disabled=${appState.busy} aria-busy=${String(appState.busy)} @click=${refreshAll}>
-            <app-icon name="refresh" class=${appState.busy ? "spinning" : ""}></app-icon><span>${appState.busy ? "同步中…" : "刷新"}</span>
-          </button>
+          <md-outlined-button @click=${refreshAll} ?disabled=${appState.busy} aria-busy=${String(appState.busy)}>
+            <app-icon slot="icon" name="refresh" class=${appState.busy ? "spinning" : ""}></app-icon>
+            ${appState.busy ? "同步中…" : "刷新"}
+          </md-outlined-button>
         </div>
       </header>
     `;

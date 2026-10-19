@@ -276,8 +276,8 @@ WebUI 新建录制时可选择画质（原画/1080p/720p/480p），画质由 Web
 预览任一录制片段（`/api/file` 支持 HTTP Range 拖动进度）。
 WebUI 前端为原生 Web Components（Lit 3），源码在 `webui/frontend/`，以 ESM + import map
 直接运行，**没有构建步骤**（改完刷新页面即可）；`webui/index.html` 是静态壳页面，
-由引导脚本注入 import map。lit@3 默认走 CDN（esm.sh），离线或 CDN 不可达时回落到
-`webui/vendor/`（lit 浏览器运行时最小闭包）。后端 `webui/server.py` 直接把 `frontend/`
+使用静态 import map。依赖（lit、@material/web、tslib）全部来自 `webui/vendor/`，
+运行期不访问 CDN，离线/内网可用。后端 `webui/server.py` 直接把 `frontend/`
 与 `vendor/` 作为静态资源提供。
 
 服务器状态监控页面位于 `https://20070809.xyz/sysmon/`。

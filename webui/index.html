@@ -15,69 +15,35 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="录制中心">
     <!--
-      无构建链：原生 ESM + import map。
-      - lit@3 优先走 CDN（esm.sh 会把 lit 内部的裸模块名改写成绝对 URL），
-        离线或 CDN 不可达（内网/受限网络）时回落到仓库内 vendor/lit 的最小闭包；
-      - 应用源码在 frontend/，由 webui/server.py 直接服务；
-      - 下面的预渲染样式只用于首个模块加载前避免白屏，色彩与 frontend/styles.js 一致。
+      无构建链：原生 ESM + 静态 import map，依赖全部来自仓库内 vendor/（纯本地，无 CDN）。
+      - vendor/lit*         lit@3.3.3 运行时（单一实例，避免双份 LitElement）
+      - vendor/material-web @material/web@2.5.0 组件（Apache-2.0）
+      - vendor/tslib        tslib@2.8.1（Material Web 的运行时辅助）
+      更新步骤见 webui/vendor/README.md；一致性由 tests/test_webui.py 保证。
     -->
     <style>
       html{background:#0b1210}
       body{margin:0;background:#0b1210;color:#b7f4d5;font:14px/1.5 "Google Sans Text","Noto Sans",Inter,ui-sans-serif,system-ui,"PingFang SC","Microsoft YaHei",sans-serif;letter-spacing:0}
     </style>
-    <script type="application/json" id="lit-import-maps">
+    <script type="importmap">
       {
-        "cdn": {
-          "imports": {
-            "lit": "https://esm.sh/lit@3.3.3"
-          }
-        },
-        "vendor": {
-          "imports": {
-            "lit": "./vendor/lit/index.js",
-            "lit-html": "./vendor/lit-html/lit-html.js",
-            "lit-html/": "./vendor/lit-html/",
-            "lit-element": "./vendor/lit-element/lit-element.js",
-            "lit-element/": "./vendor/lit-element/",
-            "@lit/reactive-element": "./vendor/reactive-element/reactive-element.js",
-            "@lit/reactive-element/": "./vendor/reactive-element/"
-          }
+        "imports": {
+          "lit": "./vendor/lit/index.js",
+          "lit/": "./vendor/lit/",
+          "lit-element": "./vendor/lit-element/lit-element.js",
+          "lit-element/": "./vendor/lit-element/",
+          "lit-html": "./vendor/lit-html/lit-html.js",
+          "lit-html/": "./vendor/lit-html/",
+          "@lit/reactive-element": "./vendor/reactive-element/reactive-element.js",
+          "@lit/reactive-element/": "./vendor/reactive-element/",
+          "@material/web/": "./vendor/material-web/",
+          "tslib": "./vendor/tslib/tslib.es6.js"
         }
       }
-    </script>
-    <script>
-      // import map 必须在任何 module script 之前注入，因此入口模块也在这里挂载。
-      (() => {
-        const maps = JSON.parse(document.getElementById("lit-import-maps").textContent);
-        const start = (map) => {
-          const importMap = document.createElement("script");
-          importMap.type = "importmap";
-          importMap.textContent = JSON.stringify(map);
-          document.head.appendChild(importMap);
-          const entry = document.createElement("script");
-          entry.type = "module";
-          entry.src = "./frontend/main.js";
-          document.head.appendChild(entry);
-        };
-        if (!navigator.onLine) {
-          start(maps.vendor); // 离线：直接用仓库内的 vendor
-          return;
-        }
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 1500);
-        fetch(maps.cdn.imports.lit, { cache: "force-cache", signal: controller.signal })
-          .then((response) => {
-            clearTimeout(timer);
-            start(response.ok ? maps.cdn : maps.vendor);
-          })
-          .catch(() => {
-            clearTimeout(timer);
-            start(maps.vendor); // CDN 被墙/超时：回落 vendor
-          });
-      })();
     </script>
   </head>
   <body>
     <div id="app"></div>
+    <script type="module" src="./frontend/main.js"></script>
   </body>
 </html>

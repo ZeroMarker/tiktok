@@ -1,6 +1,7 @@
 // library-view.js — 录制文件库（平台过滤 + 服务端搜索）。
 import { html } from "lit";
 import { LightElement } from "../base.js";
+import "../material.js";
 import "../components/app-icon.js";
 import "../components/file-browser.js";
 import { recordingState, refreshRecordings, loadMoreRecordings } from "../stores/recordingStore.js";
@@ -78,13 +79,13 @@ export class LibraryView extends LightElement {
                 <span class="panel-kicker">按平台/目录浏览，播放、下载或清理</span>
               </div>
             </div>
-            <div class="seg" role="tablist" aria-label="平台过滤">
-              <button class="seg-btn ${this.platformFilter === "all" ? "on" : ""}" type="button" @click=${() => { this.platformFilter = "all"; }}>全部</button>
+            <md-chip-set role="group" aria-label="平台过滤">
+              <md-filter-chip label="全部" .selected=${this.platformFilter === "all"} @click=${() => { this.platformFilter = "all"; }}></md-filter-chip>
               ${PLATFORM_KEYS.map((platform) => html`
-                <button class="seg-btn ${this.platformFilter === platform ? "on" : ""}" type="button" @click=${() => { this.platformFilter = platform; }}>${PLATFORM_ZH[platform] || platform}</button>
+                <md-filter-chip label=${PLATFORM_ZH[platform] || platform} .selected=${this.platformFilter === platform} @click=${() => { this.platformFilter = platform; }}></md-filter-chip>
               `)}
-            </div>
-            <button class="mini secondary" type="button" ?disabled=${recordingState.busy} @click=${this.#loadFiles}>${recordingState.busy ? "加载中…" : "刷新"}</button>
+            </md-chip-set>
+            <md-text-button ?disabled=${recordingState.busy} @click=${this.#loadFiles}>${recordingState.busy ? "加载中…" : "刷新"}</md-text-button>
           </div>
           <file-browser
             .files=${files}

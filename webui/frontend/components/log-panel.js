@@ -1,10 +1,12 @@
 // log-panel.js — 任务日志面板（自动刷新、换行、只显示错误、复制）。
+// 控件：md-checkbox / md-outlined-select / md-text-button。
 import { html, css } from "lit";
 import { BaseElement } from "../base.js";
 import { fetchTaskLogs } from "../stores/taskStore.js";
 import { toast } from "../ui.js";
+import "../material.js";
 
-const TAILS = ["200", "1000", "5000"];
+const TAILS = [["200", "200 行"], ["1000", "1000 行"], ["5000", "5000 行"]];
 
 export class LogPanel extends BaseElement {
   static properties = {
@@ -91,14 +93,14 @@ export class LogPanel extends BaseElement {
     return html`
       <div class="log-console">
         <div class="log-tools">
-          <label><input type="checkbox" .checked=${this.autoLog} @change=${(event) => { this.autoLog = event.target.checked; }}> 自动刷新</label>
-          <select aria-label="日志行数" @change=${(event) => { this.tail = event.target.value; }}>
-            ${TAILS.map((value) => html`<option value=${value} ?selected=${this.tail === value}>${value} 行</option>`)}
-          </select>
-          <button class="mini secondary" type="button" @click=${() => { this.wrap = !this.wrap; }}>${this.wrap ? "关闭换行" : "开启换行"}</button>
-          <button class="mini secondary" type="button" @click=${() => { this.errorsOnly = !this.errorsOnly; }}>${this.errorsOnly ? "全部日志" : "只显示错误"}</button>
-          <button class="mini secondary" type="button" @click=${this.#clear}>清屏</button>
-          <button class="mini secondary" type="button" @click=${this.#copy}>复制日志</button>
+          <label><md-checkbox touch-target="none" .checked=${this.autoLog} @change=${(event) => { this.autoLog = event.target.checked; }}></md-checkbox>自动刷新</label>
+          <md-outlined-select label="行数" .value=${this.tail} @change=${(event) => { this.tail = event.target.value; }}>
+            ${TAILS.map(([value, label]) => html`<md-select-option value=${value}><div slot="headline">${label}</div></md-select-option>`)}
+          </md-outlined-select>
+          <md-text-button compact @click=${() => { this.wrap = !this.wrap; }}>${this.wrap ? "关闭换行" : "开启换行"}</md-text-button>
+          <md-text-button compact @click=${() => { this.errorsOnly = !this.errorsOnly; }}>${this.errorsOnly ? "全部日志" : "只显示错误"}</md-text-button>
+          <md-text-button compact @click=${this.#clear}>清屏</md-text-button>
+          <md-text-button compact @click=${this.#copy}>复制日志</md-text-button>
         </div>
         ${this.loading
           ? html`<div class="loading-state" role="status">正在加载日志…</div>`

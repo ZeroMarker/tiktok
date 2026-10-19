@@ -95,8 +95,8 @@ ssh -L 8765:127.0.0.1:8766 <server>
 然后打开 `http://127.0.0.1:8765`。
 
 WebUI 同时提供 PWA 支持：可安装到桌面/主屏幕，断网时仍可打开界面（任务数据在联网后自动刷新）。
-前端资源（`manifest.webmanifest`、`sw.js`、图标，以及 `frontend/` 应用模块与 `vendor/` 回落）
-都在 `webui/` 目录下，`sw.js` 会预缓存应用壳与 vendor 闭包，配合 Caddy 路径剥离可正常工作。
+前端资源（`manifest.webmanifest`、`sw.js`、图标，以及 `frontend/` 应用模块与 `vendor/` 依赖）
+都在 `webui/` 目录下，`sw.js` 预缓存应用壳、其余模块按需缓存，配合 Caddy 路径剥离可正常工作。
 
 ## 常用文档
 
@@ -107,6 +107,7 @@ WebUI 同时提供 PWA 支持：可安装到桌面/主屏幕，断网时仍可�
 - [ADR 0001：WebUI 前端采用 Lit、去掉构建链](docs/adr/0001-webui-frontend-lit.md)
 - [ADR 0002：录制引擎拆为独立控制面 recorderd](docs/adr/0002-recorderd-split.md)
 - [ADR 0003：任务期望状态用命令式（不做文件对账）](docs/adr/0003-imperative-task-control.md)
+- [ADR 0004：控件层迁移到 Material Web（MD3）](docs/adr/0004-material-web-controls.md)
 - [排障](docs/troubleshooting.md)
 - [Bilibili 推流与投稿](bili/README.md)
 - [Bilibili 投稿接口细节](bili/docs/bilibili-upload-api.md)
@@ -123,10 +124,10 @@ WebUI 同时提供 PWA 支持：可安装到桌面/主屏幕，断网时仍可�
 bash test.sh    # 运行 tests/ 与 bili/tests/ 两套测试
 ```
 
-前端（`webui/frontend/`）是**原生 Web Components + Lit 3**，以 ESM + import map 直接运行，
-没有 npm / bundler / 构建产物：改完源码刷新页面即可，`webui/index.html` 只是静态壳页面
-（由引导脚本注入 import map 并加载入口模块）。lit@3 默认从 CDN（esm.sh）加载，离线或
-CDN 不可达时回落到仓库内 `webui/vendor/` 的最小闭包。
+前端（`webui/frontend/`）是**原生 Web Components + Lit 3 + Material Web**，以 ESM + import map
+直接运行，没有 npm / bundler / 构建产物：改完源码刷新页面即可，`webui/index.html` 是静态壳
+（静态 import map，直接 import 入口模块）。**依赖全部来自仓库内 `webui/vendor/`**（lit、
+@material/web、tslib），运行期不访问任何 CDN，离线/内网可用。
 
 CI（`.github/workflows/checks.yml`）在每次 push / PR 校验：两套单元测试、全部 shell
 脚本语法（`bash -n`）。前端没有构建步骤，模块路径、import map 与 vendor 闭包由单元测试

@@ -1,6 +1,7 @@
 // task-detail-view.js — 任务详情与控制。
 import { html } from "lit";
 import { LightElement } from "../base.js";
+import "../material.js";
 import "../components/app-icon.js";
 import "../components/log-panel.js";
 import { taskState } from "../stores/taskStore.js";
@@ -57,7 +58,7 @@ export class TaskDetailView extends LightElement {
                   <span class="section-icon"><app-icon name="tasks"></app-icon></span>
                   <div><h2>任务详情</h2><span class="panel-kicker">${this.unit}</span></div>
                 </div>
-                <div class="actions"><button class="secondary" type="button" @click=${() => navigate("/tasks")}>返回任务</button></div>
+                <div class="actions"><md-text-button @click=${() => navigate("/tasks")}>返回任务</md-text-button></div>
               </div>
               <div class="hint warn">该任务当前不在 systemd 单元列表中（可能已移除），仍可查看最近日志。</div>
             </section>`
@@ -85,14 +86,14 @@ export class TaskDetailView extends LightElement {
                   <dt>单元</dt><dd class="wrap">${job.unit}</dd>
                 </dl>
                 <div class="detail-actions">
-                  <button class="secondary" type="button" @click=${() => navigate("/tasks")}>返回任务</button>
+                  <md-text-button @click=${() => navigate("/tasks")}>返回任务</md-text-button>
                   ${paused
-                    ? html`<button class="secondary" type="button" ?disabled=${busy} @click=${this.#onResume}>${pending && action === "resume" ? "继续中…" : "继续"}</button>`
+                    ? html`<md-outlined-button ?disabled=${busy} @click=${this.#onResume}>${pending && action === "resume" ? "继续中…" : "继续"}</md-outlined-button>`
                     : html`
-                        <button class="secondary" type="button" ?disabled=${busy || !this.#canPause()} @click=${this.#onPause}>${stopping || (pending && action === "pause") ? "暂停中…" : "暂停"}</button>
-                        <button class="secondary" type="button" ?disabled=${busy} @click=${this.#onRestart}>${pending && action === "restart" ? "重启中…" : "重启"}</button>
+                        <md-text-button ?disabled=${busy || !this.#canPause()} @click=${this.#onPause}>${stopping || (pending && action === "pause") ? "暂停中…" : "暂停"}</md-text-button>
+                        <md-text-button ?disabled=${busy} @click=${this.#onRestart}>${pending && action === "restart" ? "重启中…" : "重启"}</md-text-button>
                       `}
-                  <button class="danger" type="button" ?disabled=${busy} @click=${this.#onDelete}>${pending && action === "delete" ? "删除中…" : "删除"}</button>
+                  <md-text-button class="danger" ?disabled=${busy} @click=${this.#onDelete}>${pending && action === "delete" ? "删除中…" : "删除"}</md-text-button>
                 </div>
               </section>`
             : ""}
@@ -102,7 +103,7 @@ export class TaskDetailView extends LightElement {
                 <span class="section-icon"><app-icon name="terminal"></app-icon></span>
                 <div><h2>任务日志</h2><span class="panel-kicker">Journal 实时输出</span></div>
               </div>
-              <button class="secondary" type="button" @click=${() => navigate("/library")}>录制文件</button>
+              <md-text-button @click=${() => navigate("/library")}>录制文件</md-text-button>
             </div>
             <log-panel unit=${this.unit}></log-panel>
           </section>

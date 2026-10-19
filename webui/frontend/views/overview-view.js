@@ -4,6 +4,7 @@ import { LightElement } from "../base.js";
 import "../components/metric-card.js";
 import "../components/task-list.js";
 import "../components/file-browser.js";
+import "../material.js";
 import "../components/app-icon.js";
 import { appState } from "../stores/appStore.js";
 import { taskState } from "../stores/taskStore.js";
@@ -75,10 +76,10 @@ export class OverviewView extends LightElement {
             <h2>每一场直播，都在掌握。</h2>
             <p class="hero-description">关注直播动态，管理录制任务与媒体文件。</p>
             <div class="hero-actions">
-              <button class="hero-create" type="button" @click=${() => navigate("/new")}><app-icon name="add"></app-icon>新建录制任务</button>
+              <md-filled-button @click=${() => navigate("/new")}><app-icon slot="icon" name="add"></app-icon>新建录制任务</md-filled-button>
               ${overviewState.failed
-                ? html`<button class="danger" type="button" @click=${() => navigate("/tasks")}>查看 ${overviewState.failed} 个失败任务</button>`
-                : html`<button class="text-button" type="button" @click=${() => navigate("/tasks")}>管理任务 →</button>`}
+                ? html`<md-outlined-button class="danger" @click=${() => navigate("/tasks")}>查看 ${overviewState.failed} 个失败任务</md-outlined-button>`
+                : html`<md-text-button @click=${() => navigate("/tasks")}>管理任务 →</md-text-button>`}
             </div>
           </div>
           <div class="hero-monitor">
@@ -111,7 +112,7 @@ export class OverviewView extends LightElement {
                 </div>
                 <div class="dist">
                   ${platforms.map(([platform, count]) => html`
-                    <button class="dist-row link-button" type="button" @click=${() => this.#showPlatform(platform)} title=${"查看" + (PLATFORM_ZH[platform] || platform) + "任务"}>
+                    <button class="dist-row" type="button" @click=${() => this.#showPlatform(platform)} title=${"查看" + (PLATFORM_ZH[platform] || platform) + "任务"}>
                       <span class="dist-name"><i class="platform-dot" style=${`background:${LOGO_COLORS[platform]}`} aria-hidden="true"></i>${PLATFORM_ZH[platform] || platform}</span>
                       <span class="dist-track"><i class="dist-fill" style=${`width:${this.#distWidth(count)}%;background:${LOGO_COLORS[platform] || ""}`}></i></span>
                       <span class="dist-num">${count} 个<span>${this.#distWidth(count).toFixed(0)}%</span></span>
@@ -126,8 +127,8 @@ export class OverviewView extends LightElement {
           <div class="panel-title">
             <div class="title-wrap"><span class="section-icon"><app-icon name="tasks"></app-icon></span><div><h2>最近任务</h2><span class="panel-kicker">点击查看日志与详情</span></div></div>
             <div class="filter-bar">
-              <input placeholder="搜索频道或平台" aria-label="搜索最近任务" .value=${taskState.query} @input=${(event) => { taskState.query = event.target.value; }}>
-              <button class="secondary" type="button" @click=${() => navigate("/tasks")}>全部任务</button>
+              <md-outlined-text-field label="搜索频道或平台" .value=${taskState.query} @input=${(event) => { taskState.query = event.target.value; }}></md-outlined-text-field>
+              <md-text-button @click=${() => navigate("/tasks")}>全部任务</md-text-button>
             </div>
           </div>
           <task-list
@@ -144,7 +145,7 @@ export class OverviewView extends LightElement {
         <section class="panel">
           <div class="panel-title">
             <div class="title-wrap"><span class="section-icon"><app-icon name="library"></app-icon></span><div><h2>最近文件</h2><span class="panel-kicker">最近生成的媒体文件</span></div></div>
-            <button class="secondary" type="button" @click=${() => navigate("/library")}>查看全部</button>
+            <md-text-button @click=${() => navigate("/library")}>查看全部</md-text-button>
           </div>
           <file-browser .files=${overviewState.files || []} .total=${(overviewState.files || []).length} @delete=${(event) => askDeleteRecording(event.detail)}></file-browser>
         </section>

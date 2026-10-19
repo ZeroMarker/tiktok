@@ -6,6 +6,7 @@ import { html } from "lit";
 import { LightElement } from "../base.js";
 import { taskState } from "../stores/taskStore.js";
 import { navigate } from "../router.js";
+import "../material.js";
 import "./task-card.js";
 
 export class TaskList extends LightElement {
@@ -25,7 +26,7 @@ export class TaskList extends LightElement {
           ? html`<div class="empty">
               <strong>${this.filtered ? "没有符合条件的任务" : "还没有录制任务"}</strong>
               <span>${this.filtered ? "请调整搜索关键词或筛选条件" : "创建一个任务后，它会显示在这里"}</span>
-              ${!this.filtered ? html`<button class="secondary" type="button" @click=${() => navigate("/new")}>新建任务</button>` : ""}
+              ${!this.filtered ? html`<md-outlined-button @click=${() => navigate("/new")}>新建任务</md-outlined-button>` : ""}
             </div>`
           : ""}
       </div>

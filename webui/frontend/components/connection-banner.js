@@ -3,9 +3,10 @@ import { html, css } from "lit";
 import { BaseElement } from "../base.js";
 import { appState } from "../stores/appStore.js";
 import { refreshAll } from "../stores/syncStore.js";
+import "../material.js";
 
 export class ConnectionBanner extends BaseElement {
-  // 两个顶层节点位于 .page-content 里；host 用普通块级盒即可（无祖先样式依赖）。
+  // 两个顶层节点位于 .page-content 里；host 用普通块级盒即可。
   static styles = [...BaseElement.styles, css`:host { display: block; }`];
 
   #statusText() {
@@ -21,7 +22,7 @@ export class ConnectionBanner extends BaseElement {
         <span>${this.#statusText()}</span>
         ${appState.degraded ? html`<span class="b-bad">服务异常</span>` : ""}
         ${appState.degraded || appState.offline
-          ? html`<button class="status-retry" type="button" @click=${refreshAll}>重试</button>`
+          ? html`<md-text-button compact @click=${refreshAll}>重试</md-text-button>`
           : ""}
       </div>
       ${hasErrors
@@ -30,7 +31,7 @@ export class ConnectionBanner extends BaseElement {
             ${appState.errors.jobs ? html`<span>任务</span>` : ""}
             ${appState.errors.overview ? html`<span>概览</span>` : ""}
             ${appState.errors.files ? html`<span>文件</span>` : ""}
-            <button type="button" class="status-retry" @click=${refreshAll}>重新同步</button>
+            <md-text-button compact @click=${refreshAll}>重新同步</md-text-button>
           </div>`
         : ""}
     `;

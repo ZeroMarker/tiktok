@@ -8,7 +8,7 @@
 ## 本轮（2026-10-19）已完成
 
 - [x] 前端改为 Lit 原生 ESM、去掉 Vue/Vite 构建链（`3784a75`，[ADR 0001](docs/adr/0001-webui-frontend-lit.md)）：
-      lit@3 走 CDN + 仓库内 vendor 回落，`webui/index.html` 退化为静态壳。
+      `webui/index.html` 退化为静态壳。
 - [x] 录制引擎拆为独立控制面 `livestream-recorderd`（`c743c64`，[ADR 0002](docs/adr/0002-recorderd-split.md)）。
   - 2026-10-19 05:59 UTC 完成切换（当时 0 频道在录，无损）：恢复 45 个任务、保留 8 个暂停；
     实测重启 WebUI 耗时 0.03s，recorderd PID 与全部任务 `started` 不变。

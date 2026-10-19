@@ -1,45 +1,52 @@
-# webui/vendor — lit@3 的本地回落（fallback）
+# webui/vendor — 前端依赖（纯本地，无 CDN）
 
-前端无构建链，lit@3 的引入方式见 [ADR 0001](../../docs/adr/0001-webui-frontend-lit.md)：
+前端没有构建链，依赖以标准 ESM 文件随仓库提交，由 `webui/index.html` 的**静态 import map**
+映射裸模块名。运行期不访问任何 CDN（原因见 [ADR 0001](../../docs/adr/0001-webui-frontend-lit.md#2-依赖全部本地-vendor无-cdn)）。
 
-1. **默认走 CDN**：`index.html` 的引导脚本注入 `{"lit": "https://esm.sh/lit@3.3.3"}`；
-2. **离线 / CDN 不可达时回落到本目录**：探针超时（1.5 s）或 `navigator.onLine === false`
-   时改用这里的 import map。
+| 包 | 版本 | 目录 | 说明 |
+| --- | --- | --- | --- |
+| [`lit`](https://www.npmjs.com/package/lit) | 3.3.3 | `lit/` | 含 `decorators.js`、`directives/*`（Material Web 用到） |
+| `lit-element` | 4.2.2 | `lit-element/` | |
+| `lit-html` | 3.3.3 | `lit-html/` | |
+| `@lit/reactive-element` | 2.1.2 | `reactive-element/` | |
+| [`@material/web`](https://www.npmjs.com/package/@material/web) | 2.5.0 | `material-web/` | MD3 组件，见 [ADR 0004](../../docs/adr/0004-material-web-controls.md) |
+| `tslib` | 2.8.1 | `tslib/` | Material Web 的运行时辅助 |
 
-这里只放 lit 浏览器运行时的**最小闭包**（6 个文件，未压缩，便于审查），不是完整包：
+每个包保留上游 `LICENSE`（lit 系列 BSD-3-Clause，Material Web Apache-2.0）。
 
-| 文件 | 来自 | 版本 |
-| --- | --- | --- |
-| `lit/index.js` | [`lit`](https://www.npmjs.com/package/lit) | 3.3.3 |
-| `lit-element/lit-element.js` | `lit-element` | 4.2.2 |
-| `lit-html/lit-html.js`、`lit-html/is-server.js` | `lit-html` | 3.3.3 |
-| `reactive-element/reactive-element.js`、`reactive-element/css-tag.js` | `@lit/reactive-element` | 2.1.2 |
+## 只保留运行所需文件
 
-每个目录保留上游 `LICENSE`（BSD-3-Clause）。没有 `lit/directives/*` 与 `decorators/`：
-本应用只用 `html` / `css` / `LitElement` / `nothing` 等核心导出，且**不使用装饰器**。
+- 不含 `.d.ts` / `*.js.map` / `development/` / `node/` / `sass`；
+- `material-web/` 只含**用到的组件闭包**（127 个文件），不是完整包（完整包 2169 个文件）；
+- `lit/` 含完整的 `directives/`、`decorators/`，因为 Material Web 会 `import "lit/decorators.js"`、
+  `lit/directives/class-map.js` 等。
 
-## 约束
+## 约束（由测试强制）
 
-- `sw.js` 的 `ASSETS` 必须预缓存上面全部 `.js`（离线回落才能生效）；这一致性由
-  `tests/test_webui.py::FrontendModuleGraphTest::test_service_worker_precaches_the_vendor_fallback`
-  强制。
-- 前端源码只允许引用 CDN map 覆盖的裸模块名（目前只有 `lit`），由
-  `test_bare_imports_are_mapped` 强制。
+- import map 的每个目标都必须存在（`FrontendModuleGraphTest.test_shell_assets_exist`）；
+- 前端与 vendor 源码里的裸模块名都必须能被 import map 解析
+  （`test_bare_imports_are_mapped`）；
+- vendor 内部的相对导入必须可解析（`test_relative_imports_resolve`）；
+- 壳与前端源码不得出现 CDN 域名（`test_no_cdn_references`）；
+- Material Web 的关键组件文件必须在位（`test_material_components_are_vendored`）。
 
 ## 更新步骤
 
-不要 `npm install` 到仓库里；只取出运行时闭包：
+不要 `npm install` 到仓库里；在临时目录取运行时闭包：
 
 ```bash
-cd /tmp && mkdir -p lit-vendor && cd lit-vendor
-for pkg in lit@3.3.3 lit-element@4.2.2 lit-html@3.3.3 @lit/reactive-element@2.1.2; do
+cd /tmp && mkdir -p wv && cd wv
+for pkg in lit@3.3.3 lit-element@4.2.2 lit-html@3.3.3 @lit/reactive-element@2.1.2 \
+           @material/web@2.5.0 tslib@2.8.1; do
   name="${pkg%@*}"; url="https://registry.npmjs.org/${name}/-/${name}-${pkg#*@}.tgz"
-  curl -sL -o "$(echo "$name" | tr '/@' '__').tgz" "$url" && mkdir -p "$name" && tar xzf "$(echo "$name" | tr '/@' '__').tgz" -C "$name" --strip-components=1
+  file="$(echo "$name" | tr '/@' '__').tgz"; mkdir -p "$name"
+  curl -sL -o "$file" "$url" && tar xzf "$file" -C "$name" --strip-components=1
 done
 ```
 
-复制上面表格里的 6 个文件与 4 个 `LICENSE` 到本目录，然后：
-
-1. 同步 `index.html` 的 cdn/vendor import map（版本号）、`sw.js` 的 `ASSETS`、
-   本 README 的版本表与 ADR 0001；
-2. 跑 `python3 -m unittest tests.test_webui`。
+1. `lit*`：复制 `.js`（排除 `development/`、`node/`、`*.map`、`*.d.ts`），保持目录结构；
+2. `@material/web`：只复制**用到的组件闭包**——从 `material.js` 里的入口出发，沿相对
+   `import`/`from` 递归（单双引号都要匹配），得到文件清单；
+3. `tslib`：`tslib.es6.js` + `LICENSE.txt`；
+4. 更新 `index.html` 的 import map（如版本目录有变）、本 README 的版本表、ADR 0001/0004；
+5. 跑 `python3 -m unittest tests.test_webui`。

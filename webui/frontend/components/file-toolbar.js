@@ -1,6 +1,7 @@
 // file-toolbar.js — 文件搜索与分组展开工具条。
 import { html, css } from "lit";
 import { BaseElement, emit } from "../base.js";
+import "../material.js";
 
 export class FileToolbar extends BaseElement {
   static properties = {
@@ -36,9 +37,14 @@ export class FileToolbar extends BaseElement {
   render() {
     return html`
       <div class="log-tools">
-        <input class="file-search" placeholder="搜索文件名或目录" aria-label="搜索文件" .value=${this.localQuery} @input=${this.#onInput}>
-        <button class="mini secondary" type="button" @click=${() => emit(this, "expand-all", true)}>全部展开</button>
-        <button class="mini secondary" type="button" @click=${() => emit(this, "expand-all", false)}>全部收起</button>
+        <md-outlined-text-field
+          class="file-search"
+          label="搜索文件名或目录"
+          .value=${this.localQuery}
+          @input=${this.#onInput}
+        ></md-outlined-text-field>
+        <md-text-button compact @click=${() => emit(this, "expand-all", true)}>全部展开</md-text-button>
+        <md-text-button compact @click=${() => emit(this, "expand-all", false)}>全部收起</md-text-button>
       </div>
     `;
   }

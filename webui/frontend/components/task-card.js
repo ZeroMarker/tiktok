@@ -1,11 +1,13 @@
 // task-card.js — 单个录制任务卡片（状态、事实、控制动作）。
 //
-// light DOM：`.job` 必须是 .jobs 网格的直接子项（styles.js 里 task-card{display:contents}）。
+// light DOM：`.job` 必须是 .jobs 网格的直接子项。
+// 动作按钮使用 MD3：次要动作为 md-text-button，危险动作为带 .danger 的 md-text-button。
 import { html } from "lit";
 import { LightElement, emit } from "../base.js";
 import { PLATFORM_ZH, LOGO_COLORS, stateClass, stateLabel, liveClass, liveLabel, isStopping, isPaused, fmtBytes, fmtUptime } from "../utils.js";
 import { toast } from "../ui.js";
 import { taskState } from "../stores/taskStore.js";
+import "../material.js";
 
 export class TaskCard extends LightElement {
   static properties = {
@@ -56,7 +58,7 @@ export class TaskCard extends LightElement {
         <div class="logo" style=${`color:${logoColor}`}>${(job.platform || "?").slice(0, 2)}</div>
         <div class="job-main">
           <div class="job-heading">
-            <button class="job-title link-button" type="button" title=${job.target} @click=${() => emit(this, "open", job)}>${job.target}</button>
+            <button class="job-title" type="button" title=${job.target} @click=${() => emit(this, "open", job)}>${job.target}</button>
             <span class="platform-tag">${platformZh}</span>
           </div>
           <div class="job-facts">
@@ -69,15 +71,15 @@ export class TaskCard extends LightElement {
           </div>
         </div>
         <div class="actions">
-          <button class="secondary" type="button" ?disabled=${busy} @click=${() => emit(this, "open", job)}>日志</button>
-          <button class="secondary optional-action" type="button" ?disabled=${busy} @click=${this.#copy}>复制名称</button>
+          <md-text-button compact @click=${() => emit(this, "open", job)} ?disabled=${busy}>日志</md-text-button>
+          <md-text-button compact @click=${this.#copy} ?disabled=${busy}>复制名称</md-text-button>
           ${paused
-            ? html`<button class="secondary" type="button" ?disabled=${busy} @click=${() => emit(this, "resume", job)}>${pending && action === "resume" ? "继续中…" : "继续"}</button>`
+            ? html`<md-outlined-button compact @click=${() => emit(this, "resume", job)} ?disabled=${busy}>${pending && action === "resume" ? "继续中…" : "继续"}</md-outlined-button>`
             : html`
-                <button class="secondary optional-action" type="button" ?disabled=${busy || !this.#canPause()} @click=${() => emit(this, "pause", job)}>${stopping || (pending && action === "pause") ? "暂停中…" : "暂停"}</button>
-                <button class="secondary optional-action" type="button" ?disabled=${busy} @click=${() => emit(this, "restart", job)}>${pending && action === "restart" ? "重启中…" : "重启"}</button>
+                <md-text-button compact @click=${() => emit(this, "pause", job)} ?disabled=${busy || !this.#canPause()}>${stopping || (pending && action === "pause") ? "暂停中…" : "暂停"}</md-text-button>
+                <md-text-button compact @click=${() => emit(this, "restart", job)} ?disabled=${busy}>${pending && action === "restart" ? "重启中…" : "重启"}</md-text-button>
               `}
-          <button class="danger" type="button" ?disabled=${busy} @click=${() => emit(this, "delete", job)}>${pending && action === "delete" ? "删除中…" : "删除"}</button>
+          <md-text-button class="danger" compact @click=${() => emit(this, "delete", job)} ?disabled=${busy}>${pending && action === "delete" ? "删除中…" : "删除"}</md-text-button>
         </div>
       </article>
     `;
