@@ -33,7 +33,7 @@ export class AppNav extends LightElement {
                 aria-current=${active ? "page" : undefined}
                 @click=${() => navigate(item.path)}
               >
-                <app-icon slot="start" name=${item.icon}></app-icon>
+                <app-icon slot="start" name=${item.icon} ?filled=${active}></app-icon>
                 <div slot="headline">${item.label}</div>
               </md-list-item>
             `;

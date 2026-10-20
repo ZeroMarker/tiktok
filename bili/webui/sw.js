@@ -1,7 +1,7 @@
 /* Bili 推流管理 Service Worker — 无构建步骤。
  * 策略：/api/* 永远走网络；/vendor/*（版本固定的依赖）缓存优先；
  * 其余（壳页面、/frontend/* 源码）网络优先、离线回退缓存——改了前端刷新即生效。 */
-const CACHE = "bili-push-v4";
+const CACHE = "bili-push-v5";
 const SHELL = [
   "/",
   "/manifest.webmanifest",

@@ -50,3 +50,9 @@ done
 3. `tslib`：`tslib.es6.js` + `LICENSE.txt`；
 4. 更新 `index.html` 的 import map（如版本目录有变）、本 README 的版本表、ADR 0001/0004；
 5. 跑 `python3 -m unittest tests.test_webui`。
+
+## Material Symbols 图标
+
+`material-symbols/` 保存两套管理界面共用的官方 Rounded SVG 路径子集（含导航填充态）。
+固定上游版本、参数和更新方法见 [material-symbols/README.md](material-symbols/README.md)，
+采用 Apache-2.0 许可，本地加载，无字体或 CDN 请求。两处副本须同步更新。

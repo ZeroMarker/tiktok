@@ -106,7 +106,7 @@ a:hover{color:var(--pri)}
 .nav md-list-item[active]{--md-list-item-label-text-color:var(--on-pri-cont);--md-list-item-container-color:var(--pri-cont);box-shadow:inset 0 0 0 1px rgba(155,232,197,.2)}
 .nav-note{display:flex;align-items:flex-start;gap:10px;margin:28px 12px 0;padding-top:18px;border-top:1px solid var(--outl-var);color:var(--pri);font-size:12px}
 .nav-note small{display:block;margin-top:6px;color:var(--sec);font-size:11px;line-height:1.7}
-.app-icon{display:block;width:18px;height:18px;fill:currentColor;flex:none}
+.app-icon{display:block;width:24px;height:24px;fill:currentColor;flex:none}
 
 /* 状态行 / 横幅 */
 .statusline{min-height:34px;margin:0 0 10px;padding:7px 12px;border:1px solid transparent;border-radius:var(--s-sm);color:var(--sec);font-size:12px}
@@ -151,7 +151,7 @@ a:hover{color:var(--pri)}
 .stat-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
 .stat-label{color:var(--sec);font-size:12px;font-weight:700}
 .stat-icon{width:32px;height:32px;display:grid;place-items:center;border:1px solid var(--outl-var);border-radius:var(--s-sm);background:var(--surf-high);color:var(--pri)}
-.stat-icon .app-icon{width:17px;height:17px}
+.stat-icon .app-icon{width:20px;height:20px}
 .stat b{font-size:30px;line-height:1;letter-spacing:-.03em;font-variant-numeric:tabular-nums;color:var(--on-pri-cont)}
 .stat-note{display:block;margin-top:8px;color:var(--sec);font-size:12px}
 metric-card:nth-child(1) .stat-icon,metric-card:nth-child(1) .stat b{color:var(--live)}
@@ -169,7 +169,7 @@ metric-card:nth-child(4) .stat-icon,metric-card:nth-child(4) .stat b{color:#7dd8
 .panel-title{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:18px}
 .title-wrap{display:flex;align-items:center;gap:12px;min-width:0}
 .section-icon{width:38px;height:38px;flex:none;display:grid;place-items:center;border:1px solid var(--outl-var);border-radius:12px;background:var(--surf-high);color:var(--pri)}
-.section-icon .app-icon{width:18px;height:18px}
+.section-icon .app-icon{width:24px;height:24px}
 .panel-title h2{font-size:17px;letter-spacing:-.01em;color:var(--on-pri-cont);overflow-wrap:anywhere}
 .panel-kicker{display:block;color:var(--sec);font-size:12px;margin-top:4px;font-weight:400}
 .count{margin-left:6px;padding:1px 8px;border-radius:var(--s-full);background:var(--surf-high);color:var(--sec);font-size:10px;font-weight:800;vertical-align:middle}
@@ -308,7 +308,10 @@ md-icon-button:is(.compact,[compact]){--md-icon-button-state-layer-width:32px;--
 /* ── light DOM 组件：布局透明（见 docs/adr/0001）── */
 app-header,app-nav,metric-card,task-card,task-list,task-filters,file-row,
 overview-view,tasks-view,task-detail-view,library-view,new-task-view{display:contents}
-app-icon{display:inline-flex}
+app-icon{display:inline-flex;flex:none;color:inherit}
+app-icon[slot=icon] .app-icon{width:18px;height:18px}
+.nav md-list-item{--md-list-item-leading-icon-color:var(--sec)}
+.nav md-list-item[active]{--md-list-item-leading-icon-color:var(--on-pri-cont)}
 
 @media(max-width:1100px){
   .workspace{grid-template-columns:160px minmax(0,1fr);gap:20px}
@@ -362,8 +365,8 @@ app-icon{display:inline-flex}
   .toast{bottom:calc(84px + env(safe-area-inset-bottom))}
 }
 @media(max-width:440px){
-  .nav app-icon{display:none}
-  .nav md-list-item{--md-list-item-leading-space:4px;--md-list-item-trailing-space:4px}
+  .nav .app-icon{width:20px;height:20px}
+  .nav md-list-item{--md-list-item-leading-space:4px;--md-list-item-trailing-space:4px;--md-list-item-label-text-size:11px;gap:4px}
   .nav md-list-item div[slot=headline]{text-align:center}
   .shell{padding:20px 12px calc(48px + env(safe-area-inset-bottom))}
   .topbar{gap:8px;padding:12px 10px}
