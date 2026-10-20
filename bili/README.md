@@ -14,7 +14,7 @@
 | `replay.sh` | 文件轮播：本地 `.mp4` 按序循环 → Bilibili（默认 `-c copy`，`--encode` 重编码；有 H.265 文件时自动重编码） |
 | `watch.sh` | 轮播值守：先播本地文件，每 60 秒探测 TikTok，一开播就停轮播切转推（管理页已内置同类值守，见「WebUI」） |
 | `soop.sh` | 直播推流：SOOP 直播间 → Bilibili |
-| `livesub.py` | 实验（**已暂停，推流流程不接入**）：TikTok 直播转推并实时烧录日→中字幕（Nemotron 流式 ASR + 本地 Hy-MT2）。设计、测试记录、负载与暂停原因见 [docs/livesub.md](docs/livesub.md) |
+| `livesub.py` | 实验（**自动推流流程不接入**）：实时烧录日→中字幕（Nemotron 流式 ASR + 本地 Hy-MT2 / 可选阿里云翻译），支持录像手动测试。见 [docs/livesub.md](docs/livesub.md) |
 | `upload.py` | 稿件投稿：本地 `.mp4` 投成 B 站普通稿件（`push` 只传文件，`post` 提交稿件） |
 | `pushctl.py` | 后端控制核心：systemd 单元、配置文件、开播、验流、跨进程控制锁；`monitord.py` 与 `webui/app.py` 共用 |
 | `monitord.py` | 值守守护进程（`bili-monitord.service`）：固定目标开播自动起推流、关播自动停推流，见下 |
@@ -23,7 +23,7 @@
 | `systemd/` | `bili-live` / `bili-replay` / `bili-monitord` / `bili-webui` 四个 user unit + `install.sh` |
 
 实时字幕的云端翻译备选见 [阿里云机器翻译接入与实测](docs/aliyun-translation.md)
-（2026-10-20 日译中 API 实测可用，尚未接入字幕推流）。
+（支持 `--mt-backend aliyun` 手动字幕测试，自动值守未启用字幕）。
 
 ## 登录态来源
 

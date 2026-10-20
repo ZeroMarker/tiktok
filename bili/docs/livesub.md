@@ -1,9 +1,10 @@
 # 实验：直播转推实时字幕（livesub.py）
 
-> **状态（2026-10-17）：暂停，推流流程不接入。** `push.sh`、WebUI 值守和 systemd 单元都不调用
-> `livesub.py`；脚本保留在仓库里，供以后手动测试。暂停原因见[结论](#结论)。
+> **状态（2026-10-20）：自动推流流程仍暂停接入，支持手动测试。** `push.sh`、WebUI 值守和
+> systemd 单元都不调用 `livesub.py`。本地方案的暂停原因见[结论](#结论)；
+> 阿里云方案的录像推流测试见 [2026-10-20 测试记录](livesub-aliyun-test-20261020.md)。
 
-`bili/livesub.py` 把 TikTok 直播转推到 B 站，同时用本地模型把日语语音识别、翻译成中文，
+`bili/livesub.py` 把 TikTok 直播转推到 B 站，同时用本地模型识别日语、用本地或云端翻译成中文，
 烧进画面。
 
 ## 流程
@@ -34,8 +35,8 @@ TikTok FLV ─ ffmpeg(取流, -re) ─┬─ -c copy → MPEG-TS 管道 → 延�
 
 部署细节见 `~/tube/docs/nemotron-asr-linux.md`、`~/tube/docs/hy-mt2-test.md`。
 
-云端翻译备选：[阿里云机器翻译](aliyun-translation.md) 已于 2026-10-20 完成日译中
-API 单次实测，可供后续替代本地 Hy-MT2；尚未接入本脚本，字幕实验仍暂停。
+云端翻译备选：[阿里云机器翻译](aliyun-translation.md) 已接入本脚本的手动测试入口
+`--mt-backend aliyun`；默认仍为本地 Hy-MT2。自动推流流程仍不调用本脚本。
 
 ## 用法
 
@@ -47,7 +48,18 @@ API 单次实测，可供后续替代本地 Hy-MT2；尚未接入本脚本，字
 python3 bili/livesub.py <tiktok用户名> --out /tmp/test.flv --duration 90    # 写本地文件
 python3 bili/livesub.py <tiktok用户名> --out rtmp                           # 推 push.env 中的 B 站地址
 python3 bili/livesub.py x --source 录制文件.mp4 --out /tmp/t.flv            # 用录制文件离线测试
+
+# 阿里云翻译：先在交互式 Bash 加载已 export 的凭据，再用录像实时测试
+source ~/.bashrc
+python3 bili/livesub.py x --source 录制文件.mp4 --out /tmp/aliyun.flv \
+  --duration 90 --delay 5 --mt-backend aliyun --workdir /tmp/livesub-aliyun
+# --out rtmp 可改为实际推 B 站，需先开播、同步推流码并确保没有其他推流进程。
 ```
+
+云端后端目前固定日译中，只接受 `--language ja-JP`；不使用本地提示词和术语表，
+单次请求超时为 5 秒，失败跳过该句。工作目录保存转写 TSV、字幕文本及
+`push-progress.log`（FFmpeg 帧数、输出时间、速度）；日志中的“字幕晚于排期”表示
+翻译与队列等待已超过设定的视频缓冲，不包含 ASR 自身的识别延迟。
 
 推 B 站前需先开播（`live.py start`），并把新推流码写入 `~/.config/bili/push.env`。
 注意：`live.py start --print-export` 打印的推流码是打码占位符，不能直接写入；
