@@ -258,8 +258,8 @@ def main():
     ap.add_argument("--source", help="跳过取流，直接用这个 URL 或本地文件（测试用）")
     ap.add_argument("--duration", type=float, help="只跑这么多秒")
     ap.add_argument("--language", default="ja-JP")
-    ap.add_argument("--delay", type=float, default=10.0,
-                    help="画面延迟秒数，需大于翻译耗时（实测 3 秒常不够，10 秒无超时）")
+    ap.add_argument("--delay", type=float, default=5.0,
+                    help="画面缓冲延迟秒数（默认 5 秒；识别或翻译较慢时需调大）")
     ap.add_argument("--asr-threads", type=int, default=2)
     ap.add_argument("--mt-url", default="http://127.0.0.1:18091/v1/chat/completions")
     ap.add_argument("--workdir", default="/tmp/livesub")
