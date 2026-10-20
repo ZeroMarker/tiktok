@@ -288,7 +288,7 @@ def main():
     draw = (f"drawtext=fontfile={FONT}:textfile={overlay.path}:reload=1:"
             "fontsize=34:fontcolor=white:line_spacing=8:borderw=2:bordercolor=black@0.8:"
             "box=1:boxcolor=black@0.35:boxborderw=10:"
-            "x=(w-text_w)/2:y=h-text_h-120")
+            "x=(w-text_w)/2:y=120")
     # 取流：输出 1 原样转 MPEG-TS 进管道（待延迟），输出 2 为 ASR 音频
     ts_r, ts_w = os.pipe()
     net = ["-headers", f"User-Agent: {UA}\r\nReferer: https://www.tiktok.com/\r\n",
