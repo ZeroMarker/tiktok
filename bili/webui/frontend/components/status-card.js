@@ -44,7 +44,8 @@ class StatusCard extends BaseElement {
       <div class="row">
         <div class="svc"><div class="t">直播推流 <span class="pill ${liveCls}">${livePill}</span></div>
           <div class="s">${unitLine(s.live)}</div>
-          <div class="s" ?hidden=${!s.live.target}>固定目标 @${s.live.target}</div></div>
+          <div class="s" ?hidden=${!s.live.target}>固定目标 @${s.live.target}</div>
+          <div class="s">直播字幕：${s.subtitles?.enabled ? "已开启 · 顶部显示 · 缓冲 5 秒" : "已关闭"}</div></div>
         <div class="svc"><div class="t">文件轮播 <span class="pill ${replayCls}">${replayPill}</span></div>
           <div class="s">${unitLine(s.replay)}</div>
           <div class="s" ?hidden=${!s.replay.args}>${s.replay.args}</div></div>

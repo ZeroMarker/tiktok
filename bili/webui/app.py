@@ -234,7 +234,36 @@ def status() -> dict[str, object]:
     else:
         mode = "idle"
     return {"mode": mode, "live": live, "replay": replay, "room": room_status(),
-            "target": target_status()}
+            "target": target_status(), "subtitles": ctl.subtitle_status()}
+
+
+@exclusive
+def set_subtitles(data: dict) -> dict[str, object]:
+    enabled = data.get("enabled")
+    if not isinstance(enabled, bool):
+        raise ValueError("enabled 必须是布尔值")
+    settings = ctl.subtitle_status()
+    if enabled and not settings["ready"]:
+        raise ValueError(str(settings["detail"]))
+    changed = enabled != settings["enabled"]
+    running = ctl.show(LIVE_UNIT)["active"] == "active"
+    previous = ctl.SUBTITLE_ENV.read_text() if ctl.SUBTITLE_ENV.exists() else None
+    if changed:
+        ctl.write_env(ctl.SUBTITLE_ENV, [f"SUBTITLES={int(enabled)}"])
+        if running:
+            try:
+                ctl.ctl("restart", LIVE_UNIT)
+            except (RuntimeError, OSError, subprocess.TimeoutExpired):
+                if previous is None:
+                    ctl.SUBTITLE_ENV.unlink(missing_ok=True)
+                else:
+                    ctl.write_private(ctl.SUBTITLE_ENV, previous)
+                try:
+                    ctl.ctl("restart", LIVE_UNIT)
+                except (RuntimeError, OSError, subprocess.TimeoutExpired):
+                    raise RuntimeError("字幕设置已回退，但推流恢复失败，请重启直播推流") from None
+                raise RuntimeError("字幕切换失败，已恢复原设置并重启推流") from None
+    return {"ok": True, "restarted": changed and running, "subtitles": ctl.subtitle_status()}
 
 
 @exclusive
@@ -481,6 +510,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(HTTPStatus.OK, stop_all())
             elif self.path == "/api/arm":
                 self.send_json(HTTPStatus.OK, arm_auto(data))
+            elif self.path == "/api/subtitles":
+                self.send_json(HTTPStatus.OK, set_subtitles(data))
             elif self.path == "/api/probe":
                 # 手动立刻跑一轮检测（不等 60 秒节奏）：交给 monitord，等它写出新快照
                 request_probe(wait=ctl.PROBE_TIMEOUT + 10)

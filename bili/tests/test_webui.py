@@ -22,6 +22,7 @@ def isolate_config(case, root: Path) -> None:
     """配置目录隔离：任何用例写 live/replay/auto.env、锁和快照都落在临时目录，不碰线上配置。"""
     overrides = {'CONFIG_DIR': root, 'LIVE_ENV': root / 'live.env', 'REPLAY_ENV': root / 'replay.env',
                  'AUTO_ENV': root / 'auto.env', 'PUSH_ENV': root / 'push.env',
+                 'SUBTITLE_ENV': root / 'subtitle.env', 'ALIYUN_ENV': root / 'aliyun.env',
                  'CONTROL_LOCK_FILE': root / 'control.lock', 'MONITOR_STATE_FILE': root / 'monitord.json'}
     for name, value in overrides.items():
         patcher = mock.patch.object(ctl, name, value)
@@ -36,6 +37,61 @@ class IsolatedConfigTest(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         isolate_config(self, Path(self.tmp.name))
+
+
+class SubtitleControlTest(IsolatedConfigTest):
+    def setUp(self):
+        super().setUp()
+        patcher = mock.patch.object(ctl.subtitle_config, 'dependency_error', return_value='')
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        ctl.write_env(ctl.ALIYUN_ENV, ['ALIBABA_CLOUD_ACCESS_KEY_ID=test-key',
+                                       'ALIBABA_CLOUD_ACCESS_KEY_SECRET=test-secret'])
+
+    def test_idle_toggle_persists_without_starting_stream(self):
+        with mock.patch.object(ctl, 'show', return_value={'active': 'inactive'}), \
+                mock.patch.object(ctl, 'ctl') as systemctl:
+            result = app.set_subtitles({'enabled': True})
+        self.assertTrue(result['subtitles']['enabled'])
+        self.assertFalse(result['restarted'])
+        self.assertEqual(ctl.SUBTITLE_ENV.stat().st_mode & 0o777, 0o600)
+        self.assertNotIn('test-secret', json.dumps(result))
+        systemctl.assert_not_called()
+
+    def test_running_toggle_restarts_once_and_is_idempotent(self):
+        with mock.patch.object(ctl, 'show', return_value={'active': 'active'}), \
+                mock.patch.object(ctl, 'ctl') as systemctl:
+            self.assertTrue(app.set_subtitles({'enabled': True})['restarted'])
+            self.assertFalse(app.set_subtitles({'enabled': True})['restarted'])
+            systemctl.assert_called_once_with('restart', app.LIVE_UNIT)
+
+    def test_restart_failure_restores_previous_setting(self):
+        ctl.write_env(ctl.SUBTITLE_ENV, ['SUBTITLES=0'])
+        before = ctl.SUBTITLE_ENV.read_bytes()
+        with mock.patch.object(ctl, 'show', return_value={'active': 'active'}), \
+                mock.patch.object(ctl, 'ctl', side_effect=[RuntimeError('failed'), None]):
+            with self.assertRaisesRegex(RuntimeError, '已恢复原设置'):
+                app.set_subtitles({'enabled': True})
+        self.assertEqual(ctl.SUBTITLE_ENV.read_bytes(), before)
+
+    def test_missing_credentials_rejects_enable_but_allows_disable(self):
+        ctl.ALIYUN_ENV.unlink()
+        ctl.write_env(ctl.SUBTITLE_ENV, ['SUBTITLES=1'])
+        with self.assertRaisesRegex(ValueError, '阿里云'):
+            app.set_subtitles({'enabled': True})
+        with mock.patch.object(ctl, 'show', return_value={'active': 'inactive'}):
+            self.assertFalse(app.set_subtitles({'enabled': False})['subtitles']['enabled'])
+
+    def test_missing_dependency_rejects_before_config_change(self):
+        with mock.patch.object(ctl.subtitle_config, 'dependency_error', return_value='缺少模型'):
+            with self.assertRaisesRegex(ValueError, '缺少模型'):
+                app.set_subtitles({'enabled': True})
+        self.assertFalse(ctl.SUBTITLE_ENV.exists())
+
+    def test_enabled_requires_boolean(self):
+        for value in (None, 'false', 1, []):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                app.set_subtitles({'enabled': value})
 
 
 class WebUITest(IsolatedConfigTest):

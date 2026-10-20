@@ -4,7 +4,7 @@ import { live } from "lit/directives/live.js";
 import * as api from "../api.js";
 import { fail, notify, refresh, run } from "../actions.js";
 import { BaseElement, loadDraft, saveDraft } from "../base.js";
-import { state } from "../store.js";
+import { set, state } from "../store.js";
 import { cardHead, onEnter, spinner, spinning } from "../ui.js";
 
 class LiveCard extends BaseElement {
@@ -57,9 +57,19 @@ class LiveCard extends BaseElement {
     });
   }
 
+  #subtitles(e) {
+    const enabled = e.target.checked;
+    run("subtitles", async () => {
+      const result = await api.post("/api/subtitles", { enabled });
+      set({ status: { ...state.status, subtitles: result.subtitles } });
+      return `直播字幕已${enabled ? "开启" : "关闭"}${result.restarted ? "，推流已重启" : "，下次直播推流时生效"}`;
+    });
+  }
+
   render() {
     const busy = !!state.busy;
     const armed = !!state.status?.target?.armed;
+    const subtitles = state.status?.subtitles || {};
     return html`<section class="card">
       ${cardHead("live", "直播推流", "固定一个 TikTok 主播，开播自动转推、关播自动停推", "LIVE")}
       <div class="row">
@@ -78,6 +88,12 @@ class LiveCard extends BaseElement {
         <label class="check"><md-checkbox touch-target="wrapper" .checked=${live(armed)} ?disabled=${busy}
             @change=${(e) => this.#watch(e)}></md-checkbox>值守：开播自动起推流、关播自动停推流</label>
       </div>
+      <div class="row">
+        <label class="check"><md-checkbox touch-target="wrapper" .checked=${live(!!subtitles.enabled)}
+            ?disabled=${busy || !state.status || (!subtitles.ready && !subtitles.enabled)}
+            @change=${(e) => this.#subtitles(e)}></md-checkbox>直播字幕（日语 → 中文）</label>
+      </div>
+      <div class="hint">${subtitles.detail || "字幕显示在画面上方，增加 5 秒画面缓冲；切换开关会重启正在运行的直播推流。仅对直播转推生效。"}</div>
       <div class="hint">目标填一次即固定：之后每 60 秒验一次流，开播自动起推流、连续两次未开播自动停推流（单次抖动不误停）。
         先验流再切换，目标没在播会拒绝并保持原推流不动，勾选上项可跳过验流。关掉值守或「停止全部推流」后不再自动接管。</div>
     </section>`;

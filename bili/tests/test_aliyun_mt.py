@@ -38,6 +38,7 @@ class AliyunTranslationTest(unittest.TestCase):
 
     def test_missing_credentials_does_not_send_request(self):
         with mock.patch.dict("os.environ", {}, clear=True), \
+                mock.patch.object(aliyun_mt.subtitle_config, "read_credentials", return_value={}), \
                 mock.patch.object(aliyun_mt, "urlopen") as send:
             with self.assertRaises(ValueError):
                 aliyun_mt.translate("こんにちは")

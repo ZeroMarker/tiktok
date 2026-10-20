@@ -28,6 +28,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PROJECT_ROOT))
 import accounts as bili_accounts  # noqa: E402  多账号档案解析（与 live.py 共用同一份逻辑）
+import subtitle_config  # noqa: E402
 
 LIVE_PY = PROJECT_ROOT / "live.py"
 GET_STREAM_PY = PROJECT_ROOT / "get_stream.py"
@@ -37,6 +38,8 @@ REPLAY_ENV = CONFIG_DIR / "replay.env"
 # 值守开关：直播推流由管理页启动过才写 AUTO=1，monitord 据此决定是否自动接管
 AUTO_ENV = CONFIG_DIR / "auto.env"
 PUSH_ENV = CONFIG_DIR / "push.env"
+SUBTITLE_ENV = CONFIG_DIR / "subtitle.env"
+ALIYUN_ENV = CONFIG_DIR / "aliyun.env"
 CONTROL_LOCK_FILE = CONFIG_DIR / "control.lock"
 MONITOR_STATE_FILE = CONFIG_DIR / "monitord.json"
 SESSION_FILE = PROJECT_ROOT / ".bilibili_session.json"
@@ -215,6 +218,15 @@ def auto_armed() -> bool:
     明确停掉的东西会被后台悄悄拉回来。
     """
     return read_env(AUTO_ENV, "AUTO").strip().lower() in TRUE_WORDS
+
+
+def subtitle_status() -> dict[str, object]:
+    error = subtitle_config.dependency_error()
+    values = subtitle_config.read_credentials(ALIYUN_ENV)
+    if not error and not all(values.get(name) for name in subtitle_config.CREDENTIAL_NAMES):
+        error = "请配置阿里云翻译凭据（aliyun.env）"
+    return {"enabled": read_env(SUBTITLE_ENV, "SUBTITLES").lower() in TRUE_WORDS,
+            "ready": not bool(error), "detail": error, "delay": 5, "backend": "aliyun"}
 
 
 def arm_epoch() -> str:

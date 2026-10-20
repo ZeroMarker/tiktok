@@ -7,6 +7,7 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=@PROJECT_ROOT@
 EnvironmentFile=%h/.config/bili/live.env
+EnvironmentFile=-%h/.config/bili/aliyun.env
 ExecStart=@PROJECT_ROOT@/push.sh $TARGET
 Restart=always
 RestartSec=10

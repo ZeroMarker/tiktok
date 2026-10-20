@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""实验：TikTok 直播转推时实时烧录日→中字幕。
+"""TikTok 直播转推时实时烧录日→中字幕。
 
-> **已暂停（2026-10-17）**：推流流程（push.sh / WebUI / systemd）不接入本脚本，详见 docs/livesub.md。
+WebUI 可开关字幕；push.sh 在开启时调用本脚本，详见 docs/livesub.md。
 
 一个 ffmpeg 取流：输出 1 叠加 drawtext 后推 RTMP（或写本地文件），输出 2 把音频以
 16 kHz 单声道 f32 管道交给本进程。本进程用 Nemotron 3.5 流式 ASR（transcribe.cpp
@@ -12,7 +12,7 @@ drawtext 的 textfile（reload=1 每帧重读）。
 缓冲 --delay 秒再喂给编码推流的第二个 ffmpeg；ASR 音频不延迟。字幕更新也按「出现
 时刻 + delay」排期，于是日文行与画面同步，中文行在该句说完、译好后出现。
 
-翻译带上文（最近两句原文，Hy-MT2「背景信息」模板）和术语表（livesub-glossary.tsv，
+本地翻译带上文（最近一句原文，Hy-MT2「背景信息」模板）和术语表（livesub-glossary.tsv，
 命中的条目按官方「参考下面的翻译」模板注入）。ASR 不支持热词，术语表只作用于翻译。
 
 依赖（均在仓库外，见 ~/tube/docs/nemotron-asr-linux.md、hy-mt2-test.md）：
@@ -31,6 +31,7 @@ import json
 import os
 import queue
 import re
+import signal
 import subprocess
 import sys
 import textwrap
@@ -42,6 +43,7 @@ from pathlib import Path
 import numpy as np
 
 import aliyun_mt
+from subtitle_runtime import offer_latest, watch_pipeline
 
 ASR_HOME = Path(os.environ.get("TUBE_ASR_HOME", Path.home() / ".local/share/tube-asr"))
 ASR_MODEL = ASR_HOME / "models/nemotron-3.5-asr-streaming-0.6b-Q8_0.gguf"
@@ -196,11 +198,11 @@ def mt_worker(q, overlay, url, transcript, delay, backend="local"):
             log(f"字幕晚于排期 {time.time() - cut_at - delay:.1f}s")
         transcript.write(f"{time.strftime('%H:%M:%S')}\t{ja}\t{zh}\n")
         transcript.flush()
-        context.append(ja + "。")
+        context[:] = (context + [ja + "。"])[-MT_CONTEXT:]
         overlay.set_at(cut_at + delay, zh=zh)
 
 
-def asr_loop(pipe, overlay, mtq, threads, language, delay):
+def asr_loop(pipe, overlay, mtq, threads, language, delay, stop_requested=None):
     sys.path.insert(0, str(ASR_HOME / "transcribe.cpp/bindings/python/src"))
     os.environ.setdefault("TRANSCRIBE_LIBRARY",
                           str(ASR_HOME / "transcribe.cpp/build-shared/src/libtranscribe.so"))
@@ -217,7 +219,7 @@ def asr_loop(pipe, overlay, mtq, threads, language, delay):
         full = ""
         last_change = time.time()
         last_ja = ""
-        while True:
+        while stop_requested is None or not stop_requested.is_set():
             buf = pipe.read(nbytes)
             if not buf:
                 break
@@ -250,7 +252,7 @@ def asr_loop(pipe, overlay, mtq, threads, language, delay):
                 seg = pending[:cut].strip("、。 ")
                 sent += cut
                 if seg:
-                    mtq.put((seg, now))
+                    offer_latest(mtq, (seg, now))
             ja = full[sent:].lstrip("、。 ")
             if ja != last_ja:
                 overlay.set_at(now + delay, ja=ja)
@@ -277,6 +279,8 @@ def main():
         aliyun_mt.credentials()
         if args.language != "ja-JP":
             ap.error("aliyun 后端当前仅支持 ja-JP → zh")
+    if args.delay < 0 or not np.isfinite(args.delay):
+        ap.error("delay 必须是有限的非负数")
 
     work = Path(args.workdir)
     work.mkdir(parents=True, exist_ok=True)
@@ -296,7 +300,7 @@ def main():
     url = url[0]
     log("取流成功")
 
-    ffmpeg = str(Path.home() / ".local/opt/ffmpeg/bin/ffmpeg")
+    ffmpeg = os.environ.get("BILI_FFMPEG", str(Path.home() / ".local/opt/ffmpeg/bin/ffmpeg"))
     target = bili_rtmp() if args.out == "rtmp" else args.out
     draw = (f"drawtext=fontfile={FONT}:textfile={overlay.path}:reload=1:"
             "fontsize=34:fontcolor=white:line_spacing=8:borderw=2:bordercolor=black@0.8:"
@@ -316,8 +320,11 @@ def main():
             "-map", "0:v:0", "-map", "0:a:0", "-c", "copy", "-f", "mpegts", f"pipe:{ts_w}",
             "-map", "0:a:0", "-vn", "-ac", "1", "-ar", str(SR), "-f", "f32le", "pipe:1"]
     # 推流：参数同 push.sh v6，另加字幕
+    progress = work / "push-progress.log"
+    progress.write_text("")
     push = [ffmpeg, "-y", "-nostdin", "-hide_banner", "-loglevel", "warning",
-            "-progress", str(work / "push-progress.log"),
+            "-stats_period", "10",
+            "-progress", str(progress),
             "-fflags", "+discardcorrupt", "-analyzeduration", "5M", "-probesize", "5M",
             "-f", "mpegts", "-i", "pipe:0",
             "-map", "0:v:0", "-map", "0:a:0",
@@ -330,7 +337,7 @@ def main():
             "-f", "flv", "-flvflags", "no_duration_filesize",
             "-max_muxing_queue_size", "9999", target]
 
-    mtq = queue.Queue()
+    mtq = queue.Queue(maxsize=8)
     threading.Thread(target=mt_worker, args=(mtq, overlay, args.mt_url, transcript, args.delay,
                                            args.mt_backend),
                      daemon=True).start()
@@ -339,22 +346,45 @@ def main():
     os.close(ts_w)
     threading.Thread(target=delay_pipe, args=(ts_r, pusher.stdin, args.delay),
                      daemon=True).start()
+    stop, failed = threading.Event(), threading.Event()
+    threading.Thread(target=watch_pipeline,
+                     args=(puller, pusher, progress, stop, failed, log), daemon=True).start()
     log(f"ffmpeg 已启动，画面延迟 {args.delay}s ->", "B 站 RTMP" if args.out == "rtmp" else target)
+    interrupted = False
+    stop_requested = threading.Event()
     try:
-        asr_loop(puller.stdout, overlay, mtq, args.asr_threads, args.language, args.delay)
+        def on_term(*_):
+            nonlocal interrupted
+            interrupted = True
+            stop_requested.set()
+            # 不跨 ctypes 回调抛异常；停止音频生产者以唤醒 pipe.read。
+            puller.terminate()
+        signal.signal(signal.SIGTERM, on_term)
+        signal.signal(signal.SIGINT, on_term)
+        asr_loop(puller.stdout, overlay, mtq, args.asr_threads, args.language, args.delay,
+                 stop_requested)
     except KeyboardInterrupt:
-        pass
+        interrupted = True
     finally:
+        stop.set()
         puller.terminate()
-        puller.wait()
-        mtq.put(None)
+        try:
+            puller.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            puller.kill()
+            puller.wait()
+        offer_latest(mtq, None)
         try:
             pusher.wait(args.delay + 15)  # 让缓冲里的画面推完
         except subprocess.TimeoutExpired:
             pusher.terminate()
-            pusher.wait()
+            try:
+                pusher.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pusher.kill()
+                pusher.wait()
     log("结束，ffmpeg 退出码 取流", puller.returncode, "推流", pusher.returncode)
-    if puller.returncode not in (0, -15) or pusher.returncode != 0:
+    if not interrupted and (failed.is_set() or puller.returncode not in (0, -15) or pusher.returncode != 0):
         sys.exit(1)
 
 

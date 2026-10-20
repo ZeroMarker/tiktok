@@ -10,10 +10,15 @@ from urllib.error import HTTPError
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
+import subtitle_config
+
 
 def credentials():
     key = os.environ.get("ALIBABA_CLOUD_ACCESS_KEY_ID", "")
     secret = os.environ.get("ALIBABA_CLOUD_ACCESS_KEY_SECRET", "")
+    if not key or not secret:
+        values = subtitle_config.read_credentials()
+        key, secret = (values.get(name, "") for name in subtitle_config.CREDENTIAL_NAMES)
     if not key or not secret:
         raise ValueError("缺少阿里云 AccessKey 环境变量")
     return key, secret

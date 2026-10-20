@@ -1,8 +1,37 @@
-# 实验：直播转推实时字幕（livesub.py）
+# 直播转推实时字幕（livesub.py）
 
-> **状态（2026-10-20）：自动推流流程仍暂停接入，支持手动测试。** `push.sh`、WebUI 值守和
-> systemd 单元都不调用 `livesub.py`。本地方案的暂停原因见[结论](#结论)；
+> **状态（2026-10-20）：支持 WebUI 开关及自动转推。** 字幕开启后，`push.sh` 调用
+> `livesub.py`，使用本地语音识别和阿里云翻译。本地 Hy-MT2 的历史暂停原因见[结论](#结论)；
 > 阿里云方案的录像推流测试见 [2026-10-20 测试记录](livesub-aliyun-test-20261020.md)。
+
+## WebUI 开关
+
+推流管理页「直播推流」卡片中的 **直播字幕（日语 → 中文）** 控制开关，
+「运行概览」同步显示设置。开启后字幕显示在画面上方，画面缓冲 5 秒。
+开关只影响 TikTok 直播转推，文件轮播不加字幕。
+
+- 设置写入 `~/.config/bili/subtitle.env` 的 `SUBTITLES=1/0`，独立于 `live.env`，
+  切换目标或值守自动拉起时保留设置；全新安装默认关闭，可在页面开启。
+- 正在直播转推时切换会重启 `bili-live.service`，画面短暂中断；空闲时只保存设置，
+  不会因此开播。关闭字幕后恢复普通 `push.sh` 推流。
+- 开启前检查模型、共享库、Python 绑定、numpy、字体、FFmpeg 及阿里云凭据；
+  缺失时拒绝开启并显示原因。检查不加载模型或发起付费翻译请求。
+- 服务凭据写入 `~/.config/bili/aliyun.env`（600），包含
+  `ALIBABA_CLOUD_ACCESS_KEY_ID` 和 `ALIBABA_CLOUD_ACCESS_KEY_SECRET`。
+  systemd 可加载该文件，手动脚本也支持安全解析该文件；WebUI/API 不返回密钥。
+- 字幕输出 60 秒不推进，或编码进程提前退出时结束本轮；systemd 在 10 秒后重启并重新取流。
+  SIGTERM 清理子进程，翻译队列最多 8 条，拥塞时丢弃最旧待处理条目。
+- 日志、字幕及转写写入 `bili/logs/livesub/`；API 为
+  `POST /api/subtitles {"enabled":true|false}`，状态见 `GET /api/status` 的 `subtitles`。
+  `push-progress.log` 每 10 秒记录输出进度，已纳入现有日志轮转配置。
+
+部署 unit 改动后执行 `bash bili/systemd/install.sh`；它只重启管理页，不自动重启正在运行的
+直播推流。翻译质量及长时间稳定性仍需持续观察，开关可随时关闭。
+更新日志轮转配置用 `sudo bash systemd/install-logrotate.sh`（在仓库根目录执行）。
+
+本次部署验证：358 项单元测试通过；真实浏览器验证开/关及刷新持久化，桌面与移动端无页面异常；
+在与正式服务相同的文件系统限制下验证识别、阿里云翻译及本地字幕输出，
+并分别验证识别运行中、缓冲收尾期间收到 SIGTERM 时正常退出，无残留子进程。
 
 `bili/livesub.py` 把 TikTok 直播转推到 B 站，同时用本地模型识别日语、用本地或云端翻译成中文，
 烧进画面。
@@ -11,7 +40,7 @@
 
 ```
 TikTok FLV ─ ffmpeg(取流, -re) ─┬─ -c copy → MPEG-TS 管道 → 延迟缓冲 N 秒 → ffmpeg(drawtext + x264) → B 站 RTMP
-                                └─ 16 kHz f32 音频 → Nemotron 流式 ASR → 切句 → Hy-MT2 翻译 → 字幕文件
+                                └─ 16 kHz f32 音频 → Nemotron 流式 ASR → 切句 → 阿里云翻译 → 字幕文件
 ```
 
 - **语音识别**：Nemotron 3.5 streaming 0.6B Q8_0，通过 transcribe.cpp Python 绑定常驻加载。
@@ -22,7 +51,8 @@ TikTok FLV ─ ffmpeg(取流, -re) ─┬─ -c copy → MPEG-TS 管道 → 延�
   - 在标点处切，且一句至少 10 字；末尾 3 字可能被改写，不参与断句；
   - 超过 28 字强制切；
   - 文本停止变化 1.5 秒（且够长）或 3.5 秒时切。
-- **翻译**：本地 llama-server（`127.0.0.1:18091`）加载 Hy-MT2-1.8B Q4_K_M。提示词：
+- **翻译**：WebUI 开启时使用阿里云 TranslateGeneral（`--mt-backend aliyun`），日译中。
+  手动脚本默认仍是本地 llama-server（`127.0.0.1:18091`）加载 Hy-MT2-1.8B Q4_K_M。本地提示词：
   - 带一句上文，用官方「背景信息」模板；
   - 术语表 `bili/livesub-glossary.tsv` 中命中的条目用官方「参考下面的翻译」模板注入；
   - 带上文时译文明显过长，就去掉上文重译（模型偶尔把上文一起译出来）；
@@ -30,13 +60,12 @@ TikTok FLV ─ ffmpeg(取流, -re) ─┬─ -c copy → MPEG-TS 管道 → 延�
 - **对齐**：画面经缓冲延迟 `--delay` 秒，默认 5 秒（2026-10-20 调整）；字幕更新按「出现时刻 + delay」排期。
   字幕整体在画面上方居中，距画面顶部 120 像素；字幕块内上行是实时日文，
   下行是最近一句中文，6 秒无更新清屏。
-  5 秒是后续试跑起点，尚未完成端到端验证；当前脚本仍使用本地 Hy-MT2，
-  其历史慢请求可能超过 5 秒，必要时用 `--delay` 调大。
+  阿里云方案已完成 3 分钟录像推流验证，尚未验证长时间运行及精确音画对齐；
+  手动选择本地 Hy-MT2 时，其历史慢请求可能超过 5 秒，必要时用 `--delay` 调大。
 
 部署细节见 `~/tube/docs/nemotron-asr-linux.md`、`~/tube/docs/hy-mt2-test.md`。
 
-云端翻译备选：[阿里云机器翻译](aliyun-translation.md) 已接入本脚本的手动测试入口
-`--mt-backend aliyun`；默认仍为本地 Hy-MT2。自动推流流程仍不调用本脚本。
+云端接口、签名及单次调用示例见 [阿里云机器翻译](aliyun-translation.md)。
 
 ## 用法
 
@@ -111,14 +140,15 @@ python3 bili/livesub.py x --source 录制文件.mp4 --out /tmp/aliyun.flv \
 
 ## 结论
 
-暂不接入推流流程：
+以下为 2026-10-17 暂停本地 Hy-MT2 方案的原因；当前 WebUI 使用云端翻译，
+不再常驻本地翻译模型，仍需注意语音识别质量与编码负载：
 
 1. **资源不够**：一路字幕推流占 2–3 核（共 4 核）。同机任何重任务都会让它卡顿或中断，
    也无法同时跑两路。
 2. **质量不够**：字幕底稿受 ASR 错误限制，翻译不能纠错，需要人工校对级别的质量才适合公开直播。
 3. **延迟代价**：当时为让字幕跟上画面，把直播延迟设为 10 秒；密集说话测试仍出现过超时。
 
-## 若以后重启
+## 后续改进
 
 可尝试的方向：
 

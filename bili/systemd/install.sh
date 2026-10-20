@@ -47,7 +47,7 @@ for unit in bili-live.service bili-replay.service bili-monitord.service bili-web
     chmod 644 "$rendered"
     mv -f "$rendered" "$UNIT_DIR/$unit"
 done
-for pair in "live.env:TARGET=" "replay.env:REPLAY_ARGS="; do
+for pair in "live.env:TARGET=" "replay.env:REPLAY_ARGS=" "subtitle.env:SUBTITLES=0"; do
     file="${pair%%:*}"; key="${pair#*:}"
     if [ ! -e "$CONF_DIR/$file" ]; then
         {

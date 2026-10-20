@@ -50,6 +50,18 @@ LOG_DIR="./logs"
 mkdir -p "$LOG_DIR"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# 字幕设置独立保存，切目标或值守重启时不会被 live.env 覆盖。
+SUBTITLES=0
+if [ -f "$HOME/.config/bili/subtitle.env" ]; then
+    source "$HOME/.config/bili/subtitle.env"
+fi
+if [ "$SUBTITLES" = "1" ]; then
+    echo "直播字幕已开启：日语识别 → 阿里云中文翻译，顶部显示，画面缓冲 5 秒"
+    # systemd Restart=always 负责断流重抓；进程组由 KillMode=control-group 清理。
+    exec python3 "$SCRIPT_DIR/livesub.py" "$USERNAME" --out rtmp --delay 5 \
+        --mt-backend aliyun --workdir "$LOG_DIR/livesub"
+fi
+
 echo "开始无人值守推流 TikTok @$USERNAME -> Bilibili"
 
 # 输入无数据 N 秒则报错退出（微秒）；输出侧卡死由下面的看门狗兜底
