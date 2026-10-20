@@ -22,6 +22,9 @@
 | `webui/frontend/` | 管理页前端：Lit + @material/web（MD3），原生 ESM、无构建链；依赖在 `webui/vendor/`（纯本地），见 [ADR 0006](../docs/adr/0006-bili-webui-lit.md) |
 | `systemd/` | `bili-live` / `bili-replay` / `bili-monitord` / `bili-webui` 四个 user unit + `install.sh` |
 
+实时字幕的云端翻译备选见 [阿里云机器翻译接入与实测](docs/aliyun-translation.md)
+（2026-10-20 日译中 API 实测可用，尚未接入字幕推流）。
+
 ## 登录态来源
 
 登录态**只有一条获取途径：`live.py login` 扫码**——没有手工贴 Cookie 的入口。

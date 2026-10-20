@@ -31,6 +31,9 @@ TikTok FLV ─ ffmpeg(取流, -re) ─┬─ -c copy → MPEG-TS 管道 → 延�
 
 部署细节见 `~/tube/docs/nemotron-asr-linux.md`、`~/tube/docs/hy-mt2-test.md`。
 
+云端翻译备选：[阿里云机器翻译](aliyun-translation.md) 已于 2026-10-20 完成日译中
+API 单次实测，可供后续替代本地 Hy-MT2；尚未接入本脚本，字幕实验仍暂停。
+
 ## 用法
 
 ```bash
