@@ -11,6 +11,8 @@ EnvironmentFile=-%h/.config/bili/aliyun.env
 ExecStart=@PROJECT_ROOT@/push.sh $TARGET
 Restart=always
 RestartSec=10
+# push.sh 长时间取不到源时 exit 75 主动放弃，不再拉起（见 push.sh note_offline）
+RestartPreventExitStatus=75
 KillMode=control-group
 TimeoutStopSec=30
 NoNewPrivileges=true

@@ -63,6 +63,40 @@ class TargetMonitorTest(unittest.TestCase):
         self.assertTrue(ctl.auto_armed())
         self.assertFalse(monitord.state['close_pending'])
 
+    def test_offline_stops_push_during_auto_restart_gap(self):
+        """push.sh 取流失败退出后单元处于 activating（auto-restart），仍要停。"""
+        restarting = {'active': 'activating', 'sub': 'auto-restart', 'pid': 0}
+        with mock.patch.object(ctl, 'show_many', return_value=self.units(live=restarting)), \
+                mock.patch.object(ctl, 'pushing', return_value={0: False}), \
+                mock.patch.object(ctl, 'probe_target', return_value=('', 'offline')), \
+                mock.patch.object(ctl, 'ctl') as systemctl, \
+                mock.patch.object(ctl, 'wait_inactive', return_value=True), \
+                mock.patch.object(ctl, 'run', return_value=subprocess.CompletedProcess([], 0, '', '')):
+            monitord.cycle()
+            monitord.cycle()
+        systemctl.assert_called_once_with('disable', '--now', ctl.LIVE_UNIT)
+
+    def test_replay_in_restart_gap_still_blocks_live_start(self):
+        """轮播单元在 auto-restart 间隙也不能抢着起直播推流，否则双推流。"""
+        restarting = {'active': 'activating', 'sub': 'auto-restart', 'pid': 0}
+        with mock.patch.object(ctl, 'show_many', return_value=self.units(replay=restarting)), \
+                mock.patch.object(ctl, 'probe_target') as probe, \
+                mock.patch.object(ctl, 'ctl') as systemctl:
+            monitord.cycle()
+        probe.assert_not_called()
+        systemctl.assert_not_called()
+
+    def test_disarmed_skips_probe_while_push_script_retries(self):
+        """值守关着时推流脚本自己在重试取流，不再重复探测 TikTok。"""
+        ctl.set_armed(False)
+        with mock.patch.object(ctl, 'show_many', return_value=self.units(live=self.UNIT)), \
+                mock.patch.object(ctl, 'pushing', return_value={100: False}), \
+                mock.patch.object(ctl, 'probe_target') as probe, \
+                mock.patch.object(ctl, 'ctl') as systemctl:
+            monitord.cycle()
+        probe.assert_not_called()
+        systemctl.assert_not_called()
+
     def test_failed_room_close_retries_after_push_stopped(self):
         with mock.patch.object(ctl, 'ctl'), \
                 mock.patch.object(ctl, 'wait_inactive', return_value=True), \

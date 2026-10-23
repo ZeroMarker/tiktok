@@ -23,10 +23,12 @@ class SubtitleLauncherTest(unittest.TestCase):
             capture = root / 'args'
             env = dict(os.environ, HOME=str(root), PATH=str(binary) + ':' + os.environ['PATH'],
                        BILI_FFMPEG=str(binary / 'ffmpeg'), BILIBILI_PUSH_URL='rtmp://example/',
-                       BILIBILI_PUSH_CODE='test-code', CAPTURE=str(capture))
+                       BILIBILI_PUSH_CODE='test-code', CAPTURE=str(capture),
+                       BILI_OFFLINE_GIVEUP_SEC='0')
             result = subprocess.run(['bash', str(script), 'test_streamer'], cwd=root,
                                     env=env, capture_output=True, text=True, timeout=5)
-            self.assertEqual(result.returncode, 0, result.stderr)
+            # 假 livesub 立即退出 = 取流失败；放弃阈值为 0 时直接 exit 75 不再重试
+            self.assertEqual(result.returncode, 75, result.stderr)
             args = capture.read_text().splitlines()
             self.assertEqual(Path(args[0]).name, 'livesub.py')
             self.assertEqual(args[1:], ['test_streamer', '--out', 'rtmp', '--delay', '5',

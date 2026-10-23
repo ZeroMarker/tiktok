@@ -225,11 +225,11 @@ def status() -> dict[str, object]:
     replay["pushing"] = pushing.get(replay["pid"], False)
     live["target"] = ctl.read_env(ctl.LIVE_ENV, "TARGET")
     replay["args"] = ctl.read_env(ctl.REPLAY_ENV, "REPLAY_ARGS")
-    if live["active"] == "active" and replay["active"] == "active":
+    if ctl.is_running(live) and ctl.is_running(replay):
         mode = "conflict"
-    elif live["active"] == "active":
+    elif ctl.is_running(live):
         mode = "live"
-    elif replay["active"] == "active":
+    elif ctl.is_running(replay):
         mode = "replay"
     else:
         mode = "idle"
@@ -246,7 +246,7 @@ def set_subtitles(data: dict) -> dict[str, object]:
     if enabled and not settings["ready"]:
         raise ValueError(str(settings["detail"]))
     changed = enabled != settings["enabled"]
-    running = ctl.show(LIVE_UNIT)["active"] == "active"
+    running = ctl.is_running(ctl.show(LIVE_UNIT))
     previous = ctl.SUBTITLE_ENV.read_text() if ctl.SUBTITLE_ENV.exists() else None
     if changed:
         ctl.write_env(ctl.SUBTITLE_ENV, [f"SUBTITLES={int(enabled)}"])
@@ -360,7 +360,7 @@ def room(data: dict) -> dict[str, object]:
         ctl.sync_push_env()
         # 推流码已换：运行中的推流进程拿的还是旧码，必须重启才生效
         for unit in (LIVE_UNIT, REPLAY_UNIT):
-            if ctl.show(unit)["active"] == "active":
+            if ctl.is_running(ctl.show(unit)):
                 ctl.ctl("restart", unit)
         return {"ok": True, "output": r.stdout.strip()[-2000:], "status": status()}
     if action == "stop":

@@ -101,6 +101,15 @@ def _unit_props(props: dict[str, str]) -> dict[str, object]:
     }
 
 
+# Restart=always 的单元在两次重启之间是 activating（auto-restart），仍算「在跑」：
+# 只认 active 会在重启间隙误判为已停（漏停推流、轮播/直播双推流）。
+RUNNING_STATES = ("active", "activating", "reloading")
+
+
+def is_running(unit_info: dict[str, object]) -> bool:
+    return unit_info.get("active") in RUNNING_STATES
+
+
 def show_many(*units: str) -> dict[str, dict[str, object]]:
     """一次 systemctl show 查多个单元（单元间以空行分隔），比逐个查少一半 fork。"""
     found: dict[str, dict[str, object]] = {}

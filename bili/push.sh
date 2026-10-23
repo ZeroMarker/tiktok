@@ -50,6 +50,30 @@ LOG_DIR="./logs"
 mkdir -p "$LOG_DIR"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+FFMPEG_PID=""
+cleanup() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] 收到退出信号，清理进程..."
+    [ -n "$FFMPEG_PID" ] && kill "$FFMPEG_PID" 2>/dev/null || true
+    pkill -P $$ 2>/dev/null || true
+    exit 0
+}
+trap cleanup SIGINT SIGTERM SIGQUIT
+
+# 连续取流失败超过 N 秒就放弃，以退出码 75 结束（unit 里 RestartPreventExitStatus=75，
+# systemd 不再拉起）：值守关着时不至于对着下播的主播无限打 TikTok；值守开着时
+# 主播再开播，monitord 会重新拉起本单元。
+OFFLINE_GIVEUP_SEC="${BILI_OFFLINE_GIVEUP_SEC:-1800}"
+OFFLINE_SINCE=""
+note_offline() {
+    local now
+    now=$(date +%s)
+    OFFLINE_SINCE="${OFFLINE_SINCE:-$now}"
+    if [ $((now - OFFLINE_SINCE)) -ge "$OFFLINE_GIVEUP_SEC" ]; then
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] 连续 ${OFFLINE_GIVEUP_SEC} 秒取不到 @$USERNAME 的直播源，停止重试"
+        exit 75
+    fi
+}
+
 # 字幕设置独立保存，切目标或值守重启时不会被 live.env 覆盖。
 SUBTITLES=0
 if [ -f "$HOME/.config/bili/subtitle.env" ]; then
@@ -57,9 +81,25 @@ if [ -f "$HOME/.config/bili/subtitle.env" ]; then
 fi
 if [ "$SUBTITLES" = "1" ]; then
     echo "直播字幕已开启：日语识别 → 阿里云中文翻译，顶部显示，画面缓冲 5 秒"
-    # systemd Restart=always 负责断流重抓；进程组由 KillMode=control-group 清理。
-    exec python3 "$SCRIPT_DIR/livesub.py" "$USERNAME" --out rtmp --delay 5 \
-        --mt-backend aliyun --workdir "$LOG_DIR/livesub"
+    # livesub 取流失败几秒内就退出；在这里退避重试，而不是交给 systemd 每 10 秒
+    # 重拉（那样未开播时每分钟要打好几次 TikTok）。运行不足 60 秒视为取流失败。
+    while true; do
+        STARTED=$(date +%s)
+        python3 "$SCRIPT_DIR/livesub.py" "$USERNAME" --out rtmp --delay 5 \
+            --mt-backend aliyun --workdir "$LOG_DIR/livesub" &
+        FFMPEG_PID=$!
+        wait "$FFMPEG_PID"
+        FFMPEG_PID=""
+        if [ $(($(date +%s) - STARTED)) -lt 60 ]; then
+            note_offline
+            echo "  → 未监测到直播或字幕推流启动失败，60 秒后重试..."
+            sleep 60
+        else
+            OFFLINE_SINCE=""
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] 字幕推流中断，10 秒后重新抓取..."
+            sleep 10
+        fi
+    done
 fi
 
 echo "开始无人值守推流 TikTok @$USERNAME -> Bilibili"
@@ -68,15 +108,6 @@ echo "开始无人值守推流 TikTok @$USERNAME -> Bilibili"
 RW_TIMEOUT_US=15000000
 # ffmpeg 日志超过 N 秒无输出即判假死（每 10 秒输出一条 stats 心跳）
 STALL_TIMEOUT=60
-
-FFMPEG_PID=""
-cleanup() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] 收到退出信号，清理进程..."
-    [ -n "$FFMPEG_PID" ] && kill "$FFMPEG_PID" 2>/dev/null || true
-    pkill -P $$ ffmpeg 2>/dev/null || true
-    exit 0
-}
-trap cleanup SIGINT SIGTERM SIGQUIT
 
 while true; do
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] 正在尝试获取直播源..."
@@ -87,11 +118,13 @@ while true; do
     STREAM_URL=$(python3 "$SCRIPT_DIR/get_stream.py" "$USERNAME" 2>>"$PROBE_LOG" | head -n1)
 
     if [ -z "$STREAM_URL" ]; then
+        note_offline
         echo "  → 未监测到直播或抓取失败（详见 $PROBE_LOG），60 秒后重试..."
         sleep 60
         continue
     fi
 
+    OFFLINE_SINCE=""
     echo "  → 成功获取源，开始向 B 站推流..."
 
     LOG_FILE="${LOG_DIR}/ffmpeg_tiktok_${USERNAME}_$(date +%Y%m%d).log"

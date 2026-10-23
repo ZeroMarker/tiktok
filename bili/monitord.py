@@ -106,7 +106,7 @@ def cycle() -> None:
 
     units = ctl.show_many(ctl.LIVE_UNIT, ctl.REPLAY_UNIT)
     live, replay = units[ctl.LIVE_UNIT], units[ctl.REPLAY_UNIT]
-    if replay["active"] == "active":
+    if ctl.is_running(replay):
         # 两种模式互斥是硬约束：轮播单元在跑时不抢，只报状态。
         # 判 active 而不是判 ffmpeg：轮播卡死（ffmpeg 已退）时抢单元会变成双推流。
         record(None, "文件轮播运行中，暂不接管", "")
@@ -116,22 +116,29 @@ def cycle() -> None:
         record(True, "推流中（ffmpeg 已连上源）", "push", 0)
         return
 
-    stream, detail = ctl.probe_target(target)
     armed = ctl.auto_armed()
+    if ctl.is_running(live) and not armed:
+        # push.sh 自己在按 60 秒重试取流，值守关着时探到什么都不会动手；
+        # 再探一次只是对 TikTok 多一倍请求、徒增风控风险。
+        record(None, "推流脚本重试取流中（值守未开启，不重复探测）", "")
+        return
+
+    stream, detail = ctl.probe_target(target)
     if stream:
         record(True, detail, "probe", 0)
-        if live["active"] != "active" and armed:
+        if not ctl.is_running(live) and armed:
             if auto_control(lambda: start_live_unit(target)):
                 record(True, "开播 → 已自动起推流", "probe", 0)
-        elif live["active"] == "active" and armed:
+        elif ctl.is_running(live) and armed:
             auto_control(recover_live_unit)
         return
 
     streak = int(state["streak"]) + 1
     record(False, detail, "probe", streak)
     # 关播自动停推流：单次失败可能是网络抖动，连续两次才动手。
+    # push.sh 取流失败会退出、systemd 隔 10 秒重拉，重启间隙也要算在跑。
     if (streak >= OFFLINE_STREAK_TO_STOP and armed
-            and (live["active"] == "active" or state["close_pending"])):
+            and (ctl.is_running(live) or state["close_pending"])):
         auto_control(stop_offline_live)
 
 
