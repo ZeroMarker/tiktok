@@ -10,6 +10,8 @@ import { cardHead, onEnter, spinner, spinning } from "../ui.js";
 class LiveCard extends BaseElement {
   static properties = { target: { state: true }, force: { state: true } };
 
+  #seeded = false;
+
   constructor() {
     super();
     this.target = loadDraft().target || "";
@@ -17,8 +19,11 @@ class LiveCard extends BaseElement {
   }
 
   willUpdate() {
-    // 后端状态才是准的：只填空，不覆盖用户正在输入的目标
+    // 首次拿到后端状态时填空一次；之后用户清空/改写都不再回填
+    if (this.#seeded) return;
     const fixed = state.status?.target?.target;
+    if (fixed === undefined) return;
+    this.#seeded = true;
     if (fixed && !this.target.trim()) this.target = fixed;
   }
 
